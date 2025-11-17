@@ -96,11 +96,20 @@ def lambda_handler(event, context):
 
     # Extract path and method from API Gateway event
     path = event.get('rawPath', event.get('path', ''))
+    # Remove stage prefix if present (e.g., /Prod/enhance -> /enhance)
+    if path.startswith('/Prod/'):
+        path = path[5:]  # Remove '/Prod' prefix
+    elif path.startswith('/Staging/'):
+        path = path[8:]  # Remove '/Staging' prefix
     method = event.get('requestContext', {}).get('http', {}).get('method',
              event.get('httpMethod', ''))
 
     # Log request with correlation ID
     StructuredLogger.info(f"Request: {method} {path}", correlation_id=correlation_id)
+
+    # Handle OPTIONS preflight requests for CORS
+    if method == 'OPTIONS':
+        return response(200, {'message': 'CORS preflight'})
 
     try:
         # Route based on path and method

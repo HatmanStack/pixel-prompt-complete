@@ -63,17 +63,22 @@ Enhance the following prompt:"""
             return prompt
 
         try:
-            print(f"Enhancing prompt with model: {prompt_model['name']}")
+            print(f"Enhancing prompt with model: {prompt_model['id']} (provider: {prompt_model['provider']})")
 
             provider = prompt_model['provider']
 
             # Branch based on provider type
             if provider == 'google_gemini':
                 # Use Google genai client for Gemini
-                client = genai.Client(api_key=prompt_model['key'])
+                api_key = prompt_model.get('api_key', '')
+                if not api_key:
+                    print("No API key configured for Google Gemini")
+                    return prompt
+
+                client = genai.Client(api_key=api_key)
 
                 response = client.models.generate_content(
-                    model='gemini-2.0-flash-exp',
+                    model=prompt_model['id'],
                     contents=f"{self.system_prompt}\n\n{prompt}"
                 )
 
@@ -85,8 +90,13 @@ Enhance the following prompt:"""
 
             else:
                 # Use OpenAI client for OpenAI and OpenAI-compatible providers
+                api_key = prompt_model.get('api_key', '')
+                if not api_key:
+                    print(f"No API key configured for provider: {provider}")
+                    return prompt
+
                 client_kwargs = {
-                    'api_key': prompt_model['key'],
+                    'api_key': api_key,
                     'timeout': 30.0
                 }
 
@@ -100,8 +110,8 @@ Enhance the following prompt:"""
                 if provider == 'openai':
                     model_id = 'gpt-4o-mini'  # Fast and cheap
                 else:
-                    # Use model name as-is for generic providers
-                    model_id = prompt_model['name']
+                    # Use model ID as-is for generic providers
+                    model_id = prompt_model['id']
 
                 response = client.chat.completions.create(
                     model=model_id,

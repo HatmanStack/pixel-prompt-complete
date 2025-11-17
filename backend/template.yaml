@@ -1148,6 +1148,7 @@ Resources:
           - Content-Type
           - Authorization
           - X-Requested-With
+          - X-Correlation-ID
         AllowMethods:
           - GET
           - POST
