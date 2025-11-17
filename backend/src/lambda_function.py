@@ -309,7 +309,8 @@ def handle_enhance(event, correlation_id=None):
 
         return response(200, {
             'original': prompt,
-            'enhanced': enhanced
+            'short_prompt': enhanced,
+            'long_prompt': enhanced
         })
 
     except json.JSONDecodeError:
