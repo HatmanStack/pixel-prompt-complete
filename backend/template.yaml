@@ -1,0 +1,676 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Pixel Prompt Complete - Serverless text-to-image generation platform
+
+# Metadata for organizing parameters in deployment UI
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Environment Configuration"
+        Parameters:
+          - Environment
+      - Label:
+          default: "Model Configuration"
+        Parameters:
+          - ModelCount
+          - PromptModelIndex
+      - Label:
+          default: "Model 1"
+        Parameters:
+          - Model1Name
+          - Model1Key
+      - Label:
+          default: "Model 2"
+        Parameters:
+          - Model2Name
+          - Model2Key
+      - Label:
+          default: "Model 3"
+        Parameters:
+          - Model3Name
+          - Model3Key
+      - Label:
+          default: "Model 4"
+        Parameters:
+          - Model4Name
+          - Model4Key
+      - Label:
+          default: "Model 5"
+        Parameters:
+          - Model5Name
+          - Model5Key
+      - Label:
+          default: "Model 6"
+        Parameters:
+          - Model6Name
+          - Model6Key
+      - Label:
+          default: "Model 7"
+        Parameters:
+          - Model7Name
+          - Model7Key
+      - Label:
+          default: "Model 8"
+        Parameters:
+          - Model8Name
+          - Model8Key
+      - Label:
+          default: "Model 9"
+        Parameters:
+          - Model9Name
+          - Model9Key
+      - Label:
+          default: "Model 10"
+        Parameters:
+          - Model10Name
+          - Model10Key
+      - Label:
+          default: "Model 11"
+        Parameters:
+          - Model11Name
+          - Model11Key
+      - Label:
+          default: "Model 12"
+        Parameters:
+          - Model12Name
+          - Model12Key
+      - Label:
+          default: "Model 13"
+        Parameters:
+          - Model13Name
+          - Model13Key
+      - Label:
+          default: "Model 14"
+        Parameters:
+          - Model14Name
+          - Model14Key
+      - Label:
+          default: "Model 15"
+        Parameters:
+          - Model15Name
+          - Model15Key
+      - Label:
+          default: "Model 16"
+        Parameters:
+          - Model16Name
+          - Model16Key
+      - Label:
+          default: "Model 17"
+        Parameters:
+          - Model17Name
+          - Model17Key
+      - Label:
+          default: "Model 18"
+        Parameters:
+          - Model18Name
+          - Model18Key
+      - Label:
+          default: "Model 19"
+        Parameters:
+          - Model19Name
+          - Model19Key
+      - Label:
+          default: "Model 20"
+        Parameters:
+          - Model20Name
+          - Model20Key
+      - Label:
+          default: "Rate Limiting"
+        Parameters:
+          - GlobalRateLimit
+          - IPRateLimit
+          - IPWhitelist
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Environment name for resource tagging
+
+  ModelCount:
+    Type: Number
+    Default: 9
+    MinValue: 1
+    MaxValue: 20
+    Description: Number of AI models to configure (1-20)
+
+  PromptModelIndex:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 20
+    Description: Which model to use for prompt enhancement (1-based index)
+
+  # Model 1 Parameters
+  Model1Name:
+    Type: String
+    Default: "DALL-E 3"
+    Description: Name of AI model 1
+
+  Model1Key:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: API key for model 1
+
+  # Model 2 Parameters
+  Model2Name:
+    Type: String
+    Default: "Gemini 2.0"
+    Description: Name of AI model 2
+
+  Model2Key:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: API key for model 2
+
+  # Model 3 Parameters
+  Model3Name:
+    Type: String
+    Default: "AWS Nova Canvas"
+    Description: Name of AI model 3
+
+  Model3Key:
+    Type: String
+    Default: "N/A"
+    NoEcho: true
+    Description: API key for model 3 (N/A for AWS Bedrock)
+
+  # Model 4 Parameters
+  Model4Name:
+    Type: String
+    Default: "Stable Diffusion 3.5 Large"
+    Description: Name of AI model 4
+
+  Model4Key:
+    Type: String
+    Default: "N/A"
+    NoEcho: true
+    Description: API key for model 4 (N/A for AWS Bedrock)
+
+  # Model 5 Parameters
+  Model5Name:
+    Type: String
+    Default: "Black Forest Pro"
+    Description: Name of AI model 5
+
+  Model5Key:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: API key for model 5
+
+  # Model 6 Parameters
+  Model6Name:
+    Type: String
+    Default: "Imagen 3.0"
+    Description: Name of AI model 6
+
+  Model6Key:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: API key for model 6
+
+  # Model 7 Parameters
+  Model7Name:
+    Type: String
+    Default: "Recraft v3"
+    Description: Name of AI model 7
+
+  Model7Key:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: API key for model 7
+
+  # Model 8 Parameters
+  Model8Name:
+    Type: String
+    Default: "Stability AI Turbo"
+    Description: Name of AI model 8
+
+  Model8Key:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: API key for model 8
+
+  # Model 9 Parameters
+  Model9Name:
+    Type: String
+    Default: "Black Forest Dev"
+    Description: Name of AI model 9
+
+  Model9Key:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: API key for model 9
+
+  # Models 10-20 (optional)
+  Model10Name:
+    Type: String
+    Default: ""
+    Description: Name of AI model 10 (optional)
+
+  Model10Key:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: API key for model 10
+
+  Model11Name:
+    Type: String
+    Default: ""
+    Description: Name of AI model 11 (optional)
+
+  Model11Key:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: API key for model 11
+
+  Model12Name:
+    Type: String
+    Default: ""
+    Description: Name of AI model 12 (optional)
+
+  Model12Key:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: API key for model 12
+
+  Model13Name:
+    Type: String
+    Default: ""
+    Description: Name of AI model 13 (optional)
+
+  Model13Key:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: API key for model 13
+
+  Model14Name:
+    Type: String
+    Default: ""
+    Description: Name of AI model 14 (optional)
+
+  Model14Key:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: API key for model 14
+
+  Model15Name:
+    Type: String
+    Default: ""
+    Description: Name of AI model 15 (optional)
+
+  Model15Key:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: API key for model 15
+
+  Model16Name:
+    Type: String
+    Default: ""
+    Description: Name of AI model 16 (optional)
+
+  Model16Key:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: API key for model 16
+
+  Model17Name:
+    Type: String
+    Default: ""
+    Description: Name of AI model 17 (optional)
+
+  Model17Key:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: API key for model 17
+
+  Model18Name:
+    Type: String
+    Default: ""
+    Description: Name of AI model 18 (optional)
+
+  Model18Key:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: API key for model 18
+
+  Model19Name:
+    Type: String
+    Default: ""
+    Description: Name of AI model 19 (optional)
+
+  Model19Key:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: API key for model 19
+
+  Model20Name:
+    Type: String
+    Default: ""
+    Description: Name of AI model 20 (optional)
+
+  Model20Key:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: API key for model 20
+
+  # Rate Limiting Parameters
+  GlobalRateLimit:
+    Type: Number
+    Default: 1000
+    Description: Maximum requests per hour globally
+
+  IPRateLimit:
+    Type: Number
+    Default: 50
+    Description: Maximum requests per day per IP address
+
+  IPWhitelist:
+    Type: String
+    Default: ""
+    Description: Comma-separated IP addresses to bypass rate limits
+
+# Global settings for all functions
+Globals:
+  Function:
+    Tags:
+      Project: PixelPromptComplete
+      Environment: !Ref Environment
+      ManagedBy: SAM
+
+Resources:
+  # Lambda Function
+  PixelPromptFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-function'
+      Runtime: python3.12
+      Handler: lambda_function.lambda_handler
+      CodeUri: ./src
+      MemorySize: 3008
+      Timeout: 900
+      ReservedConcurrentExecutions: 10
+      Environment:
+        Variables:
+          # Model Configuration
+          MODEL_COUNT: !Ref ModelCount
+          MODEL_1_NAME: !Ref Model1Name
+          MODEL_1_KEY: !Ref Model1Key
+          MODEL_2_NAME: !Ref Model2Name
+          MODEL_2_KEY: !Ref Model2Key
+          MODEL_3_NAME: !Ref Model3Name
+          MODEL_3_KEY: !Ref Model3Key
+          MODEL_4_NAME: !Ref Model4Name
+          MODEL_4_KEY: !Ref Model4Key
+          MODEL_5_NAME: !Ref Model5Name
+          MODEL_5_KEY: !Ref Model5Key
+          MODEL_6_NAME: !Ref Model6Name
+          MODEL_6_KEY: !Ref Model6Key
+          MODEL_7_NAME: !Ref Model7Name
+          MODEL_7_KEY: !Ref Model7Key
+          MODEL_8_NAME: !Ref Model8Name
+          MODEL_8_KEY: !Ref Model8Key
+          MODEL_9_NAME: !Ref Model9Name
+          MODEL_9_KEY: !Ref Model9Key
+          MODEL_10_NAME: !Ref Model10Name
+          MODEL_10_KEY: !Ref Model10Key
+          MODEL_11_NAME: !Ref Model11Name
+          MODEL_11_KEY: !Ref Model11Key
+          MODEL_12_NAME: !Ref Model12Name
+          MODEL_12_KEY: !Ref Model12Key
+          MODEL_13_NAME: !Ref Model13Name
+          MODEL_13_KEY: !Ref Model13Key
+          MODEL_14_NAME: !Ref Model14Name
+          MODEL_14_KEY: !Ref Model14Key
+          MODEL_15_NAME: !Ref Model15Name
+          MODEL_15_KEY: !Ref Model15Key
+          MODEL_16_NAME: !Ref Model16Name
+          MODEL_16_KEY: !Ref Model16Key
+          MODEL_17_NAME: !Ref Model17Name
+          MODEL_17_KEY: !Ref Model17Key
+          MODEL_18_NAME: !Ref Model18Name
+          MODEL_18_KEY: !Ref Model18Key
+          MODEL_19_NAME: !Ref Model19Name
+          MODEL_19_KEY: !Ref Model19Key
+          MODEL_20_NAME: !Ref Model20Name
+          MODEL_20_KEY: !Ref Model20Key
+          # Additional Configuration
+          PROMPT_MODEL_INDEX: !Ref PromptModelIndex
+          GLOBAL_LIMIT: !Ref GlobalRateLimit
+          IP_LIMIT: !Ref IPRateLimit
+          IP_INCLUDE: !Ref IPWhitelist
+          # S3 and CloudFront (will be set after resources are created)
+          S3_BUCKET: !Ref PixelPromptBucket
+          CLOUDFRONT_DOMAIN: !GetAtt CloudFrontDistribution.DomainName
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref PixelPromptBucket
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - bedrock-runtime:InvokeModel
+              Resource:
+                - arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-canvas-v1:0
+                - arn:aws:bedrock:us-west-2::foundation-model/stability.sd3-5-large-v1:0
+      Events:
+        GenerateApi:
+          Type: HttpApi
+          Properties:
+            Path: /generate
+            Method: POST
+            ApiId: !Ref HttpApi
+        StatusApi:
+          Type: HttpApi
+          Properties:
+            Path: /status/{jobId}
+            Method: GET
+            ApiId: !Ref HttpApi
+        EnhanceApi:
+          Type: HttpApi
+          Properties:
+            Path: /enhance
+            Method: POST
+            ApiId: !Ref HttpApi
+        GalleryListApi:
+          Type: HttpApi
+          Properties:
+            Path: /gallery/list
+            Method: GET
+            ApiId: !Ref HttpApi
+        GalleryDetailApi:
+          Type: HttpApi
+          Properties:
+            Path: /gallery/{galleryId}
+            Method: GET
+            ApiId: !Ref HttpApi
+
+  # HTTP API Gateway
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: Prod
+      CorsConfiguration:
+        AllowOrigins:
+          - '*'
+        AllowHeaders:
+          - Content-Type
+          - Authorization
+          - X-Requested-With
+        AllowMethods:
+          - GET
+          - POST
+          - OPTIONS
+        MaxAge: 86400
+        AllowCredentials: false
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 100
+        ThrottlingRateLimit: 50
+
+  # S3 Bucket for image storage and job status
+  PixelPromptBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'pixel-prompt-complete-${Environment}-${AWS::AccountId}'
+      VersioningConfiguration:
+        Status: Disabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins:
+              - '*'
+            AllowedMethods:
+              - GET
+              - HEAD
+            AllowedHeaders:
+              - '*'
+            MaxAge: 3600
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldImages
+            Status: Enabled
+            ExpirationInDays: 30
+            Prefix: group-images/
+    DeletionPolicy: Retain
+
+  # CloudFront Origin Access Identity
+  CloudFrontOAI:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: !Sub 'OAI for ${AWS::StackName}'
+
+  # S3 Bucket Policy to allow CloudFront access
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref PixelPromptBucket
+      PolicyDocument:
+        Statement:
+          - Sid: AllowCloudFrontOAI
+            Effect: Allow
+            Principal:
+              CanonicalUser: !GetAtt CloudFrontOAI.S3CanonicalUserId
+            Action: s3:GetObject
+            Resource: !Sub '${PixelPromptBucket.Arn}/*'
+
+  # CloudFront Distribution for fast image delivery
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub 'CloudFront distribution for ${AWS::StackName}'
+        Origins:
+          - Id: S3Origin
+            DomainName: !GetAtt PixelPromptBucket.RegionalDomainName
+            S3OriginConfig:
+              OriginAccessIdentity: !Sub 'origin-access-identity/cloudfront/${CloudFrontOAI}'
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachedMethods:
+            - GET
+            - HEAD
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+          Compress: true
+          DefaultTTL: 86400
+          MaxTTL: 31536000
+        PriceClass: PriceClass_100
+
+  # CloudWatch Log Group with retention
+  FunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${PixelPromptFunction}'
+      RetentionInDays: 7
+
+  # CloudWatch Alarm for Lambda Errors
+  LambdaErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-lambda-errors'
+      AlarmDescription: Alert on Lambda function errors
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref PixelPromptFunction
+      TreatMissingData: notBreaching
+
+  # CloudWatch Alarm for Lambda Duration
+  LambdaDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-lambda-duration'
+      AlarmDescription: Alert on high Lambda execution duration
+      MetricName: Duration
+      Namespace: AWS/Lambda
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 120000
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref PixelPromptFunction
+      TreatMissingData: notBreaching
+
+Outputs:
+  FunctionName:
+    Description: Lambda Function Name
+    Value: !Ref PixelPromptFunction
+
+  ApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/Prod'
+
+  CloudFrontDomain:
+    Description: CloudFront distribution domain
+    Value: !GetAtt CloudFrontDistribution.DomainName
+
+  S3BucketName:
+    Description: S3 bucket name
+    Value: !Ref PixelPromptBucket

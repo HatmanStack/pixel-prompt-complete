@@ -1,0 +1,131 @@
+.error-message {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 16px;
+  border-radius: 8px;
+  margin: 16px 0;
+  border: 1px solid;
+  background: white;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.error-message--retryable {
+  border-color: #ff9800;
+  background: linear-gradient(135deg, #fff8e1 0%, #ffecb3 100%);
+}
+
+.error-message--permanent {
+  border-color: #f44336;
+  background: linear-gradient(135deg, #ffebee 0%, #ffcdd2 100%);
+}
+
+.error-message__icon {
+  font-size: 32px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.error-message__content {
+  flex: 1;
+  min-width: 0;
+}
+
+.error-message__title {
+  margin: 0 0 8px 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #333;
+}
+
+.error-message__text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #666;
+}
+
+.error-message__details {
+  margin-top: 12px;
+  font-size: 12px;
+}
+
+.error-message__details summary {
+  cursor: pointer;
+  color: #666;
+  user-select: none;
+  padding: 4px 0;
+}
+
+.error-message__details summary:hover {
+  color: #333;
+}
+
+.error-message__details pre {
+  margin-top: 8px;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 4px;
+  overflow-x: auto;
+  font-size: 11px;
+  color: #d32f2f;
+}
+
+.error-message__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.error-message__button {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.error-message__button--retry {
+  background: linear-gradient(135deg, #2196f3 0%, #1976d2 100%);
+  color: white;
+  box-shadow: 0 2px 4px rgba(33, 150, 243, 0.3);
+}
+
+.error-message__button--retry:hover {
+  background: linear-gradient(135deg, #1976d2 0%, #1565c0 100%);
+  box-shadow: 0 4px 8px rgba(33, 150, 243, 0.4);
+  transform: translateY(-1px);
+}
+
+.error-message__button--retry:active {
+  transform: translateY(0);
+}
+
+.error-message__button--dismiss {
+  background: #e0e0e0;
+  color: #666;
+}
+
+.error-message__button--dismiss:hover {
+  background: #d0d0d0;
+  color: #333;
+}
+
+@media (max-width: 600px) {
+  .error-message {
+    flex-direction: column;
+  }
+
+  .error-message__actions {
+    flex-direction: row;
+    width: 100%;
+  }
+
+  .error-message__button {
+    flex: 1;
+  }
+}

@@ -1,0 +1,12 @@
+# AWS SDK
+boto3==1.37.22
+
+# HTTP client for external APIs
+requests==2.32.5
+
+# Image processing
+Pillow==11.1.0
+
+# AI provider SDKs
+openai==1.72.0
+google-genai==1.10.0

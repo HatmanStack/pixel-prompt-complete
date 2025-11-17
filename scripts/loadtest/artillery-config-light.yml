@@ -1,0 +1,82 @@
+config:
+  target: "{{ $processEnvironment.API_ENDPOINT }}"
+  phases:
+    # Light load: 10 users for 2 minutes
+    - duration: 120
+      arrivalRate: 10
+      name: "Light Load Test"
+
+  # Performance thresholds (same as full test)
+  ensure:
+    maxErrorRate: 1
+    p95: 5000
+    p99: 10000
+
+  # HTTP settings
+  http:
+    timeout: 60
+
+  # Test data
+  variables:
+    prompts:
+      - "a simple test image"
+      - "another test prompt"
+      - "test image generation"
+
+scenarios:
+  # 50% Generate
+  - name: "Generate"
+    weight: 50
+    flow:
+      - post:
+          url: "/generate"
+          headers:
+            Content-Type: "application/json"
+            X-Correlation-ID: "lighttest-{{ $randomString() }}"
+          json:
+            prompt: "{{ prompts }}"
+            steps: 25
+            guidance: 7
+            ip: "10.0.0.{{ $randomNumber(1, 255) }}"
+          capture:
+            - json: "$.jobId"
+              as: "jobId"
+
+  # 30% Status
+  - name: "Status"
+    weight: 30
+    flow:
+      - post:
+          url: "/generate"
+          headers:
+            Content-Type: "application/json"
+            X-Correlation-ID: "lighttest-{{ $randomString() }}"
+          json:
+            prompt: "test"
+            steps: 25
+            guidance: 7
+            ip: "10.0.0.1"
+          capture:
+            - json: "$.jobId"
+              as: "jobId"
+      - think: 1
+      - get:
+          url: "/status/{{ jobId }}"
+          headers:
+            X-Correlation-ID: "lighttest-{{ $randomString() }}"
+
+  # 20% Enhance and Gallery
+  - name: "Other"
+    weight: 20
+    flow:
+      - post:
+          url: "/enhance"
+          headers:
+            Content-Type: "application/json"
+            X-Correlation-ID: "lighttest-{{ $randomString() }}"
+          json:
+            prompt: "{{ prompts }}"
+      - get:
+          url: "/gallery/list"
+          headers:
+            X-Correlation-ID: "lighttest-{{ $randomString() }}"

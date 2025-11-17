@@ -1,0 +1,82 @@
+version = 0.1
+
+# Default configuration (dev environment)
+[default]
+[default.global.parameters]
+stack_name = "pixel-prompt-dev"
+region = "us-west-2"
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "Environment=dev ModelCount=3 PromptModelIndex=1"
+confirm_changeset = true
+resolve_s3 = true
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.deploy.parameters]
+capabilities = "CAPABILITY_IAM"
+resolve_s3 = true
+s3_prefix = "pixel-prompt-dev"
+tags = "Project=\"PixelPromptComplete\" Environment=\"dev\" ManagedBy=\"SAM\""
+
+# Development environment (same as default)
+[dev]
+[dev.global.parameters]
+stack_name = "pixel-prompt-dev"
+region = "us-west-2"
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "Environment=dev ModelCount=3 PromptModelIndex=1"
+confirm_changeset = true
+resolve_s3 = true
+
+[dev.build.parameters]
+cached = true
+parallel = true
+
+[dev.deploy.parameters]
+capabilities = "CAPABILITY_IAM"
+resolve_s3 = true
+s3_prefix = "pixel-prompt-dev"
+tags = "Project=\"PixelPromptComplete\" Environment=\"dev\" ManagedBy=\"SAM\""
+
+# Staging environment (production-like)
+[staging]
+[staging.global.parameters]
+stack_name = "pixel-prompt-staging"
+region = "us-west-2"
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "Environment=staging ModelCount=9 PromptModelIndex=1 GlobalRateLimit=1000 IPRateLimit=50"
+confirm_changeset = true
+resolve_s3 = true
+
+[staging.build.parameters]
+cached = true
+parallel = true
+
+[staging.deploy.parameters]
+capabilities = "CAPABILITY_IAM"
+resolve_s3 = true
+s3_prefix = "pixel-prompt-staging"
+tags = "Project=\"PixelPromptComplete\" Environment=\"staging\" ManagedBy=\"SAM\""
+
+# Production environment
+[prod]
+[prod.global.parameters]
+stack_name = "pixel-prompt-prod"
+region = "us-west-2"
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "Environment=prod ModelCount=9 PromptModelIndex=1 GlobalRateLimit=2000 IPRateLimit=100"
+confirm_changeset = false
+resolve_s3 = true
+
+[prod.build.parameters]
+cached = true
+parallel = true
+
+[prod.deploy.parameters]
+capabilities = "CAPABILITY_IAM"
+resolve_s3 = true
+s3_prefix = "pixel-prompt-prod"
+tags = "Project=\"PixelPromptComplete\" Environment=\"prod\" ManagedBy=\"SAM\""
+fail_on_empty_changeset = false

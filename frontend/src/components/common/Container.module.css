@@ -1,0 +1,26 @@
+.container {
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: var(--spacing-xl) var(--spacing-md);
+}
+
+/* Responsive Design */
+@media (max-width: 1440px) {
+  .container {
+    max-width: 1200px;
+  }
+}
+
+@media (max-width: 1024px) {
+  .container {
+    max-width: 960px;
+    padding: var(--spacing-lg) var(--spacing-md);
+  }
+}
+
+@media (max-width: 768px) {
+  .container {
+    padding: var(--spacing-md) var(--spacing-sm);
+  }
+}

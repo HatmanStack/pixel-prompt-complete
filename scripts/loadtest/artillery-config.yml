@@ -1,0 +1,163 @@
+config:
+  target: "{{ $processEnvironment.API_ENDPOINT }}"
+  phases:
+    # Warm-up phase: 10 users over 1 minute
+    - duration: 60
+      arrivalRate: 10
+      name: "Warm-up"
+    # Ramp-up phase: 10 → 100 users over 5 minutes
+    - duration: 300
+      arrivalRate: 10
+      rampTo: 100
+      name: "Ramp-up"
+    # Sustained load: 100 users for 5 minutes
+    - duration: 300
+      arrivalRate: 100
+      name: "Sustained Load"
+    # Cool-down: 100 → 0 users over 2 minutes
+    - duration: 120
+      arrivalRate: 100
+      rampTo: 0
+      name: "Cool-down"
+
+  # Performance thresholds
+  ensure:
+    maxErrorRate: 1  # Max 1% error rate
+    p95: 5000        # 95th percentile response time < 5000ms
+    p99: 10000       # 99th percentile response time < 10000ms
+
+  # HTTP settings
+  http:
+    timeout: 60  # 60 second timeout for requests
+
+  # Plugins for better reporting
+  plugins:
+    expect: {}
+
+  # Variables for test data
+  variables:
+    prompts:
+      - "a beautiful sunset over mountains"
+      - "a futuristic city at night"
+      - "a cute cat playing with yarn"
+      - "abstract geometric patterns"
+      - "a serene forest landscape"
+      - "a vintage car in the desert"
+      - "a colorful underwater scene"
+      - "a magical fantasy castle"
+      - "a modern minimalist interior"
+      - "a vibrant street art mural"
+
+    steps:
+      - 25
+      - 30
+      - 35
+      - 40
+      - 45
+      - 50
+
+    guidance:
+      - 5
+      - 7
+      - 10
+      - 12
+      - 15
+
+scenarios:
+  # 50% of traffic: Generate images
+  - name: "Generate Images"
+    weight: 50
+    flow:
+      - post:
+          url: "/generate"
+          headers:
+            Content-Type: "application/json"
+            X-Correlation-ID: "loadtest-{{ $randomString() }}"
+          json:
+            prompt: "{{ prompts }}"
+            steps: "{{ steps }}"
+            guidance: "{{ guidance }}"
+            ip: "{{ $randomNumber(1, 255) }}.{{ $randomNumber(1, 255) }}.{{ $randomNumber(1, 255) }}.{{ $randomNumber(1, 255) }}"
+          expect:
+            - statusCode: 200
+            - contentType: json
+            - hasProperty: jobId
+          capture:
+            - json: "$.jobId"
+              as: "jobId"
+
+  # 30% of traffic: Check job status
+  - name: "Check Job Status"
+    weight: 30
+    flow:
+      # First create a job
+      - post:
+          url: "/generate"
+          headers:
+            Content-Type: "application/json"
+            X-Correlation-ID: "loadtest-{{ $randomString() }}"
+          json:
+            prompt: "test image"
+            steps: 25
+            guidance: 7
+            ip: "{{ $randomNumber(1, 255) }}.{{ $randomNumber(1, 255) }}.{{ $randomNumber(1, 255) }}.{{ $randomNumber(1, 255) }}"
+          capture:
+            - json: "$.jobId"
+              as: "jobId"
+
+      # Wait a bit
+      - think: 2
+
+      # Check status
+      - get:
+          url: "/status/{{ jobId }}"
+          headers:
+            X-Correlation-ID: "loadtest-{{ $randomString() }}"
+          expect:
+            - statusCode: 200
+            - contentType: json
+            - hasProperty: jobId
+
+  # 10% of traffic: Enhance prompts
+  - name: "Enhance Prompts"
+    weight: 10
+    flow:
+      - post:
+          url: "/enhance"
+          headers:
+            Content-Type: "application/json"
+            X-Correlation-ID: "loadtest-{{ $randomString() }}"
+          json:
+            prompt: "{{ prompts }}"
+          expect:
+            - statusCode: 200
+            - contentType: json
+            - hasProperty: enhancedPrompt
+
+  # 10% of traffic: Gallery operations
+  - name: "Gallery Operations"
+    weight: 10
+    flow:
+      # List galleries
+      - get:
+          url: "/gallery/list"
+          headers:
+            X-Correlation-ID: "loadtest-{{ $randomString() }}"
+          expect:
+            - statusCode: 200
+            - contentType: json
+            - hasProperty: galleries
+          capture:
+            - json: "$.galleries[0].id"
+              as: "galleryId"
+
+      # If we got a gallery ID, fetch its details
+      - get:
+          url: "/gallery/{{ galleryId }}"
+          headers:
+            X-Correlation-ID: "loadtest-{{ $randomString() }}"
+          expect:
+            - statusCode:
+                - 200
+                - 404  # OK if gallery doesn't exist
+          ifTrue: "galleryId"

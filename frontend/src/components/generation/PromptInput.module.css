@@ -1,0 +1,112 @@
+.container {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.inputWrapper {
+  position: relative;
+  width: 100%;
+}
+
+.textarea {
+  width: 100%;
+  min-height: 120px;
+  max-height: 300px;
+  padding: var(--spacing-md);
+  padding-right: 3rem;
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-relaxed);
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-secondary);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  resize: none;
+  transition: border-color var(--transition-fast), background-color var(--transition-fast);
+}
+
+.textarea:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  background-color: var(--color-bg-tertiary);
+}
+
+.textarea:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.textarea::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+.clearButton {
+  position: absolute;
+  top: var(--spacing-md);
+  right: var(--spacing-md);
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
+  border: none;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  font-size: var(--font-size-lg);
+  transition: all var(--transition-fast);
+}
+
+.clearButton:hover {
+  background-color: var(--color-error);
+  color: white;
+  transform: scale(1.1);
+}
+
+.clearButton:active {
+  transform: scale(0.95);
+}
+
+.footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: 0 var(--spacing-xs);
+}
+
+.charCount {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.charCount.warning {
+  color: var(--color-warning);
+  font-weight: var(--font-weight-medium);
+}
+
+.hint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  text-align: right;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .textarea {
+    min-height: 100px;
+    font-size: var(--font-size-sm);
+  }
+
+  .hint {
+    display: none;
+  }
+
+  .footer {
+    justify-content: center;
+  }
+}
