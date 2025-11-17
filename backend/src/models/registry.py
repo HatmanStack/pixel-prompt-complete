@@ -1,81 +1,19 @@
 """
 Model Registry for Pixel Prompt Complete.
 
-Dynamically loads AI model configurations from environment variables
-and provides intelligent provider detection based on model names.
+Dynamically loads AI model configurations from environment variables.
+No provider detection - users specify provider explicitly.
 """
 
 import os
 from typing import List, Dict, Optional
 
 
-def detect_provider(model_name: str) -> str:
-    """
-    Detect AI provider from model name using pattern matching.
-
-    Args:
-        model_name: Name of the AI model
-
-    Returns:
-        Provider identifier string (e.g., 'openai', 'google_gemini', 'generic')
-    """
-    if not model_name:
-        return 'generic'
-
-    name_lower = model_name.lower()
-
-    # OpenAI models
-    if any(keyword in name_lower for keyword in ['dalle', 'dall-e', 'gpt', 'chatgpt']):
-        return 'openai'
-
-    # Google Gemini
-    if 'gemini' in name_lower:
-        return 'google_gemini'
-
-    # Google Imagen
-    if 'imagen' in name_lower:
-        return 'google_imagen'
-
-    # AWS Bedrock - Nova Canvas
-    if any(keyword in name_lower for keyword in ['nova', 'amazon nova']):
-        return 'bedrock_nova'
-
-    # AWS Bedrock - Stable Diffusion
-    if any(keyword in name_lower for keyword in ['stable diffusion', 'sd3', 'sdxl']) and \
-       any(keyword in name_lower for keyword in ['bedrock', 'aws', 'amazon']):
-        return 'bedrock_sd'
-
-    # Stability AI (non-Bedrock)
-    if any(keyword in name_lower for keyword in ['stability', 'stable diffusion', 'sd ', 'sdxl']):
-        return 'stability'
-
-    # Black Forest Labs (Flux)
-    if any(keyword in name_lower for keyword in ['flux', 'black forest', 'bfl']):
-        return 'bfl'
-
-    # Recraft
-    if 'recraft' in name_lower:
-        return 'recraft'
-
-    # Hunyuan
-    if 'hunyuan' in name_lower:
-        return 'hunyuan'
-
-    # Qwen
-    if 'qwen' in name_lower:
-        return 'qwen'
-
-    # Default fallback
-    print(f"Unknown provider for model '{model_name}', using generic handler")
-    return 'generic'
-
-
 class ModelRegistry:
     """
     Registry for managing AI model configurations.
 
-    Loads models from environment variables and provides access methods
-    for model lookup and prompt enhancement configuration.
+    Loads models from environment variables with explicit provider specification.
     """
 
     def __init__(self):
@@ -87,19 +25,30 @@ class ModelRegistry:
         # Load all models
         self.models: List[Dict] = []
         for i in range(1, self.model_count + 1):
-            name = os.environ.get(f'MODEL_{i}_NAME')
-            key = os.environ.get(f'MODEL_{i}_KEY')
+            provider = os.environ.get(f'MODEL_{i}_PROVIDER', '')
+            model_id = os.environ.get(f'MODEL_{i}_ID', '')
+            api_key = os.environ.get(f'MODEL_{i}_API_KEY', '')
+            base_url = os.environ.get(f'MODEL_{i}_BASE_URL', '')
+            user_id = os.environ.get(f'MODEL_{i}_USER_ID', '')
 
-            # Only add if both name and key are provided
-            if name and key:
-                provider = detect_provider(name)
-                self.models.append({
+            # Only add if provider and model ID are provided
+            if provider and model_id:
+                model_config = {
                     'index': i,
-                    'name': name,
-                    'key': key,
-                    'provider': provider
-                })
-                print(f"Loaded model {i}: {name} (provider: {provider})")
+                    'provider': provider,
+                    'id': model_id,
+                }
+
+                # Only include optional fields if they're not empty
+                if api_key:
+                    model_config['api_key'] = api_key
+                if base_url:
+                    model_config['base_url'] = base_url
+                if user_id:
+                    model_config['user_id'] = user_id
+
+                self.models.append(model_config)
+                print(f"Loaded model {i}: {model_id} (provider: {provider})")
 
         # Validation
         if len(self.models) != self.model_count:

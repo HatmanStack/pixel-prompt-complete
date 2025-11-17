@@ -122,12 +122,18 @@ sam deploy --guided
 - Stack name (e.g., `pixel-prompt-prod`)
 - AWS Region (e.g., `us-east-1`)
 - **ModelCount**: How many AI models (1-20)
-- **Model1Name through Model20Name**: AI model names (e.g., "DALL-E 3", "Gemini 2.0")
-- **Model1Key through Model20Key**: API keys for each model
-- **PromptModelIndex**: Which model to use for prompt enhancement
+- **For each model** (Model1 through Model20):
+  - **Provider**: openai, google_gemini, bedrock_nova, bfl, etc.
+  - **Model ID**: Exact model identifier (e.g., `dall-e-3`, `flux-pro-1.1`)
+  - **API Key**: Leave blank if not needed (e.g., AWS Bedrock)
+  - **Base URL**: Optional - for custom/OpenAI-compatible APIs
+  - **User ID**: Optional - if provider requires it
+- **PromptModelIndex**: Which model to use for prompt enhancement (1-based)
 - **Rate limits**: GlobalRateLimit, IPRateLimit, IPWhitelist
 
 **✅ Configuration is saved to `samconfig.toml`** (gitignored - safe to store API keys)
+
+**📖 See [Model Configuration Guide](#model-configuration-guide) below for detailed provider setup**
 
 **Then configure frontend:**
 ```bash
@@ -287,21 +293,113 @@ pixel-prompt-complete/
 
 ## 🔧 Configuration
 
-### Model Configuration
+### Model Configuration Guide
 
-Configure 1-20 AI models via SAM parameters:
+Each model requires 5 configuration fields during `sam deploy --guided`:
 
-```yaml
-Parameters:
-  ModelCount: 9
-  Model1Name: "DALL-E 3"
-  Model1Key: "sk-..."
-  Model2Name: "Gemini 2.0"
-  Model2Key: "AIza..."
-  # ... up to Model20Name/Model20Key
-```
+| Field | Required | Description | Example |
+|-------|----------|-------------|---------|
+| **Provider** | Yes | Provider type (dropdown selection) | `openai`, `google_gemini`, `bedrock_nova` |
+| **Model ID** | Yes | Exact model identifier for API calls | `dall-e-3`, `gemini-2.0-flash-exp` |
+| **API Key** | Optional | API key (leave blank if not needed) | `sk-...`, `AIza...` |
+| **Base URL** | Optional | Custom API endpoint (for OpenAI-compatible APIs) | `https://api.custom.com` |
+| **User ID** | Optional | User identifier (if provider requires it) | `user-123` |
 
-**AWS Bedrock Models**: Set API key to `"N/A"` and ensure Lambda role has `bedrock-runtime:InvokeModel` permissions.
+#### Provider Details
+
+<details>
+<summary><b>OpenAI (DALL-E)</b></summary>
+
+- **Provider**: `openai`
+- **Model ID**: `dall-e-3`
+- **API Key**: Required - [Get API key](https://platform.openai.com/api-keys)
+- **Base URL**: Leave blank
+- **User ID**: Leave blank
+</details>
+
+<details>
+<summary><b>Google Gemini</b></summary>
+
+- **Provider**: `google_gemini`
+- **Model ID**: `gemini-2.0-flash-exp` (or latest version)
+- **API Key**: Required - [Get API key](https://ai.google.dev/)
+- **Base URL**: Leave blank
+- **User ID**: Leave blank
+</details>
+
+<details>
+<summary><b>Google Imagen</b></summary>
+
+- **Provider**: `google_imagen`
+- **Model ID**: `imagen-3.0-generate-001`
+- **API Key**: Required - Same as Gemini
+- **Base URL**: Leave blank
+- **User ID**: Leave blank
+</details>
+
+<details>
+<summary><b>AWS Bedrock - Nova Canvas</b></summary>
+
+- **Provider**: `bedrock_nova`
+- **Model ID**: `amazon.nova-canvas-v1:0`
+- **API Key**: **Leave blank** (uses Lambda IAM role)
+- **Base URL**: Leave blank
+- **User ID**: Leave blank
+- **Note**: Ensure Lambda role has `bedrock-runtime:InvokeModel` permissions
+</details>
+
+<details>
+<summary><b>AWS Bedrock - Stable Diffusion</b></summary>
+
+- **Provider**: `bedrock_sd`
+- **Model ID**: `stability.sd3-5-large-v1:0`
+- **API Key**: **Leave blank** (uses Lambda IAM role)
+- **Base URL**: Leave blank
+- **User ID**: Leave blank
+</details>
+
+<details>
+<summary><b>Black Forest Labs (Flux)</b></summary>
+
+- **Provider**: `bfl`
+- **Model ID**: `flux-pro-1.1` or `flux-dev`
+- **API Key**: Required - [Get API key](https://api.bfl.ai/)
+- **Base URL**: Leave blank
+- **User ID**: Leave blank
+</details>
+
+<details>
+<summary><b>Recraft</b></summary>
+
+- **Provider**: `recraft`
+- **Model ID**: `recraft-v3`
+- **API Key**: Required - [Get API key](https://www.recraft.ai/)
+- **Base URL**: Leave blank
+- **User ID**: Leave blank
+</details>
+
+<details>
+<summary><b>Stability AI</b></summary>
+
+- **Provider**: `stability`
+- **Model ID**: `stable-diffusion-xl-1024-v1-0` (or other variants)
+- **API Key**: Required - [Get API key](https://platform.stability.ai/)
+- **Base URL**: Leave blank
+- **User ID**: Leave blank
+</details>
+
+<details>
+<summary><b>Generic (OpenAI-Compatible)</b></summary>
+
+- **Provider**: `generic`
+- **Model ID**: The model name your API expects
+- **API Key**: Required
+- **Base URL**: **Required** - Your API endpoint URL
+- **User ID**: Optional
+- **Use Case**: For custom or third-party OpenAI-compatible APIs
+</details>
+
+**Note**: Empty optional fields are NOT sent to providers - only non-empty values are included in API calls.
 
 ### Rate Limiting
 

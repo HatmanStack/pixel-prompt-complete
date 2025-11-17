@@ -61,7 +61,7 @@ sam local start-api
 
 ```bash
 # Install dependencies
-pip install -r requirements.txt -r tests/requirements.txt
+pip install -r src/requirements.txt -r tests/requirements.txt
 
 # Unit tests (88 tests)
 pytest tests/unit/ -v
