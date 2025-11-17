@@ -23,8 +23,12 @@ During `--guided` setup, configure:
 - Stack name (e.g., `pixel-prompt-prod`)
 - AWS Region
 - ModelCount (1-20)
-- Model1Name through Model20Name (AI model names)
-- Model1Key through Model20Key (API keys)
+- For each model:
+  - Provider (openai, google_gemini, bedrock_nova, etc.)
+  - Model ID (dall-e-3, flux-pro-1.1, etc.)
+  - API Key (optional - leave blank for Bedrock)
+  - Base URL (optional - for custom APIs)
+  - User ID (optional - if provider needs it)
 - PromptModelIndex (which model for prompt enhancement)
 - Rate limits (GlobalRateLimit, IPRateLimit, IPWhitelist)
 
@@ -38,13 +42,22 @@ sam deploy              # Uses saved config
 sam deploy --config-env prod   # Specific environment
 ```
 
-## Get API Endpoint
+## Configure Frontend
+
+**After deployment**, use the deploy script to auto-generate frontend `.env`:
 
 ```bash
-sam list stack-outputs --stack-name pixel-prompt-dev
+cd ..
+./scripts/deploy.sh prod
 ```
 
-Copy the `ApiEndpoint` value for frontend configuration.
+This automatically extracts API endpoint and creates `frontend/.env`.
+
+**Or manually:**
+```bash
+sam list stack-outputs --stack-name pixel-prompt-prod
+# Copy ApiEndpoint to frontend/.env
+```
 
 ## Test
 

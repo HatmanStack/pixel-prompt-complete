@@ -136,6 +136,21 @@ sam deploy --guided
 **📖 See [Model Configuration Guide](#model-configuration-guide) below for detailed provider setup**
 
 **Then configure frontend:**
+
+**Option 1: Auto-configure (Recommended)**
+```bash
+# Deploy script auto-generates frontend/.env with API endpoint
+cd ../..
+./scripts/deploy.sh prod
+
+# Build and test
+cd frontend
+npm install
+npm run build
+npm run preview
+```
+
+**Option 2: Manual configuration**
 ```bash
 # Get API endpoint
 sam list stack-outputs --stack-name pixel-prompt-prod

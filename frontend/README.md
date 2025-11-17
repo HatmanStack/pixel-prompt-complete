@@ -12,8 +12,19 @@ React + Vite frontend for Pixel Prompt. See [root README](../README.md) for full
 ```bash
 # Install dependencies
 npm install
+```
 
-# Configure environment
+**Configure environment:**
+
+**Option 1: Auto-configure (Recommended)**
+```bash
+# Deploy script auto-generates .env with API endpoint
+cd ..
+./scripts/deploy.sh prod
+```
+
+**Option 2: Manual**
+```bash
 cp .env.example .env
 # Edit .env and set VITE_API_ENDPOINT to your API Gateway URL
 ```
