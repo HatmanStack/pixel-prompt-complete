@@ -406,7 +406,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub '${AWS::StackName}-function'
-      Runtime: python3.12
+      Runtime: python3.13
       Handler: lambda_function.lambda_handler
       CodeUri: ./src
       MemorySize: 3008
@@ -534,8 +534,6 @@ Resources:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub 'pixel-prompt-complete-${Environment}-${AWS::AccountId}'
-      VersioningConfiguration:
-        Status: Disabled
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
