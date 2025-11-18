@@ -1,0 +1,42 @@
+# SAM build artifacts
+.aws-sam/
+samconfig.toml
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+*.cover
+.hypothesis/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Secrets and config
+parameters.json
+.env
+*.pem
+*.key
+
+# OS
+.DS_Store
+Thumbs.db

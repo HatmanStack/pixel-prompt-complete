@@ -34,11 +34,11 @@ def handle_openai(model_config: Dict, prompt: str, _params: Dict) -> Dict:
         print(f"Calling OpenAI DALL-E 3 with prompt: {prompt[:50]}...")
 
         # Initialize OpenAI client with timeout
-        client = OpenAI(api_key=model_config['key'], timeout=120.0)
+        client = OpenAI(api_key=model_config.get('api_key') or None, timeout=120.0)
 
         # Call DALL-E 3 image generation
         response = client.images.generate(
-            model="dall-e-3",
+            model=model_config["id"],
             prompt=prompt,
             size="1024x1024",
             quality="standard",
@@ -65,7 +65,7 @@ def handle_openai(model_config: Dict, prompt: str, _params: Dict) -> Dict:
         return {
             'status': 'success',
             'image': image_base64,
-            'model': model_config['name'],
+            'model': model_config['id'],
             'provider': 'openai'
         }
 
@@ -75,7 +75,7 @@ def handle_openai(model_config: Dict, prompt: str, _params: Dict) -> Dict:
         return {
             'status': 'error',
             'error': error_msg,
-            'model': model_config['name'],
+            'model': model_config['id'],
             'provider': 'openai'
         }
 
@@ -84,7 +84,7 @@ def handle_openai(model_config: Dict, prompt: str, _params: Dict) -> Dict:
         return {
             'status': 'error',
             'error': str(e),
-            'model': model_config['name'],
+            'model': model_config['id'],
             'provider': 'openai'
         }
 
@@ -105,11 +105,11 @@ def handle_google_gemini(model_config: Dict, prompt: str, _params: Dict) -> Dict
         print(f"Calling Google Gemini 2.0 with prompt: {prompt[:50]}...")
 
         # Create Gemini client
-        client = genai.Client(api_key=model_config['key'])
+        client = genai.Client(api_key=model_config.get('api_key') or None)
 
         # Generate image with multimodal model
         response = client.models.generate_content(
-            model='gemini-2.0-flash-exp-image-generation',
+            model=model_config["id"],
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_modalities=['Text', 'Image']
@@ -138,7 +138,7 @@ def handle_google_gemini(model_config: Dict, prompt: str, _params: Dict) -> Dict
         return {
             'status': 'success',
             'image': image_base64,
-            'model': model_config['name'],
+            'model': model_config['id'],
             'provider': 'google_gemini'
         }
 
@@ -147,7 +147,7 @@ def handle_google_gemini(model_config: Dict, prompt: str, _params: Dict) -> Dict
         return {
             'status': 'error',
             'error': str(e),
-            'model': model_config['name'],
+            'model': model_config['id'],
             'provider': 'google_gemini'
         }
 
@@ -168,7 +168,7 @@ def handle_google_imagen(model_config: Dict, prompt: str, _params: Dict) -> Dict
         print(f"Calling Google Imagen 3.0 with prompt: {prompt[:50]}...")
 
         # Create Imagen client
-        client = genai.Client(api_key=model_config['key'])
+        client = genai.Client(api_key=model_config.get('api_key') or None)
 
         # Generate image
         response = client.models.generate_images(
@@ -194,7 +194,7 @@ def handle_google_imagen(model_config: Dict, prompt: str, _params: Dict) -> Dict
         return {
             'status': 'success',
             'image': image_base64,
-            'model': model_config['name'],
+            'model': model_config['id'],
             'provider': 'google_imagen'
         }
 
@@ -203,7 +203,7 @@ def handle_google_imagen(model_config: Dict, prompt: str, _params: Dict) -> Dict
         return {
             'status': 'error',
             'error': str(e),
-            'model': model_config['name'],
+            'model': model_config['id'],
             'provider': 'google_imagen'
         }
 
@@ -247,7 +247,7 @@ def handle_bedrock_nova(model_config: Dict, prompt: str, params: Dict) -> Dict:
 
         # Invoke model
         response = bedrock.invoke_model(
-            modelId='amazon.nova-canvas-v1:0',
+            modelId=model_config['id'],
             body=json.dumps(request_body)
         )
 
@@ -266,7 +266,7 @@ def handle_bedrock_nova(model_config: Dict, prompt: str, params: Dict) -> Dict:
         return {
             'status': 'success',
             'image': image_base64,
-            'model': model_config['name'],
+            'model': model_config['id'],
             'provider': 'bedrock_nova'
         }
 
@@ -275,7 +275,7 @@ def handle_bedrock_nova(model_config: Dict, prompt: str, params: Dict) -> Dict:
         return {
             'status': 'error',
             'error': str(e),
-            'model': model_config['name'],
+            'model': model_config['id'],
             'provider': 'bedrock_nova'
         }
 
@@ -317,7 +317,7 @@ def handle_bedrock_sd(model_config: Dict, prompt: str, params: Dict) -> Dict:
 
         # Invoke model
         response = bedrock.invoke_model(
-            modelId='stability.sd3-5-large-v1:0',
+            modelId=model_config['id'],
             body=json.dumps(request_body)
         )
 
@@ -336,7 +336,7 @@ def handle_bedrock_sd(model_config: Dict, prompt: str, params: Dict) -> Dict:
         return {
             'status': 'success',
             'image': image_base64,
-            'model': model_config['name'],
+            'model': model_config['id'],
             'provider': 'bedrock_sd'
         }
 
@@ -345,7 +345,7 @@ def handle_bedrock_sd(model_config: Dict, prompt: str, params: Dict) -> Dict:
         return {
             'status': 'error',
             'error': str(e),
-            'model': model_config['name'],
+            'model': model_config['id'],
             'provider': 'bedrock_sd'
         }
 
@@ -370,7 +370,7 @@ def handle_stability(model_config: Dict, prompt: str, params: Dict) -> Dict:
 
         # Headers
         headers = {
-            "authorization": f"Bearer {model_config['key']}",
+            "authorization": f"Bearer {model_config.get('api_key') or None}",
             "accept": "image/*"
         }
 
@@ -399,7 +399,7 @@ def handle_stability(model_config: Dict, prompt: str, params: Dict) -> Dict:
         return {
             'status': 'success',
             'image': image_base64,
-            'model': model_config['name'],
+            'model': model_config['id'],
             'provider': 'stability'
         }
 
@@ -409,7 +409,7 @@ def handle_stability(model_config: Dict, prompt: str, params: Dict) -> Dict:
         return {
             'status': 'error',
             'error': error_msg,
-            'model': model_config['name'],
+            'model': model_config['id'],
             'provider': 'stability'
         }
 
@@ -418,7 +418,7 @@ def handle_stability(model_config: Dict, prompt: str, params: Dict) -> Dict:
         return {
             'status': 'error',
             'error': str(e),
-            'model': model_config['name'],
+            'model': model_config['id'],
             'provider': 'stability'
         }
 
@@ -436,20 +436,15 @@ def handle_bfl(model_config: Dict, prompt: str, params: Dict) -> Dict:
         Standardized response dict
     """
     try:
-        model_name_lower = model_config['name'].lower()
-
-        # Determine endpoint based on model name
-        if 'pro' in model_name_lower:
-            endpoint = "flux-pro-1.1"
-        else:
-            endpoint = "flux-dev"
+        # Use model ID directly as endpoint (e.g., "flux-pro-1.1", "flux-dev")
+        endpoint = model_config['id']
 
         print(f"Calling BFL {endpoint} with prompt: {prompt[:50]}...")
 
         # Start job
         start_url = f"https://api.bfl.ai/v1/{endpoint}"
         headers = {
-            "x-key": model_config['key'],
+            "x-key": model_config.get('api_key') or None,
             "Content-Type": "application/json"
         }
         payload = {
@@ -499,7 +494,7 @@ def handle_bfl(model_config: Dict, prompt: str, params: Dict) -> Dict:
                 return {
                     'status': 'success',
                     'image': image_base64,
-                    'model': model_config['name'],
+                    'model': model_config['id'],
                     'provider': 'bfl'
                 }
 
@@ -515,7 +510,7 @@ def handle_bfl(model_config: Dict, prompt: str, params: Dict) -> Dict:
         return {
             'status': 'error',
             'error': str(e),
-            'model': model_config['name'],
+            'model': model_config['id'],
             'provider': 'bfl'
         }
 
@@ -537,7 +532,7 @@ def handle_recraft(model_config: Dict, prompt: str, _params: Dict) -> Dict:
 
         # Recraft uses OpenAI-compatible API with custom base URL
         client = OpenAI(
-            api_key=model_config['key'],
+            api_key=model_config.get('api_key') or None,
             base_url="https://external.api.recraft.ai/v1"
         )
 
@@ -565,7 +560,7 @@ def handle_recraft(model_config: Dict, prompt: str, _params: Dict) -> Dict:
         return {
             'status': 'success',
             'image': image_base64,
-            'model': model_config['name'],
+            'model': model_config['id'],
             'provider': 'recraft'
         }
 
@@ -574,7 +569,7 @@ def handle_recraft(model_config: Dict, prompt: str, _params: Dict) -> Dict:
         return {
             'status': 'error',
             'error': str(e),
-            'model': model_config['name'],
+            'model': model_config['id'],
             'provider': 'recraft'
         }
 
@@ -594,13 +589,13 @@ def handle_generic(model_config: Dict, prompt: str, _params: Dict) -> Dict:
         Standardized response dict
     """
     try:
-        print(f"Calling generic OpenAI-compatible handler for {model_config['name']}")
+        print(f"Calling generic OpenAI-compatible handler for {model_config['id']}")
         print(f"Attempting with prompt: {prompt[:50]}...")
 
         # Try as OpenAI-compatible API
         # Use the model name as-is
         client_kwargs = {
-            'api_key': model_config['key'],
+            'api_key': model_config.get('api_key') or None,
             'timeout': 120.0
         }
 
@@ -611,7 +606,7 @@ def handle_generic(model_config: Dict, prompt: str, _params: Dict) -> Dict:
         client = OpenAI(**client_kwargs)
 
         response = client.images.generate(
-            model=model_config['name'],
+            model=model_config['id'],
             prompt=prompt,
             size="1024x1024",
             n=1
@@ -636,7 +631,7 @@ def handle_generic(model_config: Dict, prompt: str, _params: Dict) -> Dict:
         return {
             'status': 'success',
             'image': image_base64,
-            'model': model_config['name'],
+            'model': model_config['id'],
             'provider': 'generic'
         }
 
@@ -646,7 +641,7 @@ def handle_generic(model_config: Dict, prompt: str, _params: Dict) -> Dict:
         return {
             'status': 'error',
             'error': error_msg,
-            'model': model_config['name'],
+            'model': model_config['id'],
             'provider': 'generic'
         }
 

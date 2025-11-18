@@ -1,188 +1,81 @@
-# Pixel Prompt Complete - Frontend
+# Frontend - Quick Deployment
 
-Modern React frontend for the Pixel Prompt text-to-image generation platform.
-
-## Features
-
-- **Vite React** - Fast development with HMR
-- **Dynamic Model Support** - Works with variable model counts (3, 9, 20+ models)
-- **Real-time Updates** - Progressive image loading via job polling
-- **Gallery Browser** - Browse historical generations
-- **Prompt Enhancement** - LLM-powered prompt improvement
-- **Responsive Design** - Mobile and desktop optimized
-- **Accessible** - WCAG AA compliant
+React + Vite frontend for Pixel Prompt. See [root README](../README.md) for full documentation.
 
 ## Prerequisites
 
 - Node.js 18+
-- npm or yarn
-- Backend deployed and accessible
+- Backend deployed with API endpoint URL
 
-## Development Setup
-
-1. **Install dependencies:**
-   ```bash
-   npm install
-   ```
-
-2. **Configure environment variables:**
-   ```bash
-   cp .env.example .env
-   # Edit .env and set VITE_API_ENDPOINT to your API Gateway URL
-   ```
-
-3. **Start development server:**
-   ```bash
-   npm run dev
-   ```
-   Access at http://localhost:3000
-
-## Available Scripts
-
-- `npm run dev` - Start development server (port 3000)
-- `npm run build` - Build production bundle
-- `npm run preview` - Preview production build
-- `npm run lint` - Run ESLint
-
-## Environment Variables
-
-Create `.env` file with:
+## Setup
 
 ```bash
-VITE_API_ENDPOINT=https://your-api-endpoint.execute-api.us-west-2.amazonaws.com/Prod
+# Install dependencies
+npm install
 ```
 
-## Project Structure
+**Configure environment:**
 
-```
-src/
-├── api/              # API client and fetch utilities
-├── components/       # React components
-│   ├── common/       # Generic components (buttons, inputs)
-│   ├── gallery/      # Gallery-related components
-│   └── generation/   # Image generation components
-├── hooks/            # Custom React hooks
-├── utils/            # Helper functions
-├── assets/           # Images, fonts, sounds
-│   ├── images/
-│   ├── fonts/
-│   └── sounds/
-├── styles/           # CSS files
-├── App.jsx           # Root component
-└── main.jsx          # Entry point
+**Option 1: Auto-configure (Recommended)**
+```bash
+# Deploy script auto-generates .env with API endpoint
+cd ..
+./scripts/deploy.sh prod
 ```
 
-## Coding Conventions
-
-### Component Naming
-- **Files:** PascalCase matching component name (`PromptInput.jsx`)
-- **Components:** PascalCase function components
-- **Props:** camelCase with destructuring
-
-Example:
-```javascript
-function PromptInput({ value, onChange, maxLength }) {
-  // ...
-}
+**Option 2: Manual**
+```bash
+cp .env.example .env
+# Edit .env and set VITE_API_ENDPOINT to your API Gateway URL
 ```
 
-### Hook Naming
-- **Files:** camelCase with `use` prefix (`useJobPolling.js`)
-- **Hooks:** Start with `use` prefix
-
-Example:
-```javascript
-function useJobPolling(jobId, interval = 2000) {
-  // ...
-}
-```
-
-### Styling
-- **CSS Modules:** `ComponentName.module.css`
-- **Import:** `import styles from './ComponentName.module.css'`
-- **Usage:** `<div className={styles.container}>`
-
-### State Management
-- Local state: `useState` for component-specific state
-- Global state: React Context via `AppContext`
-- Derived state: `useMemo` for expensive calculations
-
-## Code Organization Guidelines
-
-1. **One component per file**
-2. **Group related components** in subdirectories
-3. **Export at bottom** of file for components
-4. **Imports order:**
-   - React imports
-   - Third-party imports
-   - Internal imports (utils, hooks)
-   - Styles
-
-5. **Props destructuring** in function signature
-6. **Early returns** for conditional rendering
-
-## Building for Production
+## Development
 
 ```bash
-npm run build
+npm run dev          # Start dev server (port 3000)
+npm run lint         # Run ESLint
 ```
 
-Output in `dist/` directory. Deploy to:
-- AWS S3 + CloudFront
-- Netlify
-- Vercel
-- Any static hosting
+## Testing
 
-## Performance Best Practices
+```bash
+npm test                    # Run all tests (145 tests)
+npm test -- --watch         # Watch mode
+npm run test:coverage       # Coverage report
+```
 
-- Use `React.memo` for expensive components
-- Lazy load heavy components with `React.lazy`
-- Optimize images (compress, WebP)
-- Code split with dynamic imports
-- Minimize bundle size (check with `npm run build`)
+## Production Build
 
-## Accessibility
+```bash
+npm run build        # Build to dist/
+npm run preview      # Preview production build
+```
 
-- Semantic HTML elements
-- ARIA labels on interactive elements
-- Keyboard navigation support
-- Focus management
-- Screen reader tested
-- Color contrast WCAG AA
+## Deploy
 
-## Browser Support
+Deploy `dist/` folder to any static hosting:
 
-- Chrome (latest)
-- Firefox (latest)
-- Safari (latest)
-- Edge (latest)
-- Mobile browsers (iOS Safari, Chrome Mobile)
+**AWS S3 + CloudFront:**
+```bash
+aws s3 sync dist/ s3://your-bucket --delete
+```
 
-## Troubleshooting
+**Netlify:**
+```bash
+netlify deploy --prod
+```
 
-### Dev server won't start
-- Check port 3000 is not in use
-- Verify Node.js version >= 18
-- Delete `node_modules` and run `npm install`
+**Vercel:**
+```bash
+vercel --prod
+```
 
-### Build fails
-- Clear cache: `rm -rf node_modules dist .vite`
-- Reinstall: `npm install`
-- Check for ESLint errors: `npm run lint`
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed hosting guides.
 
-### API calls failing
-- Verify `VITE_API_ENDPOINT` in `.env`
-- Check CORS settings on backend
-- Verify backend is deployed and accessible
-- Check browser DevTools Network tab
+---
 
-## Contributing
-
-1. Follow coding conventions
-2. Run `npm run lint` before committing
-3. Test on mobile and desktop
-4. Ensure accessibility standards
-
-## License
-
-See root LICENSE file
+**Detailed Documentation:**
+- [API_INTEGRATION.md](./API_INTEGRATION.md) - API integration guide
+- [DEPLOYMENT.md](./DEPLOYMENT.md) - Multi-platform deployment guide
+- [TESTING.md](./TESTING.md) - Testing guide
+- [Root README](../README.md) - Full project documentation

@@ -55,25 +55,28 @@ Enhance the following prompt:"""
         if not prompt:
             return None
 
+
         # Get prompt enhancement model
         prompt_model = self.model_registry.get_prompt_model()
 
         if not prompt_model:
-            print("No prompt model configured, returning original prompt")
             return prompt
 
         try:
-            print(f"Enhancing prompt with model: {prompt_model['name']}")
 
             provider = prompt_model['provider']
 
             # Branch based on provider type
             if provider == 'google_gemini':
                 # Use Google genai client for Gemini
-                client = genai.Client(api_key=prompt_model['key'])
+                api_key = prompt_model.get('api_key', '')
+                if not api_key:
+                    return prompt
+
+                client = genai.Client(api_key=api_key)
 
                 response = client.models.generate_content(
-                    model='gemini-2.0-flash-exp',
+                    model=prompt_model['id'],
                     contents=f"{self.system_prompt}\n\n{prompt}"
                 )
 
@@ -85,8 +88,12 @@ Enhance the following prompt:"""
 
             else:
                 # Use OpenAI client for OpenAI and OpenAI-compatible providers
+                api_key = prompt_model.get('api_key', '')
+                if not api_key:
+                    return prompt
+
                 client_kwargs = {
-                    'api_key': prompt_model['key'],
+                    'api_key': api_key,
                     'timeout': 30.0
                 }
 
@@ -97,32 +104,48 @@ Enhance the following prompt:"""
                 client = OpenAI(**client_kwargs)
 
                 # Determine model identifier
-                if provider == 'openai':
-                    model_id = 'gpt-4o-mini'  # Fast and cheap
-                else:
-                    # Use model name as-is for generic providers
-                    model_id = prompt_model['name']
+                # Use configured model ID from prompt_model
+                model_id = prompt_model['id']
 
-                response = client.chat.completions.create(
-                    model=model_id,
-                    messages=[
+
+                # GPT-5 and newer models have different API requirements
+                completion_params = {
+                    "model": model_id,
+                    "messages": [
                         {"role": "system", "content": self.system_prompt},
                         {"role": "user", "content": prompt}
-                    ],
-                    max_tokens=200,
-                    temperature=0.7
-                )
+                    ]
+                }
+
+                # GPT-5 specific parameters
+                if "gpt-5" in model_id:
+                    # GPT-5 uses reasoning tokens, need more tokens for reasoning + output
+                    completion_params["max_completion_tokens"] = 1000
+                    # GPT-5 only supports temperature=1 (default), so omit it
+                # GPT-4o and newer use max_completion_tokens
+                elif "gpt-4o" in model_id:
+                    completion_params["max_completion_tokens"] = 200
+                    completion_params["temperature"] = 0.7
+                # Older models use max_tokens
+                else:
+                    completion_params["max_tokens"] = 200
+                    completion_params["temperature"] = 0.7
+
+                response = client.chat.completions.create(**completion_params)
 
                 # Extract enhanced prompt
-                enhanced = response.choices[0].message.content.strip()
+                enhanced = response.choices[0].message.content
+                if enhanced:
+                    enhanced = enhanced.strip()
+                else:
+                    enhanced = ""
 
-            print(f"Original: {prompt}")
-            print(f"Enhanced: {enhanced[:100]}...")
 
             return enhanced
 
         except Exception as e:
-            print(f"Error enhancing prompt: {str(e)}")
+            import traceback
+            traceback.print_exc()
             # Return original prompt on error
             return prompt
 

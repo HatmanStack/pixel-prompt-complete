@@ -17,13 +17,8 @@ export function AppProvider({ children }) {
   // Current job state
   const [currentJob, setCurrentJob] = useState(null);
 
-  // Prompt and parameters
+  // Prompt
   const [prompt, setPrompt] = useState('');
-  const [parameters, setParameters] = useState({
-    steps: 28,
-    guidance: 5,
-    control: 1.0,
-  });
 
   // Generated images (array of 9 image objects)
   const [generatedImages, setGeneratedImages] = useState(Array(9).fill(null));
@@ -49,13 +44,6 @@ export function AppProvider({ children }) {
     setIsGenerating(false);
   };
 
-  const updateParameter = (key, value) => {
-    setParameters(prev => ({
-      ...prev,
-      [key]: value,
-    }));
-  };
-
   const updateGeneratedImage = (index, imageData) => {
     setGeneratedImages(prev => {
       const newImages = [...prev];
@@ -71,12 +59,9 @@ export function AppProvider({ children }) {
     setCurrentJob,
     updateJobStatus,
 
-    // Prompt and parameters
+    // Prompt
     prompt,
     setPrompt,
-    parameters,
-    setParameters,
-    updateParameter,
 
     // Generated images
     generatedImages,

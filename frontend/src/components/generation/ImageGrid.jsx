@@ -27,7 +27,7 @@ function ImageGrid({ images, modelNames = [] }) {
       const modelName = modelNames[index] || `Model ${index + 1}`;
 
       return {
-        image: imageData?.imageUrl || imageData?.image || null,
+        image: imageData?.image || imageData?.imageUrl || null,  // Prioritize blob URL over CloudFront URL
         model: imageData?.model || modelName,
         status: imageData?.status || 'pending',
         error: imageData?.error || null,

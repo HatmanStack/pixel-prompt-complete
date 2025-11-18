@@ -18,10 +18,7 @@ def test_generate_endpoint_accepts_correlation_id(api_endpoint, correlation_id):
     response = requests.post(
         f"{api_endpoint}/generate",
         json={
-            "prompt": "test prompt for correlation",
-            "steps": 28,
-            "guidance": 5.0,
-            "control": 1.0
+            "prompt": "test prompt for correlation"
         },
         headers={"X-Correlation-ID": correlation_id},
         timeout=30
@@ -36,7 +33,7 @@ def test_status_endpoint_accepts_correlation_id(api_endpoint, correlation_id):
     # First create a job
     create_response = requests.post(
         f"{api_endpoint}/generate",
-        json={"prompt": "test", "steps": 28},
+        json={"prompt": "test"},
         timeout=30
     )
     assert create_response.status_code == 200
@@ -89,7 +86,7 @@ def test_correlation_id_generated_if_not_provided(api_endpoint):
     """Test that backend generates correlation ID if not provided"""
     response = requests.post(
         f"{api_endpoint}/generate",
-        json={"prompt": "test without correlation id", "steps": 28},
+        json={"prompt": "test without correlation id"},
         timeout=30
         # No X-Correlation-ID header
     )

@@ -25,28 +25,39 @@ ip_include = [ip.strip() for ip in ip_include_str.split(',') if ip.strip()]
 model_count = int(os.environ.get('MODEL_COUNT', 9))
 prompt_model_index = int(os.environ.get('PROMPT_MODEL_INDEX', 1))
 
-# Load all models from environment variables
+# Load all models from environment variables (new 5-field format)
 models = []
 for i in range(1, model_count + 1):
-    name = os.environ.get(f'MODEL_{i}_NAME')
-    key = os.environ.get(f'MODEL_{i}_KEY')
-    if name and key:
-        models.append({
+    provider = os.environ.get(f'MODEL_{i}_PROVIDER', '')
+    model_id = os.environ.get(f'MODEL_{i}_ID', '')
+    api_key = os.environ.get(f'MODEL_{i}_API_KEY', '')
+    base_url = os.environ.get(f'MODEL_{i}_BASE_URL', '')
+    user_id = os.environ.get(f'MODEL_{i}_USER_ID', '')
+
+    # Only add if provider and model ID are provided
+    if provider and model_id:
+        model_config = {
             'index': i,
-            'name': name,
-            'key': key
-        })
+            'provider': provider,
+            'id': model_id,
+        }
+        # Only include optional fields if they're not empty
+        if api_key:
+            model_config['api_key'] = api_key
+        if base_url:
+            model_config['base_url'] = base_url
+        if user_id:
+            model_config['user_id'] = user_id
 
-# Validation - fail fast on misconfiguration
+        models.append(model_config)
+
+# Validation - warn but don't fail if model count doesn't match
+# (allows partial configuration for testing)
 if len(models) != model_count:
-    error_msg = f"MODEL_COUNT is {model_count} but only {len(models)} models are configured"
-    print(f"ERROR: {error_msg}")
-    raise ValueError(error_msg)
+    print(f"WARNING: MODEL_COUNT is {model_count} but only {len(models)} models are configured")
 
-if prompt_model_index < 1 or prompt_model_index > len(models):
-    error_msg = f"PROMPT_MODEL_INDEX {prompt_model_index} is out of range (1-{len(models)})"
-    print(f"ERROR: {error_msg}")
-    raise ValueError(error_msg)
+if len(models) > 0 and (prompt_model_index < 1 or prompt_model_index > len(models)):
+    print(f"WARNING: PROMPT_MODEL_INDEX {prompt_model_index} is out of range (1-{len(models)})")
 
 # Permanent negative prompt for Stable Diffusion models
 perm_negative_prompt = "ugly, blurry, low quality, distorted"

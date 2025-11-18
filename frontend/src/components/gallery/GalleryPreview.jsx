@@ -48,21 +48,20 @@ function GalleryPreview({ gallery, isSelected, onClick }) {
         {gallery.preview ? (
           <img
             src={gallery.preview}
-            alt={`Gallery preview from ${formatTimestamp(gallery.timestamp)}`}
+            alt={`Preview from ${formatTimestamp(gallery.timestamp)}`}
             className={styles.image}
             onError={handleImageError}
           />
         ) : (
           <div className={styles.placeholder}>
-            <span>No preview</span>
+            <span className={styles.iconLarge}>🖼️</span>
+            <span className={styles.imageCount}>{gallery.imageCount || 0} {gallery.imageCount === 1 ? 'image' : 'images'}</span>
           </div>
         )}
-        <div className={styles.overlay}>
-          <span className={styles.imageCount}>{gallery.imageCount || 0} images</span>
-        </div>
       </div>
       <div className={styles.info}>
         <p className={styles.timestamp}>{formatTimestamp(gallery.timestamp)}</p>
+        <p className={styles.imageCount}>{gallery.imageCount || 0} {gallery.imageCount === 1 ? 'image' : 'images'}</p>
       </div>
     </div>
   );

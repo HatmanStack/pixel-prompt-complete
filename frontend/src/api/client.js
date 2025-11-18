@@ -83,19 +83,15 @@ async function apiFetch(endpoint, options = {}, retryCount = 0) {
 }
 
 /**
- * Generate images from prompt and parameters
+ * Generate images from prompt
  * @param {string} prompt - The text prompt
- * @param {Object} params - Generation parameters (steps, guidance, etc.)
  * @returns {Promise<Object>} Response with jobId
  */
-export async function generateImages(prompt, params = {}) {
+export async function generateImages(prompt) {
   return apiFetch(API_ROUTES.GENERATE, {
     method: 'POST',
     body: JSON.stringify({
       prompt,
-      steps: params.steps ?? 28,
-      guidance: params.guidance ?? 5,
-      control: params.control ?? 1.0,
     }),
   });
 }

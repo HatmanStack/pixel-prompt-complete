@@ -6,10 +6,13 @@ Handles saving generated images to S3 with metadata and gallery management.
 
 import json
 import re
+import base64
+import io
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 import boto3
 from botocore.exceptions import ClientError
+from PIL import Image
 
 from .retry import retry_with_backoff
 
@@ -37,17 +40,15 @@ class ImageStorage:
         base64_image: str,
         model_name: str,
         prompt: str,
-        params: Dict,
         target: str
     ) -> str:
         """
-        Save generated image to S3 with metadata.
+        Save generated image to S3 with metadata and thumbnail.
 
         Args:
             base64_image: Base64-encoded image data
             model_name: Name of the AI model
             prompt: Text prompt used
-            params: Generation parameters
             target: Target timestamp (groups images together)
 
         Returns:
@@ -67,9 +68,6 @@ class ImageStorage:
             'output': base64_image,
             'model': model_name,
             'prompt': prompt,
-            'steps': params.get('steps', 25),
-            'guidance': params.get('guidance', 7),
-            'control': params.get('control', 1.0),
             'target': target,
             'timestamp': datetime.now(timezone.utc).isoformat(),
             'NSFW': False  # Will be updated by content filter if needed
@@ -83,6 +81,32 @@ class ImageStorage:
         )
 
         print(f"Saved image to S3: {key}")
+
+        # Generate and save thumbnail
+        try:
+            thumbnail_base64 = self._generate_thumbnail(base64_image)
+            thumbnail_key = f"group-images/{target}/{normalized_model}-{timestamp}-thumb.json"
+
+            thumbnail_metadata = {
+                'output': thumbnail_base64,
+                'model': model_name,
+                'prompt': prompt,
+                'target': target,
+                'timestamp': datetime.now(timezone.utc).isoformat(),
+                'NSFW': False,
+                'thumbnail': True
+            }
+
+            self._put_object_with_retry(
+                key=thumbnail_key,
+                body=json.dumps(thumbnail_metadata),
+                content_type='application/json'
+            )
+
+            print(f"Saved thumbnail to S3: {thumbnail_key}")
+        except Exception as e:
+            print(f"Warning: Failed to generate thumbnail: {e}")
+            # Continue even if thumbnail fails - not critical
 
         return key
 
@@ -225,6 +249,50 @@ class ImageStorage:
             CloudFront URL
         """
         return f"https://{self.cloudfront_domain}/{s3_key}"
+
+    def _generate_thumbnail(self, base64_image: str, size: int = 200, quality: int = 75) -> str:
+        """
+        Generate a thumbnail from base64 image data.
+
+        Args:
+            base64_image: Base64-encoded image data
+            size: Maximum dimension for thumbnail (default 200px)
+            quality: JPEG quality for compression (default 75)
+
+        Returns:
+            Base64-encoded thumbnail image
+
+        Raises:
+            Exception: If thumbnail generation fails
+        """
+        # Decode base64 to bytes
+        image_bytes = base64.b64decode(base64_image)
+
+        # Open image with Pillow
+        img = Image.open(io.BytesIO(image_bytes))
+
+        # Convert to RGB if necessary (for PNG with transparency)
+        if img.mode in ('RGBA', 'LA', 'P'):
+            background = Image.new('RGB', img.size, (255, 255, 255))
+            if img.mode == 'P':
+                img = img.convert('RGBA')
+            background.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
+            img = background
+
+        # Calculate thumbnail size maintaining aspect ratio
+        img.thumbnail((size, size), Image.Resampling.LANCZOS)
+
+        # Save to bytes buffer as JPEG with compression
+        buffer = io.BytesIO()
+        img.save(buffer, format='JPEG', quality=quality, optimize=True)
+        buffer.seek(0)
+
+        # Encode to base64
+        thumbnail_base64 = base64.b64encode(buffer.read()).decode('utf-8')
+
+        print(f"Generated thumbnail: {len(base64_image)} bytes -> {len(thumbnail_base64)} bytes")
+
+        return thumbnail_base64
 
     def _normalize_model_name(self, model_name: str) -> str:
         """

@@ -84,6 +84,8 @@ function useImageLoader(jobStatus, cloudFrontDomain = '') {
             throw new Error('No image data in response');
           }
         }
+        else {
+        }
 
         // Check again if job changed before updating state
         if (currentJobIdRef.current !== currentJobId) {
@@ -107,7 +109,7 @@ function useImageLoader(jobStatus, cloudFrontDomain = '') {
         // Mark as fetched
         fetchedRef.current.add(fetchKey);
       } catch (error) {
-        console.error(`Error loading image ${index}:`, error);
+        console.error(`[IMAGE_LOADER] Error loading image ${index}:`, error);
 
         // Check if job changed during error handling
         if (currentJobIdRef.current !== currentJobId) {

@@ -3,8 +3,9 @@
  * Manages gallery state and data fetching
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { listGalleries, getGallery } from '../api/client';
+import { base64ToBlobUrl } from '../utils/imageHelpers';
 
 /**
  * Custom hook for gallery management
@@ -17,6 +18,10 @@ function useGallery() {
   const [error, setError] = useState(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
 
+  // Track blob URLs for cleanup to prevent memory leaks
+  const previewBlobUrlsRef = useRef([]);
+  const imageBlobUrlsRef = useRef([]);
+
   /**
    * Fetch list of all galleries
    */
@@ -26,8 +31,36 @@ function useGallery() {
 
     try {
       const response = await listGalleries();
-      setGalleries(response.galleries || []);
-      console.log(`Fetched ${response.galleries?.length || 0} galleries`);
+
+      // Revoke old preview blob URLs to prevent memory leaks
+      previewBlobUrlsRef.current.forEach(url => {
+        if (url && url.startsWith('blob:')) {
+          URL.revokeObjectURL(url);
+        }
+      });
+      previewBlobUrlsRef.current = [];
+
+      // Convert preview base64 data to blob URLs
+      const galleriesWithPreviews = (response.galleries || []).map(gallery => {
+        if (gallery.previewData) {
+          try {
+            const previewBlob = base64ToBlobUrl(gallery.previewData);
+            if (previewBlob) {
+              previewBlobUrlsRef.current.push(previewBlob);
+              return {
+                ...gallery,
+                preview: previewBlob,  // Replace URL with blob URL
+              };
+            }
+          } catch (err) {
+            console.warn(`Failed to convert preview for gallery ${gallery.id}:`, err);
+          }
+        }
+        return gallery;
+      });
+
+      setGalleries(galleriesWithPreviews);
+      console.log(`Fetched ${galleriesWithPreviews.length} galleries`);
     } catch (err) {
       console.error('Error fetching galleries:', err);
       setError(err.message || 'Failed to load galleries');
@@ -51,10 +84,39 @@ function useGallery() {
     setError(null);
 
     try {
+      // Revoke old image blob URLs to prevent memory leaks
+      imageBlobUrlsRef.current.forEach(url => {
+        if (url && url.startsWith('blob:')) {
+          URL.revokeObjectURL(url);
+        }
+      });
+      imageBlobUrlsRef.current = [];
+
       const response = await getGallery(galleryId);
+
+      // Convert base64 images to blob URLs
+      const imagesWithBlobs = (response.images || []).map(img => {
+        if (img.output) {
+          try {
+            // Convert base64 to blob URL
+            const blobUrl = base64ToBlobUrl(img.output);
+            if (blobUrl) {
+              imageBlobUrlsRef.current.push(blobUrl);
+              return {
+                ...img,
+                blobUrl,  // Add blob URL for display
+              };
+            }
+          } catch (err) {
+            console.warn(`Failed to convert image blob for ${img.model}:`, err);
+          }
+        }
+        return img;
+      });
+
       setSelectedGallery({
         id: response.galleryId,
-        images: response.images || [],
+        images: imagesWithBlobs,
         total: response.total || 0,
       });
       console.log(`Loaded gallery ${galleryId} with ${response.images?.length || 0} images`);
@@ -96,6 +158,25 @@ function useGallery() {
 
     return () => clearInterval(interval);
   }, [autoRefresh, fetchGalleries]);
+
+  // Cleanup: Revoke all blob URLs on unmount to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      // Revoke preview blob URLs
+      previewBlobUrlsRef.current.forEach(url => {
+        if (url && url.startsWith('blob:')) {
+          URL.revokeObjectURL(url);
+        }
+      });
+
+      // Revoke image blob URLs
+      imageBlobUrlsRef.current.forEach(url => {
+        if (url && url.startsWith('blob:')) {
+          URL.revokeObjectURL(url);
+        }
+      });
+    };
+  }, []);
 
   return {
     galleries,

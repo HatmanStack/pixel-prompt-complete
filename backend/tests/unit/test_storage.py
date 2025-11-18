@@ -22,16 +22,12 @@ class TestImageStorage:
         image_data = SAMPLE_IMAGE_BASE64
         metadata = {
             'prompt': 'test prompt',
-            'model': 'Test Model',
-            'steps': 28,
-            'guidance': 5.0
-        }
+            'model': 'Test Model'}
 
         key = storage.save_image(
             base64_image=image_data,
             model_name='TestModel',
             prompt=metadata['prompt'],
-            params={'steps': metadata['steps'], 'guidance': metadata['guidance']},
             target='2025-11-16-10-30-00'
         )
 
@@ -112,7 +108,6 @@ class TestImageStorage:
         metadata = {
             'prompt': 'test',
             'model': 'Test Model',
-            'steps': 28,
             'output': SAMPLE_IMAGE_BASE64
         }
 

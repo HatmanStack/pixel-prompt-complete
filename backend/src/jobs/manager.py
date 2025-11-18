@@ -28,13 +28,12 @@ class JobManager:
         self.s3 = s3_client
         self.bucket = bucket_name
 
-    def create_job(self, prompt: str, params: Dict, models: List[Dict]) -> str:
+    def create_job(self, prompt: str, models: List[Dict]) -> str:
         """
         Create a new image generation job.
 
         Args:
             prompt: Text prompt for image generation
-            params: Generation parameters (steps, guidance, etc.)
             models: List of model configurations
 
         Returns:
@@ -54,10 +53,9 @@ class JobManager:
             'totalModels': len(models),
             'completedModels': 0,
             'prompt': prompt,
-            'parameters': params,
             'results': [
                 {
-                    'model': model['name'],
+                    'model': model['id'],
                     'status': 'pending',
                     'index': model['index']
                 }
