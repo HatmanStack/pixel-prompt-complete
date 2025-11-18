@@ -64,14 +64,6 @@ function GenerationPanel() {
           completedAt: result.completedAt,
         }));
 
-        console.log('[GENERATION_PANEL] Updating generatedImages:', updatedImages.map((img, i) => ({
-          index: i,
-          model: img.model,
-          status: img.status,
-          hasImage: !!img.image,
-          imagePreview: img.image ? img.image.substring(0, 50) : null
-        })));
-
         setGeneratedImages(updatedImages);
       }
 
@@ -203,7 +195,7 @@ function GenerationPanel() {
 
     // Convert gallery images to generatedImages format
     const galleryImages = gallery.images.map((img, index) => ({
-      model: img.model,
+      model: img.model || `Model ${index + 1}`,
       status: 'completed',
       imageUrl: img.url,
       image: img.blobUrl || img.url,  // Use blob URL if available
@@ -212,7 +204,7 @@ function GenerationPanel() {
     }));
 
     setGeneratedImages(galleryImages);
-    setModelNames(gallery.images.map(img => img.model || `Model ${index + 1}`));
+    setModelNames(galleryImages.map(img => img.model));
   };
 
   return (

@@ -196,5 +196,5 @@ class JobExecutor:
         """
         # For now, just call the handler directly
         # The individual handlers have their own timeouts for API calls
-        # Handlers receive model config and prompt only
+        # Handlers receive model config, prompt, and empty params dict
         return handler(model, prompt, {})

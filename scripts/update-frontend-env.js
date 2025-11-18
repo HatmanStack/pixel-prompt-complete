@@ -5,20 +5,34 @@
  * Usage: node scripts/update-frontend-env.js [stack-name]
  */
 
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
 // Get stack name from command line or default to prod
 const stackName = process.argv[2] || 'pixel-prompt-prod';
 
+// Validate stack name to prevent injection (alphanumeric, hyphens, underscores only)
+if (!/^[a-zA-Z0-9_-]+$/.test(stackName)) {
+  console.error('❌ Error: Invalid stack name. Only alphanumeric characters, hyphens, and underscores allowed.');
+  process.exit(1);
+}
+
 console.log(`\n🔍 Fetching API endpoint from stack: ${stackName}...`);
 
 try {
   // Get API endpoint from CloudFormation stack outputs
-  const command = `aws cloudformation describe-stacks --stack-name ${stackName} --query 'Stacks[0].Outputs[?OutputKey==\`ApiEndpoint\`].OutputValue' --output text`;
-
-  const apiEndpoint = execSync(command, { encoding: 'utf-8' }).trim();
+  // Use execFileSync to avoid shell injection - args passed directly to AWS CLI
+  const apiEndpoint = execFileSync('aws', [
+    'cloudformation',
+    'describe-stacks',
+    '--stack-name',
+    stackName,
+    '--query',
+    'Stacks[0].Outputs[?OutputKey==`ApiEndpoint`].OutputValue',
+    '--output',
+    'text'
+  ], { encoding: 'utf-8' }).trim();
 
   if (!apiEndpoint) {
     console.error('❌ Error: Could not find ApiEndpoint in stack outputs');

@@ -228,6 +228,7 @@ Parameters:
 
   Model1ApiKey:
     Type: String
+    NoEcho: true
     Default: ""
     Description: API key for model 1 (leave blank if not needed)
 
@@ -264,6 +265,7 @@ Parameters:
 
   Model2ApiKey:
     Type: String
+    NoEcho: true
     Default: ""
     Description: API key for model 2 (leave blank if not needed)
 
@@ -300,6 +302,7 @@ Parameters:
 
   Model3ApiKey:
     Type: String
+    NoEcho: true
     Default: ""
     Description: API key for model 3 (leave blank if not needed)
 
@@ -336,6 +339,7 @@ Parameters:
 
   Model4ApiKey:
     Type: String
+    NoEcho: true
     Default: ""
     Description: API key for model 4 (leave blank if not needed)
 
@@ -372,6 +376,7 @@ Parameters:
 
   Model5ApiKey:
     Type: String
+    NoEcho: true
     Default: ""
     Description: API key for model 5 (leave blank if not needed)
 
@@ -408,6 +413,7 @@ Parameters:
 
   Model6ApiKey:
     Type: String
+    NoEcho: true
     Default: ""
     Description: API key for model 6 (leave blank if not needed)
 
@@ -444,6 +450,7 @@ Parameters:
 
   Model7ApiKey:
     Type: String
+    NoEcho: true
     Default: ""
     Description: API key for model 7 (leave blank if not needed)
 
@@ -480,6 +487,7 @@ Parameters:
 
   Model8ApiKey:
     Type: String
+    NoEcho: true
     Default: ""
     Description: API key for model 8 (leave blank if not needed)
 
@@ -516,6 +524,7 @@ Parameters:
 
   Model9ApiKey:
     Type: String
+    NoEcho: true
     Default: ""
     Description: API key for model 9 (leave blank if not needed)
 
@@ -552,6 +561,7 @@ Parameters:
 
   Model10ApiKey:
     Type: String
+    NoEcho: true
     Default: ""
     Description: API key for model 10 (leave blank if not needed)
 
@@ -588,6 +598,7 @@ Parameters:
 
   Model11ApiKey:
     Type: String
+    NoEcho: true
     Default: ""
     Description: API key for model 11 (leave blank if not needed)
 
@@ -624,6 +635,7 @@ Parameters:
 
   Model12ApiKey:
     Type: String
+    NoEcho: true
     Default: ""
     Description: API key for model 12 (leave blank if not needed)
 
@@ -660,6 +672,7 @@ Parameters:
 
   Model13ApiKey:
     Type: String
+    NoEcho: true
     Default: ""
     Description: API key for model 13 (leave blank if not needed)
 
@@ -696,6 +709,7 @@ Parameters:
 
   Model14ApiKey:
     Type: String
+    NoEcho: true
     Default: ""
     Description: API key for model 14 (leave blank if not needed)
 
@@ -732,6 +746,7 @@ Parameters:
 
   Model15ApiKey:
     Type: String
+    NoEcho: true
     Default: ""
     Description: API key for model 15 (leave blank if not needed)
 
@@ -768,6 +783,7 @@ Parameters:
 
   Model16ApiKey:
     Type: String
+    NoEcho: true
     Default: ""
     Description: API key for model 16 (leave blank if not needed)
 
@@ -804,6 +820,7 @@ Parameters:
 
   Model17ApiKey:
     Type: String
+    NoEcho: true
     Default: ""
     Description: API key for model 17 (leave blank if not needed)
 
@@ -840,6 +857,7 @@ Parameters:
 
   Model18ApiKey:
     Type: String
+    NoEcho: true
     Default: ""
     Description: API key for model 18 (leave blank if not needed)
 
@@ -876,6 +894,7 @@ Parameters:
 
   Model19ApiKey:
     Type: String
+    NoEcho: true
     Default: ""
     Description: API key for model 19 (leave blank if not needed)
 
@@ -912,6 +931,7 @@ Parameters:
 
   Model20ApiKey:
     Type: String
+    NoEcho: true
     Default: ""
     Description: API key for model 20 (leave blank if not needed)
 

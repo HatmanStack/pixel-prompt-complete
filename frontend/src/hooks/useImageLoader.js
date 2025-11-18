@@ -65,24 +65,19 @@ function useImageLoader(jobStatus, cloudFrontDomain = '') {
 
         // If result has base64 output, convert it
         if (result.output) {
-          console.log(`[IMAGE_LOADER] Converting base64 for index ${index}, length: ${result.output.length}`);
           imageUrl = base64ToBlobUrl(result.output);
           blobUrlsRef.current.push(imageUrl);
-          console.log(`[IMAGE_LOADER] Created blob URL for index ${index}: ${imageUrl}`);
         }
         // If result has imageUrl (S3 key), fetch from CloudFront
         else if (result.imageUrl) {
-          console.log(`[IMAGE_LOADER] Fetching from ${result.imageUrl} for index ${index}`);
           const imageData = await fetchImageFromS3(result.imageUrl, cloudFrontDomain);
 
           // Check if job changed during async fetch
           if (currentJobIdRef.current !== currentJobId) {
-            console.log(`[IMAGE_LOADER] Job changed during fetch for index ${index}, skipping`);
             return;
           }
 
           if (imageData.output) {
-            console.log(`[IMAGE_LOADER] Fetched image data for index ${index}, length: ${imageData.output.length}`);
             imageUrl = base64ToBlobUrl(imageData.output);
             blobUrlsRef.current.push(imageUrl);
           } else {
@@ -90,7 +85,6 @@ function useImageLoader(jobStatus, cloudFrontDomain = '') {
           }
         }
         else {
-          console.log(`[IMAGE_LOADER] No output or imageUrl for index ${index}`);
         }
 
         // Check again if job changed before updating state
@@ -102,7 +96,6 @@ function useImageLoader(jobStatus, cloudFrontDomain = '') {
         setImages(prev => {
           const newImages = [...prev];
           newImages[index] = imageUrl;
-          console.log(`[IMAGE_LOADER] Set image at index ${index}:`, imageUrl);
           return newImages;
         });
 

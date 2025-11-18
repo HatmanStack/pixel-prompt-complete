@@ -134,7 +134,7 @@ class TestImageGeneration:
         response = requests.post(
             f"{API_ENDPOINT}/generate",
             json={
-                'prompt': 'test image'
+                'prompt': 'test image',
                 'ip': '127.0.0.1'
             },
             headers={'Content-Type': 'application/json'},
@@ -153,7 +153,7 @@ class TestImageGeneration:
         create_response = requests.post(
             f"{API_ENDPOINT}/generate",
             json={
-                'prompt': 'test status check'
+                'prompt': 'test status check',
                 'ip': '127.0.0.1'
             },
             headers={'Content-Type': 'application/json'},

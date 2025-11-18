@@ -53,43 +53,28 @@ Enhance the following prompt:"""
             Enhanced prompt string or None if enhancement fails
         """
         if not prompt:
-            print("[ENHANCE] Empty prompt provided")
             return None
 
-        print(f"[ENHANCE] Starting enhancement for prompt: '{prompt[:50]}...'")
 
         # Get prompt enhancement model
         prompt_model = self.model_registry.get_prompt_model()
 
         if not prompt_model:
-            print("[ENHANCE] ERROR: No prompt model configured!")
-            print(f"[ENHANCE] PROMPT_MODEL_INDEX: {self.model_registry.prompt_model_index}")
-            print(f"[ENHANCE] Available models: {len(self.model_registry.get_all_models())}")
-            print("[ENHANCE] Returning original prompt (no enhancement)")
             return prompt
 
         try:
-            print(f"[ENHANCE] Found prompt model: {prompt_model['id']}")
-            print(f"[ENHANCE] Provider: {prompt_model['provider']}")
-            print(f"[ENHANCE] Has API key: {bool(prompt_model.get('api_key'))}")
-            print(f"[ENHANCE] Has base URL: {bool(prompt_model.get('base_url'))}")
 
             provider = prompt_model['provider']
 
             # Branch based on provider type
             if provider == 'google_gemini':
-                print("[ENHANCE] Using Google Gemini for enhancement")
                 # Use Google genai client for Gemini
                 api_key = prompt_model.get('api_key', '')
                 if not api_key:
-                    print("[ENHANCE] ERROR: No API key configured for Google Gemini")
-                    print("[ENHANCE] Returning original prompt")
                     return prompt
 
-                print(f"[ENHANCE] Initializing Google Gemini client with model: {prompt_model['id']}")
                 client = genai.Client(api_key=api_key)
 
-                print("[ENHANCE] Calling Gemini API...")
                 response = client.models.generate_content(
                     model=prompt_model['id'],
                     contents=f"{self.system_prompt}\n\n{prompt}"
@@ -97,19 +82,14 @@ Enhance the following prompt:"""
 
                 # Extract text from Gemini response
                 if not response.candidates or len(response.candidates) == 0:
-                    print("[ENHANCE] ERROR: Gemini returned empty candidates")
                     raise ValueError("Gemini returned empty candidates")
 
                 enhanced = response.candidates[0].content.parts[0].text.strip()
-                print(f"[ENHANCE] Gemini response received: {len(enhanced)} characters")
 
             else:
                 # Use OpenAI client for OpenAI and OpenAI-compatible providers
-                print(f"[ENHANCE] Using OpenAI-compatible client for provider: {provider}")
                 api_key = prompt_model.get('api_key', '')
                 if not api_key:
-                    print(f"[ENHANCE] ERROR: No API key configured for provider: {provider}")
-                    print("[ENHANCE] Returning original prompt")
                     return prompt
 
                 client_kwargs = {
@@ -120,17 +100,13 @@ Enhance the following prompt:"""
                 # Support custom base_url for OpenAI-compatible providers
                 if 'base_url' in prompt_model:
                     client_kwargs['base_url'] = prompt_model['base_url']
-                    print(f"[ENHANCE] Using custom base URL: {prompt_model['base_url']}")
 
-                print(f"[ENHANCE] Initializing OpenAI client (timeout: 30s)")
                 client = OpenAI(**client_kwargs)
 
                 # Determine model identifier
                 # Use configured model ID from prompt_model
                 model_id = prompt_model['id']
-                print(f"[ENHANCE] Using configured model ID: {model_id}")
 
-                print("[ENHANCE] Calling OpenAI-compatible API...")
 
                 # GPT-5 and newer models have different API requirements
                 completion_params = {
@@ -158,28 +134,18 @@ Enhance the following prompt:"""
                 response = client.chat.completions.create(**completion_params)
 
                 # Extract enhanced prompt
-                print(f"[ENHANCE] Full response: {response}")
                 enhanced = response.choices[0].message.content
                 if enhanced:
                     enhanced = enhanced.strip()
                 else:
                     enhanced = ""
-                    print(f"[ENHANCE] WARNING: GPT response content is None/empty")
-                print(f"[ENHANCE] OpenAI response received: {len(enhanced)} characters")
 
-            print(f"[ENHANCE] SUCCESS!")
-            print(f"[ENHANCE] Original: {prompt}")
-            print(f"[ENHANCE] Enhanced: {enhanced[:100]}...")
 
             return enhanced
 
         except Exception as e:
-            print(f"[ENHANCE] EXCEPTION occurred: {type(e).__name__}")
-            print(f"[ENHANCE] Error message: {str(e)}")
             import traceback
-            print(f"[ENHANCE] Traceback:")
             traceback.print_exc()
-            print("[ENHANCE] Returning original prompt due to error")
             # Return original prompt on error
             return prompt
 

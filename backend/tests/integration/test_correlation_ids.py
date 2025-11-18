@@ -18,7 +18,7 @@ def test_generate_endpoint_accepts_correlation_id(api_endpoint, correlation_id):
     response = requests.post(
         f"{api_endpoint}/generate",
         json={
-            "prompt": "test prompt for correlation""control": 1.0
+            "prompt": "test prompt for correlation"
         },
         headers={"X-Correlation-ID": correlation_id},
         timeout=30
