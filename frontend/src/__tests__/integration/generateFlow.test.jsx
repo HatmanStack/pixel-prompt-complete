@@ -55,27 +55,15 @@ describe('Generate Images Flow - Integration', () => {
 
     expect(promptInput).toHaveValue('a beautiful sunset');
 
-    // Step 2: User adjusts parameters
-    const stepsSlider = screen.getByLabelText(/sampling steps/i);
-    const guidanceSlider = screen.getByLabelText(/guidance scale/i);
-
-    // For range inputs, use fireEvent to change the value
-    fireEvent.change(stepsSlider, { target: { value: '30' } });
-
-    // Step 3: User clicks generate button
+    // Step 2: User clicks generate button
     const generateButton = screen.getByRole('button', { name: /generate images/i });
     expect(generateButton).not.toBeDisabled();
 
     await user.click(generateButton);
 
-    // Step 4: Verify API call made
+    // Step 3: Verify API call made
     await waitFor(() => {
-      expect(apiClient.generateImages).toHaveBeenCalledWith(
-        'a beautiful sunset',
-        expect.objectContaining({
-          steps: 30
-        })
-      );
+      expect(apiClient.generateImages).toHaveBeenCalledWith('a beautiful sunset');
     });
 
     // Step 5: Verify loading state appears
@@ -184,10 +172,7 @@ describe('Generate Images Flow - Integration', () => {
     await user.click(generateButton);
 
     await waitFor(() => {
-      expect(apiClient.generateImages).toHaveBeenCalledWith(
-        'first prompt',
-        expect.any(Object)
-      );
+      expect(apiClient.generateImages).toHaveBeenCalledWith('first prompt');
     });
 
     // Wait for completion
@@ -201,10 +186,7 @@ describe('Generate Images Flow - Integration', () => {
     await user.click(generateButton);
 
     await waitFor(() => {
-      expect(apiClient.generateImages).toHaveBeenCalledWith(
-        'second prompt',
-        expect.any(Object)
-      );
+      expect(apiClient.generateImages).toHaveBeenCalledWith('second prompt');
     });
 
     expect(apiClient.generateImages).toHaveBeenCalledTimes(2);

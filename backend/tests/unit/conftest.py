@@ -40,8 +40,5 @@ def sample_prompt():
 @pytest.fixture
 def sample_params():
     """Sample generation parameters"""
-    return {
-        'steps': 28,
-        'guidance': 5.0,
-        'control': 1.0
+    return {'control': 1.0
     }

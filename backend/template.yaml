@@ -229,7 +229,6 @@ Parameters:
   Model1ApiKey:
     Type: String
     Default: ""
-    NoEcho: true
     Description: API key for model 1 (leave blank if not needed)
 
   Model1BaseUrl:
@@ -266,7 +265,6 @@ Parameters:
   Model2ApiKey:
     Type: String
     Default: ""
-    NoEcho: true
     Description: API key for model 2 (leave blank if not needed)
 
   Model2BaseUrl:
@@ -303,7 +301,6 @@ Parameters:
   Model3ApiKey:
     Type: String
     Default: ""
-    NoEcho: true
     Description: API key for model 3 (leave blank if not needed)
 
   Model3BaseUrl:
@@ -340,7 +337,6 @@ Parameters:
   Model4ApiKey:
     Type: String
     Default: ""
-    NoEcho: true
     Description: API key for model 4 (leave blank if not needed)
 
   Model4BaseUrl:
@@ -377,7 +373,6 @@ Parameters:
   Model5ApiKey:
     Type: String
     Default: ""
-    NoEcho: true
     Description: API key for model 5 (leave blank if not needed)
 
   Model5BaseUrl:
@@ -414,7 +409,6 @@ Parameters:
   Model6ApiKey:
     Type: String
     Default: ""
-    NoEcho: true
     Description: API key for model 6 (leave blank if not needed)
 
   Model6BaseUrl:
@@ -451,7 +445,6 @@ Parameters:
   Model7ApiKey:
     Type: String
     Default: ""
-    NoEcho: true
     Description: API key for model 7 (leave blank if not needed)
 
   Model7BaseUrl:
@@ -488,7 +481,6 @@ Parameters:
   Model8ApiKey:
     Type: String
     Default: ""
-    NoEcho: true
     Description: API key for model 8 (leave blank if not needed)
 
   Model8BaseUrl:
@@ -525,7 +517,6 @@ Parameters:
   Model9ApiKey:
     Type: String
     Default: ""
-    NoEcho: true
     Description: API key for model 9 (leave blank if not needed)
 
   Model9BaseUrl:
@@ -562,7 +553,6 @@ Parameters:
   Model10ApiKey:
     Type: String
     Default: ""
-    NoEcho: true
     Description: API key for model 10 (leave blank if not needed)
 
   Model10BaseUrl:
@@ -599,7 +589,6 @@ Parameters:
   Model11ApiKey:
     Type: String
     Default: ""
-    NoEcho: true
     Description: API key for model 11 (leave blank if not needed)
 
   Model11BaseUrl:
@@ -636,7 +625,6 @@ Parameters:
   Model12ApiKey:
     Type: String
     Default: ""
-    NoEcho: true
     Description: API key for model 12 (leave blank if not needed)
 
   Model12BaseUrl:
@@ -673,7 +661,6 @@ Parameters:
   Model13ApiKey:
     Type: String
     Default: ""
-    NoEcho: true
     Description: API key for model 13 (leave blank if not needed)
 
   Model13BaseUrl:
@@ -710,7 +697,6 @@ Parameters:
   Model14ApiKey:
     Type: String
     Default: ""
-    NoEcho: true
     Description: API key for model 14 (leave blank if not needed)
 
   Model14BaseUrl:
@@ -747,7 +733,6 @@ Parameters:
   Model15ApiKey:
     Type: String
     Default: ""
-    NoEcho: true
     Description: API key for model 15 (leave blank if not needed)
 
   Model15BaseUrl:
@@ -784,7 +769,6 @@ Parameters:
   Model16ApiKey:
     Type: String
     Default: ""
-    NoEcho: true
     Description: API key for model 16 (leave blank if not needed)
 
   Model16BaseUrl:
@@ -821,7 +805,6 @@ Parameters:
   Model17ApiKey:
     Type: String
     Default: ""
-    NoEcho: true
     Description: API key for model 17 (leave blank if not needed)
 
   Model17BaseUrl:
@@ -858,7 +841,6 @@ Parameters:
   Model18ApiKey:
     Type: String
     Default: ""
-    NoEcho: true
     Description: API key for model 18 (leave blank if not needed)
 
   Model18BaseUrl:
@@ -895,7 +877,6 @@ Parameters:
   Model19ApiKey:
     Type: String
     Default: ""
-    NoEcho: true
     Description: API key for model 19 (leave blank if not needed)
 
   Model19BaseUrl:
@@ -932,7 +913,6 @@ Parameters:
   Model20ApiKey:
     Type: String
     Default: ""
-    NoEcho: true
     Description: API key for model 20 (leave blank if not needed)
 
   Model20BaseUrl:

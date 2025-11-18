@@ -111,13 +111,13 @@ pytest tests/integration/ -v
 ```
 backend/src/
 ├── lambda_function.py       # Main handler - routes /generate, /status, /enhance
-├── config.py                # Env vars → MODEL_COUNT, MODEL_1_NAME, MODEL_1_KEY, etc.
+├── config.py                # Env vars → MODEL_COUNT, MODEL_{N}_PROVIDER/ID/API_KEY/BASE_URL/USER_ID
 ├── models/
-│   ├── registry.py          # ModelRegistry: 1-based indexing, provider detection
-│   └── handlers.py          # Provider handlers: OpenAI, Google, Bedrock, BFL, Recraft
+│   ├── registry.py          # ModelRegistry: 1-based indexing, explicit provider config
+│   └── handlers.py          # Provider handlers: OpenAI, Google, Bedrock, BFL, Recraft, get_handler() factory
 ├── jobs/
 │   ├── manager.py           # JobManager: S3-based job state (status.json)
-│   └── executor.py          # JobExecutor: Parallel threading, error isolation
+│   └── executor.py          # JobExecutor: Parallel threading (ThreadPoolExecutor), error isolation
 ├── api/
 │   ├── enhance.py           # PromptEnhancer: LLM prompt improvement
 │   └── log.py               # Client-side logging endpoint
@@ -133,27 +133,40 @@ backend/src/
 
 **Critical**: The backend uses **1-based indexing** for models (MODEL_1, MODEL_2...) but Python internals use 0-based arrays.
 
-Models configured via CloudFormation parameters:
+Models configured via CloudFormation parameters using **5-field format**:
 - `ModelCount`: 1-20 (number of active models)
-- `Model{1-20}Name`: Display name (e.g., "DALL-E 3", "Gemini 2.0")
-- `Model{1-20}Key`: API key (NoEcho: true)
 - `PromptModelIndex`: Which model handles /enhance (1-based)
 
-**Provider Detection** (`models/registry.py`): Model names are pattern-matched to determine provider:
-- "DALL-E" / "dalle" → OpenAI handler
-- "Gemini" / "gemini" → Google Gemini handler
-- "Imagen" / "imagen" → Google Imagen handler
-- "Nova Canvas" → AWS Bedrock Nova
-- "Stable Diffusion 3.5" → AWS Bedrock SD3.5
-- "Black Forest" / "Flux" → BFL API
-- "Recraft" → Recraft API
-- "Stability" → Stability AI API
+**For each model (1-20):**
+- `Model{N}Provider`: **Required** - Explicit provider type (e.g., "openai", "google_gemini", "bedrock_nova", "bfl", "recraft", "stability", "generic")
+- `Model{N}Id`: **Required** - Model identifier for API calls (e.g., "dall-e-3", "gemini-2.0-flash-exp", "flux-pro-1.1")
+- `Model{N}ApiKey`: *Optional* - API key (NoEcho: true, not needed for Bedrock)
+- `Model{N}BaseUrl`: *Optional* - Custom API endpoint (for OpenAI-compatible APIs)
+- `Model{N}UserId`: *Optional* - User identifier (if provider requires it)
+
+**Important**: Empty optional fields are NOT sent to providers - only non-empty values are included in API calls (`config.py:45-50`).
+
+**Provider Types** (explicit specification, no pattern matching):
+- `openai` - OpenAI DALL-E models
+- `google_gemini` - Google Gemini image generation
+- `google_imagen` - Google Imagen models
+- `bedrock_nova` - AWS Bedrock Nova Canvas (uses Lambda IAM role, no API key needed)
+- `bedrock_sd` - AWS Bedrock Stable Diffusion 3.5 (uses Lambda IAM role)
+- `bfl` - Black Forest Labs (Flux models)
+- `recraft` - Recraft v3
+- `stability` - Stability AI models
+- `generic` - OpenAI-compatible APIs (requires BaseUrl)
 
 ### Job Lifecycle
 
 1. **POST /generate** → Creates job with UUID, stores `status.json` in S3
-2. **JobExecutor.execute_job()** → Spawns thread per model
-3. Each thread: Call provider → Upload image → Update job status atomically
+2. **JobExecutor.execute_job()** → Spawns thread per model (ThreadPoolExecutor, max 10 workers)
+3. Each thread (`_execute_model()`):
+   - Gets handler function: `handler = get_handler(model['provider'])`
+   - Calls handler: `result = handler(model_config, prompt, params)` (with 120s timeout)
+   - If success: Upload image to S3, update job status
+   - If error: Log error, update job status with error message
+   - Error isolation: One model failure doesn't affect others
 4. **GET /status/{jobId}** → Returns aggregated results from `status.json`
 
 **Key S3 Structure**:
@@ -218,14 +231,22 @@ Whitelisted IPs (comma-separated in `IPWhitelist` parameter) bypass all limits.
 
 ### Backend Environment Variables (set via SAM parameters)
 
-Required for each model:
-- `MODEL_1_NAME` through `MODEL_20_NAME`
-- `MODEL_1_KEY` through `MODEL_20_KEY`
+**5-field format for each model (1-20):**
+- `MODEL_{N}_PROVIDER` - **Required**: Provider type (openai, google_gemini, bedrock_nova, etc.)
+- `MODEL_{N}_ID` - **Required**: Model identifier (dall-e-3, flux-pro-1.1, etc.)
+- `MODEL_{N}_API_KEY` - *Optional*: API key (leave empty for Bedrock models)
+- `MODEL_{N}_BASE_URL` - *Optional*: Custom API endpoint
+- `MODEL_{N}_USER_ID` - *Optional*: User identifier
 
-AWS Bedrock models (Nova Canvas, SD3.5):
-- Use AWS credentials from Lambda execution role
-- Set `MODEL_X_KEY` to `"N/A"` for Bedrock models
+**AWS Bedrock models** (Nova Canvas, SD3.5):
+- Use AWS credentials from Lambda execution role (no API key needed)
+- Leave `MODEL_{N}_API_KEY` empty (not "N/A", just empty string)
 - Ensure Lambda role has `bedrock-runtime:InvokeModel` permissions
+
+**Generic provider** (OpenAI-compatible APIs):
+- Set `MODEL_{N}_PROVIDER` to `generic`
+- `MODEL_{N}_BASE_URL` is **required** for generic provider
+- Include API key in `MODEL_{N}_API_KEY` if needed
 
 ### Frontend Environment Variables
 
@@ -245,24 +266,70 @@ VITE_API_ENDPOINT=https://xxxx.execute-api.region.amazonaws.com/Prod
 
 ### Adding a New AI Provider
 
-1. Add handler class to `backend/src/models/handlers.py`:
+**Pattern**: Handlers are functions (not classes) that return standardized response dicts.
+
+**Handler Contract**: All handlers must accept `(model_config: Dict, prompt: str, _params: Dict)` and return:
+- Success: `{'status': 'success', 'image': base64_str, 'model': model_id, 'provider': provider_name}`
+- Error: `{'status': 'error', 'error': error_message, 'model': model_id, 'provider': provider_name}`
+
+1. Add handler function to `backend/src/models/handlers.py`:
    ```python
-   class NewProviderHandler(BaseHandler):
-       def generate_image(self, prompt, **params):
-           # Implementation
+   def handle_new_provider(model_config: Dict, prompt: str, _params: Dict) -> Dict:
+       """
+       Handle image generation for NewProvider.
+
+       Args:
+           model_config: Dict with 'id', 'api_key', 'base_url', 'user_id' (optional fields)
+           prompt: Text prompt for image generation
+           _params: Generation parameters (steps, guidance, etc.)
+
+       Returns:
+           Dict with 'status', 'image' (base64), 'model', 'provider'
+           OR 'status': 'error', 'error': message
+       """
+       try:
+           # Initialize provider SDK
+           api_key = model_config.get('api_key', '')
+           model_id = model_config['id']
+
+           # Call provider API
+           # ... implementation ...
+
+           # Return standardized success response
+           return {
+               'status': 'success',
+               'image': base64_encoded_image,
+               'model': model_id,
+               'provider': 'new_provider'
+           }
+       except Exception as e:
+           return {
+               'status': 'error',
+               'error': str(e),
+               'model': model_config['id'],
+               'provider': 'new_provider'
+           }
    ```
 
-2. Add provider detection in `backend/src/models/registry.py`:
+2. Register handler in `get_handler()` dict in `backend/src/models/handlers.py` (around line 659):
    ```python
-   if "provider-keyword" in model_name.lower():
-       return NewProviderHandler(model_name, api_key)
+   handlers = {
+       'openai': handle_openai,
+       # ... existing handlers ...
+       'new_provider': handle_new_provider,  # Add this line
+   }
    ```
 
 3. Add unit tests in `backend/tests/unit/test_handlers.py`
 
-4. Deploy with model configured:
+4. Update `template.yaml` if adding provider to allowed values (optional)
+
+5. Deploy with explicit provider configuration:
    ```bash
-   sam deploy --parameter-overrides Model1Name="Provider Name" Model1Key="api-key"
+   sam deploy --parameter-overrides \
+     Model1Provider="new_provider" \
+     Model1Id="model-identifier" \
+     Model1ApiKey="api-key"
    ```
 
 ### Modifying Job Schema
@@ -319,6 +386,12 @@ Located in `.github/workflows/`:
 **"Job stuck in progress"**: Lambda timeout or thread deadlock - check CloudWatch for errors, verify provider API responsiveness
 
 **Frontend can't connect**: Verify CORS in API Gateway (should allow `*` origin), check `frontend/.env` has correct endpoint
+
+**"Prompt enhancement not working"**: Enhancement returns original prompt unchanged. See [DEBUGGING_ENHANCE.md](./DEBUGGING_ENHANCE.md) for detailed diagnostics. Quick checks:
+- Run `./scripts/diagnose-enhance.sh <stack-name>` to check configuration
+- Verify PROMPT_MODEL_INDEX is valid (1 to MODEL_COUNT)
+- Check CloudWatch logs for `[ENHANCE]` errors: `sam logs --stack-name <stack-name> --tail --filter-pattern "[ENHANCE]"`
+- Test endpoint: `./scripts/test-enhance-endpoint.sh <api-endpoint>`
 
 ## Repository Structure Notes
 

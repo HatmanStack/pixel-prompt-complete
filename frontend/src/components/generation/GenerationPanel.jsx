@@ -6,22 +6,20 @@
 import { useEffect, useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import useJobPolling from '../../hooks/useJobPolling';
+import useImageLoader from '../../hooks/useImageLoader';
 import { generateImages } from '../../api/client';
 import PromptInput from './PromptInput';
 import RandomPromptButton from '../features/generation/RandomPromptButton';
 import PromptEnhancer from './PromptEnhancer';
-import ParameterPresets from '../features/generation/ParameterPresets';
-import ParameterSliders from './ParameterSliders';
 import GenerateButton from './GenerateButton';
 import ImageGrid from './ImageGrid';
+import GalleryBrowser from '../gallery/GalleryBrowser';
 import styles from './GenerationPanel.module.css';
 
 function GenerationPanel() {
   const {
     prompt,
     setPrompt,
-    parameters,
-    updateParameter,
     currentJob,
     setCurrentJob,
     generatedImages,
@@ -33,12 +31,16 @@ function GenerationPanel() {
 
   const [errorMessage, setErrorMessage] = useState(null);
   const [modelNames, setModelNames] = useState([]);
+  const [viewingGallery, setViewingGallery] = useState(false);
 
   // Poll job status when we have a job ID
   const { jobStatus, error: pollingError } = useJobPolling(
     currentJob?.jobId,
     2000
   );
+
+  // Load images from S3 (fetches JSON and converts base64 to blob URLs)
+  const { images: loadedImages } = useImageLoader(jobStatus);
 
   // Update generated images when job status changes
   useEffect(() => {
@@ -51,16 +53,24 @@ function GenerationPanel() {
         setModelNames(names);
       }
 
-      // Update image states based on results
+      // Update image states based on results and loaded images
       if (jobStatus.results) {
-        const updatedImages = jobStatus.results.map(result => ({
+        const updatedImages = jobStatus.results.map((result, index) => ({
           model: result.model,
           status: result.status,
           imageUrl: result.imageUrl,
-          image: result.imageUrl,
+          image: loadedImages[index], // Use loaded blob URL from hook
           error: result.error,
           completedAt: result.completedAt,
         }));
+
+        console.log('[GENERATION_PANEL] Updating generatedImages:', updatedImages.map((img, i) => ({
+          index: i,
+          model: img.model,
+          status: img.status,
+          hasImage: !!img.image,
+          imagePreview: img.image ? img.image.substring(0, 50) : null
+        })));
 
         setGeneratedImages(updatedImages);
       }
@@ -73,7 +83,7 @@ function GenerationPanel() {
         setErrorMessage('Generation failed. Please try again.');
       }
     }
-  }, [jobStatus]);
+  }, [jobStatus, loadedImages]);
 
   // Handle polling errors
   useEffect(() => {
@@ -96,7 +106,7 @@ function GenerationPanel() {
       setIsGenerating(true);
 
       // Call API to start generation
-      const response = await generateImages(prompt, parameters);
+      const response = await generateImages(prompt);
 
       if (response.jobId) {
         setCurrentJob({
@@ -167,7 +177,7 @@ function GenerationPanel() {
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [prompt, isGenerating, parameters]);
+  }, [prompt, isGenerating]);
 
   const getProgressText = () => {
     if (!jobStatus || !jobStatus.results) return '';
@@ -180,6 +190,29 @@ function GenerationPanel() {
     }
 
     return `Generating: ${completed} / ${total} models complete`;
+  };
+
+  // Handle gallery selection - populate grid with gallery images
+  const handleGallerySelect = (gallery) => {
+    if (!gallery) {
+      setViewingGallery(false);
+      return;
+    }
+
+    setViewingGallery(true);
+
+    // Convert gallery images to generatedImages format
+    const galleryImages = gallery.images.map((img, index) => ({
+      model: img.model,
+      status: 'completed',
+      imageUrl: img.url,
+      image: img.blobUrl || img.url,  // Use blob URL if available
+      error: null,
+      completedAt: img.timestamp,
+    }));
+
+    setGeneratedImages(galleryImages);
+    setModelNames(gallery.images.map(img => img.model || `Model ${index + 1}`));
   };
 
   return (
@@ -204,26 +237,6 @@ function GenerationPanel() {
             disabled={isGenerating}
           />
         </div>
-
-        <ParameterPresets
-          steps={parameters.steps}
-          guidance={parameters.guidance}
-          control={parameters.control}
-          onPresetSelect={(preset) => {
-            updateParameter('steps', preset.steps);
-            updateParameter('guidance', preset.guidance);
-            updateParameter('control', preset.control);
-          }}
-          disabled={isGenerating}
-        />
-
-        <ParameterSliders
-          steps={parameters.steps}
-          guidance={parameters.guidance}
-          onStepsChange={(value) => updateParameter('steps', value)}
-          onGuidanceChange={(value) => updateParameter('guidance', value)}
-          disabled={isGenerating}
-        />
 
         <GenerateButton
           onClick={handleGenerate}
@@ -260,6 +273,11 @@ function GenerationPanel() {
             <p className={styles.progressText}>{getProgressText()}</p>
           </div>
         )}
+      </div>
+
+      {/* Gallery Section */}
+      <div className={styles.gallerySection}>
+        <GalleryBrowser onGallerySelect={handleGallerySelect} />
       </div>
 
       {/* Results Section */}

@@ -5,6 +5,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { listGalleries, getGallery } from '../api/client';
+import { base64ToBlobUrl } from '../utils/imageHelpers';
 
 /**
  * Custom hook for gallery management
@@ -26,8 +27,21 @@ function useGallery() {
 
     try {
       const response = await listGalleries();
-      setGalleries(response.galleries || []);
-      console.log(`Fetched ${response.galleries?.length || 0} galleries`);
+
+      // Convert preview base64 data to blob URLs
+      const galleriesWithPreviews = (response.galleries || []).map(gallery => {
+        if (gallery.previewData) {
+          const previewBlob = base64ToBlobUrl(gallery.previewData);
+          return {
+            ...gallery,
+            preview: previewBlob,  // Replace URL with blob URL
+          };
+        }
+        return gallery;
+      });
+
+      setGalleries(galleriesWithPreviews);
+      console.log(`Fetched ${galleriesWithPreviews.length} galleries`);
     } catch (err) {
       console.error('Error fetching galleries:', err);
       setError(err.message || 'Failed to load galleries');
@@ -52,9 +66,23 @@ function useGallery() {
 
     try {
       const response = await getGallery(galleryId);
+
+      // Convert base64 images to blob URLs
+      const imagesWithBlobs = (response.images || []).map(img => {
+        if (img.output) {
+          // Convert base64 to blob URL
+          const blobUrl = base64ToBlobUrl(img.output);
+          return {
+            ...img,
+            blobUrl,  // Add blob URL for display
+          };
+        }
+        return img;
+      });
+
       setSelectedGallery({
         id: response.galleryId,
-        images: response.images || [],
+        images: imagesWithBlobs,
         total: response.total || 0,
       });
       console.log(`Loaded gallery ${galleryId} with ${response.images?.length || 0} images`);

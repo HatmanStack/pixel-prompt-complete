@@ -29,7 +29,7 @@ class JobExecutor:
         self.image_storage = image_storage
         self.model_registry = model_registry
 
-    def execute_job(self, job_id: str, prompt: str, params: Dict, target: str) -> None:
+    def execute_job(self, job_id: str, prompt: str, target: str) -> None:
         """
         Execute image generation job across all models in parallel.
 
@@ -39,7 +39,6 @@ class JobExecutor:
         Args:
             job_id: Job ID
             prompt: Text prompt for image generation
-            params: Generation parameters (steps, guidance, etc.)
             target: Target timestamp for grouping images
         """
         models = self.model_registry.get_all_models()
@@ -55,7 +54,6 @@ class JobExecutor:
                     job_id,
                     model,
                     prompt,
-                    params,
                     target
                 ): model
                 for model in models
@@ -67,15 +65,15 @@ class JobExecutor:
                 try:
                     result = future.result()
                     if result['status'] == 'success':
-                        print(f"Job {job_id}: Model {model['name']} completed successfully")
+                        print(f"Job {job_id}: Model {model['id']} completed successfully")
                     else:
-                        print(f"Job {job_id}: Model {model['name']} failed: {result.get('error')}")
+                        print(f"Job {job_id}: Model {model['id']} failed: {result.get('error')}")
 
                 except Exception as e:
-                    print(f"Job {job_id}: Model {model['name']} raised exception: {str(e)}")
+                    print(f"Job {job_id}: Model {model['id']} raised exception: {str(e)}")
                     # Mark as error
                     try:
-                        self.job_manager.mark_model_error(job_id, model['name'], str(e))
+                        self.job_manager.mark_model_error(job_id, model['id'], str(e))
                     except Exception as update_error:
                         print(f"Failed to update job status: {update_error}")
 
@@ -86,7 +84,6 @@ class JobExecutor:
         job_id: str,
         model: Dict,
         prompt: str,
-        params: Dict,
         target: str
     ) -> Dict:
         """
@@ -96,13 +93,12 @@ class JobExecutor:
             job_id: Job ID
             model: Model configuration dict
             prompt: Text prompt
-            params: Generation parameters
             target: Target timestamp
 
         Returns:
             Result dict with status and image data or error
         """
-        model_name = model['name']
+        model_name = model['id']
         start_time = time.time()
 
         try:
@@ -119,13 +115,18 @@ class JobExecutor:
             result = self._execute_with_timeout(
                 handler,
                 model,
-                prompt,
-                params,
-                timeout=120  # 2 minutes per model
+                prompt
             )
 
             # Calculate duration
             duration = time.time() - start_time
+
+            # Log the full result for debugging
+            print(f"[EXECUTOR] Job {job_id}: {model_name} returned status: {result.get('status')}")
+            if result.get('status') == 'error':
+                print(f"[EXECUTOR] Job {job_id}: {model_name} error: {result.get('error')}")
+            elif result.get('status') == 'success':
+                print(f"[EXECUTOR] Job {job_id}: {model_name} image length: {len(result.get('image', ''))}")
 
             if result['status'] == 'success':
                 # Save image to S3
@@ -133,7 +134,6 @@ class JobExecutor:
                     base64_image=result['image'],
                     model_name=model_name,
                     prompt=prompt,
-                    params=params,
                     target=target
                 )
 
@@ -177,8 +177,7 @@ class JobExecutor:
         self,
         handler,
         model: Dict,
-        prompt: str,
-        params: Dict
+        prompt: str
     ) -> Dict:
         """
         Execute handler (wrapper for future timeout implementation).
@@ -191,11 +190,11 @@ class JobExecutor:
             handler: Handler function to call
             model: Model configuration
             prompt: Text prompt
-            params: Generation parameters
 
         Returns:
             Handler result dict
         """
         # For now, just call the handler directly
         # The individual handlers have their own timeouts for API calls
-        return handler(model, prompt, params)
+        # Handlers receive model config and prompt only
+        return handler(model, prompt, {})

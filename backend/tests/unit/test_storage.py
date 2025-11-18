@@ -22,16 +22,12 @@ class TestImageStorage:
         image_data = SAMPLE_IMAGE_BASE64
         metadata = {
             'prompt': 'test prompt',
-            'model': 'Test Model',
-            'steps': 28,
-            'guidance': 5.0
-        }
+            'model': 'Test Model'}
 
         key = storage.save_image(
             base64_image=image_data,
             model_name='TestModel',
-            prompt=metadata['prompt'],
-            params={'steps': metadata['steps'], 'guidance': metadata['guidance']},
+            prompt=metadata['prompt']
             target='2025-11-16-10-30-00'
         )
 
@@ -111,9 +107,7 @@ class TestImageStorage:
         key = 'group-images/test/image.json'
         metadata = {
             'prompt': 'test',
-            'model': 'Test Model',
-            'steps': 28,
-            'output': SAMPLE_IMAGE_BASE64
+            'model': 'Test Model''output': SAMPLE_IMAGE_BASE64
         }
 
         s3_client.put_object(

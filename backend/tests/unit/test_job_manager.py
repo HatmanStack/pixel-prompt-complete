@@ -18,7 +18,6 @@ class TestJobManager:
         manager = JobManager(s3_client, bucket_name)
 
         prompt = "a beautiful sunset"
-        params = {'steps': 28, 'guidance': 7.5}
         models = [
             {'name': 'Model A', 'index': 0},
             {'name': 'Model B', 'index': 1},
@@ -40,7 +39,6 @@ class TestJobManager:
         assert status['totalModels'] == 3
         assert status['completedModels'] == 0
         assert status['prompt'] == prompt
-        assert status['parameters'] == params
         assert len(status['results']) == 3
 
         # Verify all results are initially pending
@@ -66,7 +64,6 @@ class TestJobManager:
         # Create job
         job_id = manager.create_job(
             "test prompt",
-            {'steps': 28},
             [{'name': 'Model A', 'index': 0}]
         )
 
@@ -89,7 +86,6 @@ class TestJobManager:
         # Create job
         job_id = manager.create_job(
             "test prompt",
-            {'steps': 28},
             [{'name': 'Model A', 'index': 0}]
         )
 
@@ -116,7 +112,6 @@ class TestJobManager:
         # Create job
         job_id = manager.create_job(
             "test prompt",
-            {'steps': 28},
             [{'name': 'Model A', 'index': 0}]
         )
 
@@ -140,7 +135,6 @@ class TestJobManager:
         # Create job with 3 models
         job_id = manager.create_job(
             "test prompt",
-            {'steps': 28},
             [
                 {'name': 'Model A', 'index': 0},
                 {'name': 'Model B', 'index': 1},
@@ -181,7 +175,6 @@ class TestJobManager:
 
         job_id = manager.create_job(
             "test prompt",
-            {'steps': 28},
             [
                 {'name': 'Model A', 'index': 0},
                 {'name': 'Model B', 'index': 1}
@@ -205,7 +198,6 @@ class TestJobManager:
 
         job_id = manager.create_job(
             "test prompt",
-            {'steps': 28},
             [
                 {'name': 'Model A', 'index': 0},
                 {'name': 'Model B', 'index': 1}
@@ -229,7 +221,6 @@ class TestJobManager:
 
         job_id = manager.create_job(
             "test prompt",
-            {'steps': 28},
             [{'name': 'Model A', 'index': 0}]
         )
 
@@ -253,7 +244,6 @@ class TestJobManager:
 
         job_id = manager.create_job(
             "test prompt",
-            {'steps': 28},
             [{'name': 'Model A', 'index': 0}]
         )
 
@@ -278,7 +268,6 @@ class TestJobManager:
 
         job_id = manager.create_job(
             "test prompt",
-            {'steps': 28},
             [{'name': 'Model A', 'index': 0}]
         )
 
@@ -310,7 +299,7 @@ class TestJobManager:
             {'name': 'Model C', 'index': 15}
         ]
 
-        job_id = manager.create_job("test", {'steps': 28}, models)
+        job_id = manager.create_job("test", models)
 
         status = manager.get_job_status(job_id)
 
@@ -327,7 +316,6 @@ class TestJobManager:
 
         job_id = manager.create_job(
             "test",
-            {'steps': 28},
             [
                 {'name': 'Model A', 'index': 0},
                 {'name': 'Model B', 'index': 1},
@@ -361,7 +349,6 @@ class TestJobManager:
 
         job_id = manager.create_job(
             "test prompt",
-            {'steps': 28, 'guidance': 7.5},
             [{'name': 'Model A', 'index': 0}]
         )
 
@@ -373,5 +360,3 @@ class TestJobManager:
         # Verify structure
         assert raw_data['jobId'] == job_id
         assert raw_data['prompt'] == "test prompt"
-        assert raw_data['parameters']['steps'] == 28
-        assert raw_data['parameters']['guidance'] == 7.5

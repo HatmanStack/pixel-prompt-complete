@@ -1,0 +1,15 @@
+{
+  "name": "pixel-prompt-complete",
+  "version": "1.0.0",
+  "description": "Full-stack serverless text-to-image generation platform",
+  "private": true,
+  "scripts": {
+    "update-env": "node scripts/update-frontend-env.js",
+    "update-env:dev": "node scripts/update-frontend-env.js pixel-prompt-dev",
+    "update-env:staging": "node scripts/update-frontend-env.js pixel-prompt-staging",
+    "update-env:prod": "node scripts/update-frontend-env.js pixel-prompt-prod"
+  },
+  "keywords": ["aws", "lambda", "sam", "react", "vite", "ai", "image-generation"],
+  "author": "",
+  "license": "Apache-2.0"
+}

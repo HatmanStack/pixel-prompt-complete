@@ -141,9 +141,6 @@ def handle_generate(event, correlation_id=None):
     Request body:
         {
             "prompt": "text prompt",
-            "steps": 25,
-            "guidance": 7,
-            "control": 1.0,
             "ip": "client IP address"
         }
 
@@ -154,9 +151,6 @@ def handle_generate(event, correlation_id=None):
         body = json.loads(event.get('body', '{}'))
 
         prompt = body.get('prompt', '')
-        steps = body.get('steps', 25)
-        guidance = body.get('guidance', 7)
-        control = body.get('control', 1.0)
 
         # Get client IP
         ip = body.get('ip')
@@ -185,20 +179,12 @@ def handle_generate(event, correlation_id=None):
         if is_blocked:
             return response(400, error_responses.inappropriate_content())
 
-        # Build parameters
-        params = {
-            'steps': steps,
-            'guidance': guidance,
-            'control': control
-        }
-
         # Create target timestamp for grouping images
         target = datetime.now(timezone.utc).strftime('%Y-%m-%d-%H-%M-%S')
 
         # Create job
         job_id = job_manager.create_job(
             prompt=prompt,
-            params=params,
             models=model_registry.get_all_models()
         )
 
@@ -213,7 +199,7 @@ def handle_generate(event, correlation_id=None):
         # - This works for MVP due to Lambda container reuse and S3 persistence
         thread = threading.Thread(
             target=job_executor.execute_job,
-            args=(job_id, prompt, params, target)
+            args=(job_id, prompt, target)
         )
         thread.daemon = True
         thread.start()
@@ -261,11 +247,19 @@ def handle_status(event, correlation_id=None):
         if not status:
             return response(404, error_responses.job_not_found(job_id))
 
-        # Add CloudFront URLs to image results
+        # Add CloudFront URLs and image data to results
         for result in status.get('results', []):
             if result.get('status') == 'completed' and result.get('imageKey'):
                 result['imageUrl'] = image_storage.get_cloudfront_url(result['imageKey'])
+                # Also include base64 image data to avoid CORS issues
+                image_data = image_storage.get_image(result['imageKey'])
+                if image_data and image_data.get('output'):
+                    result['output'] = image_data['output']
+                    print(f"[STATUS] Added output data for {result.get('model')}: {len(result['output'])} bytes")
+                else:
+                    print(f"[STATUS] WARNING: No image data found for {result.get('model')} at key {result.get('imageKey')}")
 
+        print(f"[STATUS] Returning status for job {job_id}: {status.get('status')}, {status.get('completedModels')}/{status.get('totalModels')} complete")
         return response(200, status)
 
     except Exception as e:
@@ -341,17 +335,28 @@ def handle_gallery_list(event, correlation_id=None):
         gallery_folders = image_storage.list_galleries()
         StructuredLogger.info(f"Listing {len(gallery_folders)} galleries", correlation_id=correlation_id)
 
-        # Build response with preview images
+        # Build response with preview thumbnails
         galleries = []
         for folder in gallery_folders:
-            # Get first image from each gallery as preview
-            images = image_storage.list_gallery_images(folder)
+            # Get all images from gallery
+            all_images = image_storage.list_gallery_images(folder)
 
-            preview_url = None
-            if images:
-                # Use first image as preview
-                preview_key = images[0]
-                preview_url = image_storage.get_cloudfront_url(preview_key)
+            # Filter for thumbnail files
+            thumbnails = [img for img in all_images if '-thumb.json' in img]
+            # Filter for non-thumbnail files (for accurate count)
+            images = [img for img in all_images if '-thumb.json' not in img]
+
+            preview_data = None
+            if thumbnails:
+                # Use random thumbnail as preview for variety
+                import random
+                thumbnail_key = random.choice(thumbnails)
+
+                # Fetch thumbnail data (small, ~10-20KB each)
+                thumbnail_metadata = image_storage.get_image(thumbnail_key)
+                if thumbnail_metadata and thumbnail_metadata.get('output'):
+                    preview_data = thumbnail_metadata['output']
+                    print(f"Including thumbnail for {folder}: {len(preview_data)} bytes")
 
             # Parse timestamp from folder name (format: YYYY-MM-DD-HH-MM-SS)
             try:
@@ -362,7 +367,7 @@ def handle_gallery_list(event, correlation_id=None):
             galleries.append({
                 'id': folder,
                 'timestamp': timestamp_str,
-                'preview': preview_url,
+                'previewData': preview_data,  # Base64 thumbnail data
                 'imageCount': len(images)
             })
 
@@ -471,9 +476,6 @@ def handle_gallery_detail(event, correlation_id=None):
                     'url': image_storage.get_cloudfront_url(key),
                     'model': metadata.get('model', 'Unknown'),
                     'prompt': metadata.get('prompt', ''),
-                    'steps': metadata.get('steps'),
-                    'guidance': metadata.get('guidance'),
-                    'control': metadata.get('control'),
                     'timestamp': metadata.get('timestamp'),
                     'output': metadata.get('output')  # Include base64 image data
                 })

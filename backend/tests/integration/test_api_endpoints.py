@@ -134,9 +134,7 @@ class TestImageGeneration:
         response = requests.post(
             f"{API_ENDPOINT}/generate",
             json={
-                'prompt': 'test image',
-                'steps': 25,
-                'guidance': 7,
+                'prompt': 'test image'
                 'ip': '127.0.0.1'
             },
             headers={'Content-Type': 'application/json'},
@@ -155,9 +153,7 @@ class TestImageGeneration:
         create_response = requests.post(
             f"{API_ENDPOINT}/generate",
             json={
-                'prompt': 'test status check',
-                'steps': 25,
-                'guidance': 7,
+                'prompt': 'test status check'
                 'ip': '127.0.0.1'
             },
             headers={'Content-Type': 'application/json'},
@@ -192,7 +188,7 @@ class TestInputValidation:
         """Test that empty prompts are rejected."""
         response = requests.post(
             f"{API_ENDPOINT}/generate",
-            json={'prompt': '', 'steps': 25, 'guidance': 7},
+            json={'prompt': ''},
             headers={'Content-Type': 'application/json'},
             timeout=REQUEST_TIMEOUT
         )
@@ -204,7 +200,7 @@ class TestInputValidation:
         long_prompt = 'a' * 1001  # Max is 1000
         response = requests.post(
             f"{API_ENDPOINT}/generate",
-            json={'prompt': long_prompt, 'steps': 25, 'guidance': 7},
+            json={'prompt': long_prompt},
             headers={'Content-Type': 'application/json'},
             timeout=REQUEST_TIMEOUT
         )
