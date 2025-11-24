@@ -37,6 +37,6 @@
     "prop-types": "^15.8.1",
     "rollup-plugin-visualizer": "^6.0.5",
     "vite": "^7.2.2",
-    "vitest": "^1.0.4"
+    "vitest": "^4.0.13"
   }
 }
