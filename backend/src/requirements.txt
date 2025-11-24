@@ -9,4 +9,4 @@ Pillow==11.1.0
 
 # AI provider SDKs
 openai==1.72.0
-google-genai==1.10.0
+google-genai==1.52.0
