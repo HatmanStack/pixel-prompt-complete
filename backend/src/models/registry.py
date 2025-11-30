@@ -6,6 +6,7 @@ No provider detection - users specify provider explicitly.
 """
 
 import os
+import warnings
 from typing import List, Dict, Optional
 
 
@@ -48,26 +49,17 @@ class ModelRegistry:
                     model_config['user_id'] = user_id
 
                 self.models.append(model_config)
-                print(f"Loaded model {i}: {model_id} (provider: {provider})")
 
-        # Validation
+        # Validation - warn if configuration doesn't match
         if len(self.models) != self.model_count:
-            print(f"[REGISTRY] WARNING: MODEL_COUNT is {self.model_count} but only "
-                  f"{len(self.models)} models are configured")
+            warnings.warn(f"MODEL_COUNT={self.model_count} but only {len(self.models)} models configured")
 
         if self.prompt_model_index < 1 or self.prompt_model_index > len(self.models):
-            print(f"[REGISTRY] WARNING: PROMPT_MODEL_INDEX {self.prompt_model_index} is out of "
-                  f"range (1-{len(self.models)})")
-            print(f"[REGISTRY] This will cause prompt enhancement to fail!")
+            warnings.warn(f"PROMPT_MODEL_INDEX={self.prompt_model_index} is out of range (1-{len(self.models)})")
         else:
             prompt_model = self.get_model_by_index(self.prompt_model_index)
-            if prompt_model:
-                print(f"[REGISTRY] Prompt enhancement model (index {self.prompt_model_index}): "
-                      f"{prompt_model['id']} (provider: {prompt_model['provider']})")
-            else:
-                print(f"[REGISTRY] WARNING: Could not find model at PROMPT_MODEL_INDEX {self.prompt_model_index}")
-
-        print(f"[REGISTRY] Model registry initialized with {len(self.models)} models")
+            if not prompt_model:
+                warnings.warn(f"Prompt model at index {self.prompt_model_index} not found")
 
     def get_model_by_index(self, index: int) -> Optional[Dict]:
         """

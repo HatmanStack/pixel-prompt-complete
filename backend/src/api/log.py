@@ -4,7 +4,6 @@ Logging API endpoint for Pixel Prompt Complete.
 Accepts frontend error logs and writes them to CloudWatch with structured format.
 """
 
-import json
 from typing import Dict, Optional
 from utils.logger import StructuredLogger
 

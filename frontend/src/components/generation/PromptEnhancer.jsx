@@ -4,7 +4,7 @@
  * Supports Ctrl+E keyboard shortcut
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { enhancePrompt } from '../../api/client';
 import styles from './PromptEnhancer.module.css';
 
@@ -14,26 +14,8 @@ function PromptEnhancer({ currentPrompt = '', onUsePrompt, disabled = false }) {
   const [error, setError] = useState(null);
   const [showLong, setShowLong] = useState(false);
 
-  // Listen for keyboard shortcut (Ctrl+E)
-  useEffect(() => {
-    const handleEnhancePromptTrigger = () => {
-      if (!disabled && !isEnhancing && currentPrompt.trim()) {
-        handleEnhance();
-      }
-    };
-
-    document.addEventListener('enhance-prompt-trigger', handleEnhancePromptTrigger);
-    return () => {
-      document.removeEventListener('enhance-prompt-trigger', handleEnhancePromptTrigger);
-    };
-  }, [disabled, isEnhancing, currentPrompt]);
-
-  const handleEnhance = async () => {
-    if (!currentPrompt.trim()) {
-      setError('Please enter a prompt first');
-      return;
-    }
-
+  // Shared enhancement logic
+  const runEnhance = useCallback(async () => {
     setIsEnhancing(true);
     setError(null);
     setEnhancedPrompt(null);
@@ -56,6 +38,28 @@ function PromptEnhancer({ currentPrompt = '', onUsePrompt, disabled = false }) {
     } finally {
       setIsEnhancing(false);
     }
+  }, [currentPrompt]);
+
+  // Listen for keyboard shortcut (Ctrl+E)
+  useEffect(() => {
+    const handleEnhancePromptTrigger = async () => {
+      if (!disabled && !isEnhancing && currentPrompt.trim()) {
+        await runEnhance();
+      }
+    };
+
+    document.addEventListener('enhance-prompt-trigger', handleEnhancePromptTrigger);
+    return () => {
+      document.removeEventListener('enhance-prompt-trigger', handleEnhancePromptTrigger);
+    };
+  }, [disabled, isEnhancing, currentPrompt, runEnhance]);
+
+  const handleEnhance = async () => {
+    if (!currentPrompt.trim()) {
+      setError('Please enter a prompt first');
+      return;
+    }
+    await runEnhance();
   };
 
   const handleUse = () => {

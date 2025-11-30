@@ -12,7 +12,7 @@ import threading
 
 # Import configuration
 from config import (
-    models, s3_bucket, cloudfront_domain,
+    s3_bucket, cloudfront_domain,
     global_limit, ip_limit, ip_include
 )
 
@@ -30,7 +30,6 @@ from utils import error_responses
 from uuid import uuid4
 
 # Initialize components at module level (Lambda container reuse)
-print("Initializing Lambda components...")
 
 # S3 client
 s3_client = boto3.client('s3')
@@ -56,7 +55,6 @@ job_executor = JobExecutor(job_manager, image_storage, model_registry)
 # Prompt enhancer
 prompt_enhancer = PromptEnhancer(model_registry)
 
-print(f"Lambda initialization complete: {model_registry.get_model_count()} models configured")
 
 
 def extract_correlation_id(event):
@@ -255,11 +253,9 @@ def handle_status(event, correlation_id=None):
                 image_data = image_storage.get_image(result['imageKey'])
                 if image_data and image_data.get('output'):
                     result['output'] = image_data['output']
-                    print(f"[STATUS] Added output data for {result.get('model')}: {len(result['output'])} bytes")
                 else:
-                    print(f"[STATUS] WARNING: No image data found for {result.get('model')} at key {result.get('imageKey')}")
+                    pass  # Warning stripped
 
-        print(f"[STATUS] Returning status for job {job_id}: {status.get('status')}, {status.get('completedModels')}/{status.get('totalModels')} complete")
         return response(200, status)
 
     except Exception as e:
@@ -356,7 +352,6 @@ def handle_gallery_list(event, correlation_id=None):
                 thumbnail_metadata = image_storage.get_image(thumbnail_key)
                 if thumbnail_metadata and thumbnail_metadata.get('output'):
                     preview_data = thumbnail_metadata['output']
-                    print(f"Including thumbnail for {folder}: {len(preview_data)} bytes")
 
             # Parse timestamp from folder name (format: YYYY-MM-DD-HH-MM-SS)
             try:
@@ -371,15 +366,13 @@ def handle_gallery_list(event, correlation_id=None):
                 'imageCount': len(images)
             })
 
-        print(f"Returning {len(galleries)} galleries")
 
         return response(200, {
             'galleries': galleries,
             'total': len(galleries)
         })
 
-    except Exception as e:
-        print(f"Error in handle_gallery_list: {str(e)}")
+    except Exception:
         traceback.print_exc()
         return response(500, {'error': 'Internal server error'})
 
@@ -430,8 +423,7 @@ def handle_log_endpoint(event):
         return response(400, {'error': 'Invalid JSON in request body'})
     except ValueError as e:
         return response(400, {'error': str(e)})
-    except Exception as e:
-        print(f"Error in handle_log_endpoint: {str(e)}")
+    except Exception:
         traceback.print_exc()
         return response(500, {'error': 'Internal server error'})
 
@@ -480,7 +472,6 @@ def handle_gallery_detail(event, correlation_id=None):
                     'output': metadata.get('output')  # Include base64 image data
                 })
 
-        print(f"Returning {len(images)} images from gallery {gallery_id}")
 
         return response(200, {
             'galleryId': gallery_id,
@@ -488,8 +479,7 @@ def handle_gallery_detail(event, correlation_id=None):
             'total': len(images)
         })
 
-    except Exception as e:
-        print(f"Error in handle_gallery_detail: {str(e)}")
+    except Exception:
         traceback.print_exc()
         return response(500, {'error': 'Internal server error'})
 

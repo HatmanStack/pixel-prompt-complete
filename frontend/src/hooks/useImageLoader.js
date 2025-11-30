@@ -85,6 +85,7 @@ function useImageLoader(jobStatus, cloudFrontDomain = '') {
           }
         }
         else {
+          throw new Error('No image source available');
         }
 
         // Check again if job changed before updating state
@@ -138,6 +139,7 @@ function useImageLoader(jobStatus, cloudFrontDomain = '') {
         loadImage(result, index);
       }
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobStatus, cloudFrontDomain]);
 
   // Reset when job changes

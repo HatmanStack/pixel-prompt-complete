@@ -5,8 +5,8 @@ Executes image generation across multiple AI models concurrently using threading
 """
 
 import time
+import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
 from typing import Dict
 from models.handlers import get_handler
 
@@ -43,7 +43,6 @@ class JobExecutor:
         """
         models = self.model_registry.get_all_models()
 
-        print(f"Starting job {job_id} with {len(models)} models in parallel")
 
         # Create thread pool with one worker per model, capped at 10 to prevent resource exhaustion
         with ThreadPoolExecutor(max_workers=min(len(models), 10)) as executor:
@@ -65,19 +64,16 @@ class JobExecutor:
                 try:
                     result = future.result()
                     if result['status'] == 'success':
-                        print(f"Job {job_id}: Model {model['id']} completed successfully")
+                        pass  # Logging stripped
                     else:
-                        print(f"Job {job_id}: Model {model['id']} failed: {result.get('error')}")
-
+                        pass  # Logging stripped
                 except Exception as e:
-                    print(f"Job {job_id}: Model {model['id']} raised exception: {str(e)}")
                     # Mark as error
                     try:
                         self.job_manager.mark_model_error(job_id, model['id'], str(e))
                     except Exception as update_error:
-                        print(f"Failed to update job status: {update_error}")
+                        warnings.warn(f"Failed to update job status for {model['id']}: {update_error}")
 
-        print(f"Job {job_id}: All models finished processing")
 
     def _execute_model(
         self,
@@ -109,7 +105,6 @@ class JobExecutor:
             provider = model['provider']
             handler = get_handler(provider)
 
-            print(f"Job {job_id}: Executing {model_name} (provider: {provider})")
 
             # Call handler with timeout wrapper
             result = self._execute_with_timeout(
@@ -122,11 +117,10 @@ class JobExecutor:
             duration = time.time() - start_time
 
             # Log the full result for debugging
-            print(f"[EXECUTOR] Job {job_id}: {model_name} returned status: {result.get('status')}")
             if result.get('status') == 'error':
-                print(f"[EXECUTOR] Job {job_id}: {model_name} error: {result.get('error')}")
+                pass  # Error logging stripped
             elif result.get('status') == 'success':
-                print(f"[EXECUTOR] Job {job_id}: {model_name} image length: {len(result.get('image', ''))}")
+                pass  # Success logging stripped
 
             if result['status'] == 'success':
                 # Save image to S3
@@ -163,13 +157,11 @@ class JobExecutor:
 
         except TimeoutError as e:
             error_msg = f"Model execution timeout: {str(e)}"
-            print(f"Job {job_id}: {model_name} - {error_msg}")
             self.job_manager.mark_model_error(job_id, model_name, error_msg)
             return {'status': 'error', 'error': error_msg}
 
         except Exception as e:
             error_msg = f"Model execution failed: {str(e)}"
-            print(f"Job {job_id}: {model_name} - {error_msg}")
             self.job_manager.mark_model_error(job_id, model_name, error_msg)
             return {'status': 'error', 'error': error_msg}
 

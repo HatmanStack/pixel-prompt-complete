@@ -66,7 +66,6 @@ async function apiFetch(endpoint, options = {}, retryCount = 0) {
         RETRY_CONFIG.maxDelay
       );
 
-      console.log(`Retrying request (attempt ${retryCount + 1}/${RETRY_CONFIG.maxRetries}) after ${delay}ms...`);
       await sleep(delay);
 
       // Pass correlation ID to retry

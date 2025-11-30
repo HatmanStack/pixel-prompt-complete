@@ -4,7 +4,7 @@
  * Memoized to prevent unnecessary re-renders in grid
  */
 
-import { useState, useEffect, memo } from 'react';
+import { useState, memo } from 'react';
 import { useToast } from '../../context/ToastContext';
 import { downloadImage } from '../../utils/imageHelpers';
 import styles from './ImageCard.module.css';
@@ -19,11 +19,13 @@ function ImageCard({
   const { success, error: errorToast } = useToast();
   const [imageError, setImageError] = useState(false);
   const [showActions, setShowActions] = useState(false);
+  const [prevImage, setPrevImage] = useState(image);
 
-  // Reset imageError when image prop changes
-  useEffect(() => {
+  // Reset imageError when image prop changes (without useEffect)
+  if (image !== prevImage) {
     setImageError(false);
-  }, [image]);
+    setPrevImage(image);
+  }
 
   const handleImageError = () => {
     setImageError(true);

@@ -3,21 +3,17 @@
  * Subtle animated background gradient that "breathes"
  */
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import styles from './BreathingBackground.module.css';
 
-function BreathingBackground() {
-  const [isEnabled, setIsEnabled] = useState(() => {
-    // Load preference from localStorage
-    const saved = localStorage.getItem('breathingBackgroundEnabled');
-    // Default to enabled if not set
-    return saved === null ? true : saved === 'true';
-  });
+// Shared helper for reading localStorage preference
+const getBreathingBackgroundEnabled = () => {
+  const saved = localStorage.getItem('breathingBackgroundEnabled');
+  return saved === null ? true : saved === 'true';
+};
 
-  // Save preference to localStorage when it changes
-  useEffect(() => {
-    localStorage.setItem('breathingBackgroundEnabled', isEnabled.toString());
-  }, [isEnabled]);
+function BreathingBackground() {
+  const [isEnabled] = useState(getBreathingBackgroundEnabled);
 
   // Don't render if disabled
   if (!isEnabled) {
@@ -35,10 +31,7 @@ function BreathingBackground() {
 
 // Export toggle control component
 export function BreathingBackgroundToggle() {
-  const [isEnabled, setIsEnabled] = useState(() => {
-    const saved = localStorage.getItem('breathingBackgroundEnabled');
-    return saved === null ? true : saved === 'true';
-  });
+  const [isEnabled, setIsEnabled] = useState(getBreathingBackgroundEnabled);
 
   const handleToggle = () => {
     const newValue = !isEnabled;

@@ -8,7 +8,6 @@ import json
 import uuid
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
-import boto3
 from botocore.exceptions import ClientError
 
 
@@ -66,7 +65,6 @@ class JobManager:
         # Save to S3
         self._save_status(job_id, status)
 
-        print(f"Created job {job_id} with {len(models)} models")
 
         return job_id
 
@@ -130,7 +128,6 @@ class JobManager:
         # Save
         self._save_status(job_id, status)
 
-        print(f"Job {job_id}: Model {model_name} completed ({status['completedModels']}/{status['totalModels']})")
 
     def mark_model_error(self, job_id: str, model_name: str, error: str) -> None:
         """
@@ -162,7 +159,6 @@ class JobManager:
         # Save
         self._save_status(job_id, status)
 
-        print(f"Job {job_id}: Model {model_name} failed: {error}")
 
     def mark_model_in_progress(self, job_id: str, model_name: str) -> None:
         """
@@ -194,7 +190,6 @@ class JobManager:
         # Save
         self._save_status(job_id, status)
 
-        print(f"Job {job_id}: Model {model_name} started")
 
     def get_job_status(self, job_id: str) -> Optional[Dict]:
         """
@@ -214,7 +209,6 @@ class JobManager:
 
         except ClientError as e:
             if e.response['Error']['Code'] == 'NoSuchKey':
-                print(f"Job {job_id} not found in S3")
                 return None
             else:
                 raise

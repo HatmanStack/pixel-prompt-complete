@@ -5,7 +5,7 @@
  * Supports Ctrl+R keyboard shortcut
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { getRandomPrompt } from '../../../data/seedPrompts';
 import styles from './RandomPromptButton.module.css';
 
@@ -13,7 +13,8 @@ function RandomPromptButton({ onSelectPrompt, disabled = false }) {
   const [lastPrompt, setLastPrompt] = useState(null);
   const [isAnimating, setIsAnimating] = useState(false);
 
-  const handleClick = () => {
+  // Shared logic for triggering random prompt
+  const triggerRandomPrompt = useCallback(() => {
     if (disabled) return;
 
     // Trigger animation
@@ -24,19 +25,19 @@ function RandomPromptButton({ onSelectPrompt, disabled = false }) {
     const randomPrompt = getRandomPrompt(lastPrompt);
     setLastPrompt(randomPrompt);
     onSelectPrompt(randomPrompt);
+  }, [disabled, lastPrompt, onSelectPrompt]);
+
+  const handleClick = () => {
+    triggerRandomPrompt();
   };
 
   // Listen for keyboard shortcut (Ctrl+R)
   useEffect(() => {
-    const handleRandomPromptTrigger = () => {
-      handleClick();
-    };
-
-    document.addEventListener('random-prompt-trigger', handleRandomPromptTrigger);
+    document.addEventListener('random-prompt-trigger', triggerRandomPrompt);
     return () => {
-      document.removeEventListener('random-prompt-trigger', handleRandomPromptTrigger);
+      document.removeEventListener('random-prompt-trigger', triggerRandomPrompt);
     };
-  }, [disabled, lastPrompt]); // Re-create listener when disabled or lastPrompt changes
+  }, [triggerRandomPrompt]);
 
   return (
     <button

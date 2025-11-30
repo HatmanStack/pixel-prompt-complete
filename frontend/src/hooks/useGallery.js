@@ -60,7 +60,6 @@ function useGallery() {
       });
 
       setGalleries(galleriesWithPreviews);
-      console.log(`Fetched ${galleriesWithPreviews.length} galleries`);
     } catch (err) {
       console.error('Error fetching galleries:', err);
       setError(err.message || 'Failed to load galleries');
@@ -119,7 +118,6 @@ function useGallery() {
         images: imagesWithBlobs,
         total: response.total || 0,
       });
-      console.log(`Loaded gallery ${galleryId} with ${response.images?.length || 0} images`);
     } catch (err) {
       console.error(`Error loading gallery ${galleryId}:`, err);
       setError(err.message || 'Failed to load gallery');
