@@ -301,6 +301,7 @@ async function main() {
   try {
     await buildAndDeploy();
   } catch (e) {
+    console.error('Deployment error:', e.message);
     process.exit(1);
   }
 

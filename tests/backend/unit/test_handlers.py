@@ -227,7 +227,6 @@ class TestOtherHandlers:
 
         result = handle_stability(stability_config, sample_prompt, sample_params)
 
-        assert result is not None
         assert result['status'] == 'success'
         assert 'image' in result
         assert result['provider'] == 'stability'
@@ -275,7 +274,6 @@ class TestOtherHandlers:
         with patch('models.handlers.time.sleep'):  # Skip actual sleeping
             result = handle_bfl(bfl_config, sample_prompt, params_with_fast_poll)
 
-        assert result is not None
         assert result['status'] == 'success'
         assert 'image' in result
         assert result['provider'] == 'bfl'
@@ -309,7 +307,6 @@ class TestOtherHandlers:
 
             result = handle_recraft(recraft_config, sample_prompt, sample_params)
 
-            assert result is not None
             assert result['status'] == 'success'
             assert 'image' in result
             assert result['provider'] == 'recraft'
@@ -344,7 +341,6 @@ class TestOtherHandlers:
 
             result = handle_generic(generic_config, sample_prompt, sample_params)
 
-            assert result is not None
             assert result['status'] == 'success'
             assert 'image' in result
             assert result['provider'] == 'generic'
