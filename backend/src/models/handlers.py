@@ -7,11 +7,9 @@ returning a standardized response format.
 
 import base64
 import json
-import os
 import requests
-import tempfile
 import time
-from typing import Dict, Any, Callable
+from typing import Dict, Callable
 from openai import OpenAI
 import boto3
 from google import genai
@@ -31,7 +29,6 @@ def handle_openai(model_config: Dict, prompt: str, _params: Dict) -> Dict:
         Standardized response dict with status and image data
     """
     try:
-        print(f"Calling OpenAI DALL-E 3 with prompt: {prompt[:50]}...")
 
         # Initialize OpenAI client with timeout
         client = OpenAI(api_key=model_config.get('api_key') or None, timeout=120.0)
@@ -53,14 +50,12 @@ def handle_openai(model_config: Dict, prompt: str, _params: Dict) -> Dict:
         image_url = response.data[0].url
 
         # Download image
-        print(f"Downloading image from {image_url[:50]}...")
         img_response = requests.get(image_url, timeout=30)
         img_response.raise_for_status()
 
         # Convert to base64
         image_base64 = base64.b64encode(img_response.content).decode('utf-8')
 
-        print(f"OpenAI image generated successfully ({len(image_base64)} bytes)")
 
         return {
             'status': 'success',
@@ -71,7 +66,6 @@ def handle_openai(model_config: Dict, prompt: str, _params: Dict) -> Dict:
 
     except requests.Timeout:
         error_msg = "Image download timeout after 30 seconds"
-        print(f"Error in handle_openai: {error_msg}")
         return {
             'status': 'error',
             'error': error_msg,
@@ -80,7 +74,6 @@ def handle_openai(model_config: Dict, prompt: str, _params: Dict) -> Dict:
         }
 
     except Exception as e:
-        print(f"Error in handle_openai: {str(e)}")
         return {
             'status': 'error',
             'error': str(e),
@@ -102,7 +95,6 @@ def handle_google_gemini(model_config: Dict, prompt: str, _params: Dict) -> Dict
         Standardized response dict
     """
     try:
-        print(f"Calling Google Gemini 2.0 with prompt: {prompt[:50]}...")
 
         # Create Gemini client
         client = genai.Client(api_key=model_config.get('api_key') or None)
@@ -133,7 +125,6 @@ def handle_google_gemini(model_config: Dict, prompt: str, _params: Dict) -> Dict
         # Convert bytes to base64
         image_base64 = base64.b64encode(image_data).decode('utf-8')
 
-        print(f"Gemini image generated successfully ({len(image_base64)} bytes)")
 
         return {
             'status': 'success',
@@ -143,7 +134,6 @@ def handle_google_gemini(model_config: Dict, prompt: str, _params: Dict) -> Dict
         }
 
     except Exception as e:
-        print(f"Error in handle_google_gemini: {str(e)}")
         return {
             'status': 'error',
             'error': str(e),
@@ -165,7 +155,6 @@ def handle_google_imagen(model_config: Dict, prompt: str, _params: Dict) -> Dict
         Standardized response dict
     """
     try:
-        print(f"Calling Google Imagen 3.0 with prompt: {prompt[:50]}...")
 
         # Create Imagen client
         client = genai.Client(api_key=model_config.get('api_key') or None)
@@ -189,7 +178,6 @@ def handle_google_imagen(model_config: Dict, prompt: str, _params: Dict) -> Dict
         # Convert bytes directly to base64
         image_base64 = base64.b64encode(image_bytes).decode('utf-8')
 
-        print(f"Imagen image generated successfully ({len(image_base64)} bytes)")
 
         return {
             'status': 'success',
@@ -199,7 +187,6 @@ def handle_google_imagen(model_config: Dict, prompt: str, _params: Dict) -> Dict
         }
 
     except Exception as e:
-        print(f"Error in handle_google_imagen: {str(e)}")
         return {
             'status': 'error',
             'error': str(e),
@@ -221,7 +208,6 @@ def handle_bedrock_nova(model_config: Dict, prompt: str, params: Dict) -> Dict:
         Standardized response dict
     """
     try:
-        print(f"Calling AWS Bedrock Nova Canvas with prompt: {prompt[:50]}...")
 
         # Create boto3 session with credentials
         # Note: AWS credentials should be in environment or Lambda execution role
@@ -261,7 +247,6 @@ def handle_bedrock_nova(model_config: Dict, prompt: str, params: Dict) -> Dict:
         # Extract base64 image from response
         image_base64 = response_body['images'][0]
 
-        print(f"Bedrock Nova image generated successfully ({len(image_base64)} bytes)")
 
         return {
             'status': 'success',
@@ -271,7 +256,6 @@ def handle_bedrock_nova(model_config: Dict, prompt: str, params: Dict) -> Dict:
         }
 
     except Exception as e:
-        print(f"Error in handle_bedrock_nova: {str(e)}")
         return {
             'status': 'error',
             'error': str(e),
@@ -293,7 +277,6 @@ def handle_bedrock_sd(model_config: Dict, prompt: str, params: Dict) -> Dict:
         Standardized response dict
     """
     try:
-        print(f"Calling AWS Bedrock SD 3.5 Large with prompt: {prompt[:50]}...")
 
         # Create boto3 client
         bedrock = boto3.client(
@@ -331,7 +314,6 @@ def handle_bedrock_sd(model_config: Dict, prompt: str, params: Dict) -> Dict:
         # Extract base64 image from response
         image_base64 = response_body['images'][0]
 
-        print(f"Bedrock SD image generated successfully ({len(image_base64)} bytes)")
 
         return {
             'status': 'success',
@@ -341,7 +323,6 @@ def handle_bedrock_sd(model_config: Dict, prompt: str, params: Dict) -> Dict:
         }
 
     except Exception as e:
-        print(f"Error in handle_bedrock_sd: {str(e)}")
         return {
             'status': 'error',
             'error': str(e),
@@ -363,7 +344,6 @@ def handle_stability(model_config: Dict, prompt: str, params: Dict) -> Dict:
         Standardized response dict
     """
     try:
-        print(f"Calling Stability AI SD3 with prompt: {prompt[:50]}...")
 
         # Stability AI API endpoint
         url = "https://api.stability.ai/v2beta/stable-image/generate/sd3"
@@ -394,7 +374,6 @@ def handle_stability(model_config: Dict, prompt: str, params: Dict) -> Dict:
         # Response is raw image bytes - convert to base64
         image_base64 = base64.b64encode(response.content).decode('utf-8')
 
-        print(f"Stability AI image generated successfully ({len(image_base64)} bytes)")
 
         return {
             'status': 'success',
@@ -405,7 +384,6 @@ def handle_stability(model_config: Dict, prompt: str, params: Dict) -> Dict:
 
     except requests.Timeout:
         error_msg = "Stability AI request timeout after 60 seconds"
-        print(f"Error in handle_stability: {error_msg}")
         return {
             'status': 'error',
             'error': error_msg,
@@ -414,7 +392,6 @@ def handle_stability(model_config: Dict, prompt: str, params: Dict) -> Dict:
         }
 
     except Exception as e:
-        print(f"Error in handle_stability: {str(e)}")
         return {
             'status': 'error',
             'error': str(e),
@@ -439,7 +416,6 @@ def handle_bfl(model_config: Dict, prompt: str, params: Dict) -> Dict:
         # Use model ID directly as endpoint (e.g., "flux-pro-1.1", "flux-dev")
         endpoint = model_config['id']
 
-        print(f"Calling BFL {endpoint} with prompt: {prompt[:50]}...")
 
         # Start job
         start_url = f"https://api.bfl.ai/v1/{endpoint}"
@@ -461,7 +437,6 @@ def handle_bfl(model_config: Dict, prompt: str, params: Dict) -> Dict:
         if not job_id:
             raise ValueError("No job ID returned from BFL API")
 
-        print(f"BFL job started: {job_id}, polling for result...")
 
         # Poll for result (tunable via params)
         result_url = f"https://api.bfl.ai/v1/get_result?id={job_id}"
@@ -478,7 +453,6 @@ def handle_bfl(model_config: Dict, prompt: str, params: Dict) -> Dict:
             result_data = result_response.json()
 
             status = result_data.get('status')
-            print(f"BFL job status: {status} (attempt {attempt}/{max_attempts})")
 
             if status == 'Ready':
                 # Download image from result URL
@@ -489,7 +463,6 @@ def handle_bfl(model_config: Dict, prompt: str, params: Dict) -> Dict:
                 # Convert to base64
                 image_base64 = base64.b64encode(img_response.content).decode('utf-8')
 
-                print(f"BFL image generated successfully ({len(image_base64)} bytes)")
 
                 return {
                     'status': 'success',
@@ -506,7 +479,6 @@ def handle_bfl(model_config: Dict, prompt: str, params: Dict) -> Dict:
         raise TimeoutError(f"BFL job timeout after {max_attempts * 3} seconds")
 
     except Exception as e:
-        print(f"Error in handle_bfl: {str(e)}")
         return {
             'status': 'error',
             'error': str(e),
@@ -528,7 +500,6 @@ def handle_recraft(model_config: Dict, prompt: str, _params: Dict) -> Dict:
         Standardized response dict
     """
     try:
-        print(f"Calling Recraft v3 with prompt: {prompt[:50]}...")
 
         # Recraft uses OpenAI-compatible API with custom base URL
         client = OpenAI(
@@ -548,14 +519,12 @@ def handle_recraft(model_config: Dict, prompt: str, _params: Dict) -> Dict:
         image_url = response.data[0].url
 
         # Download image
-        print(f"Downloading Recraft image from {image_url[:50]}...")
         img_response = requests.get(image_url, timeout=30)
         img_response.raise_for_status()
 
         # Convert to base64
         image_base64 = base64.b64encode(img_response.content).decode('utf-8')
 
-        print(f"Recraft image generated successfully ({len(image_base64)} bytes)")
 
         return {
             'status': 'success',
@@ -565,7 +534,6 @@ def handle_recraft(model_config: Dict, prompt: str, _params: Dict) -> Dict:
         }
 
     except Exception as e:
-        print(f"Error in handle_recraft: {str(e)}")
         return {
             'status': 'error',
             'error': str(e),
@@ -589,8 +557,6 @@ def handle_generic(model_config: Dict, prompt: str, _params: Dict) -> Dict:
         Standardized response dict
     """
     try:
-        print(f"Calling generic OpenAI-compatible handler for {model_config['id']}")
-        print(f"Attempting with prompt: {prompt[:50]}...")
 
         # Try as OpenAI-compatible API
         # Use the model name as-is
@@ -626,7 +592,6 @@ def handle_generic(model_config: Dict, prompt: str, _params: Dict) -> Dict:
         # Convert to base64
         image_base64 = base64.b64encode(img_response.content).decode('utf-8')
 
-        print(f"Generic handler succeeded ({len(image_base64)} bytes)")
 
         return {
             'status': 'success',
@@ -637,7 +602,6 @@ def handle_generic(model_config: Dict, prompt: str, _params: Dict) -> Dict:
 
     except Exception as e:
         error_msg = f"Generic handler failed (model may not be OpenAI-compatible): {str(e)}"
-        print(f"Error in handle_generic: {error_msg}")
         return {
             'status': 'error',
             'error': error_msg,
@@ -670,6 +634,6 @@ def get_handler(provider: str) -> Callable:
 
     handler = handlers.get(provider, handle_generic)
     if provider not in handlers:
-        print(f"No specific handler for provider '{provider}', using generic handler")
+        pass  # Warning stripped
 
     return handler

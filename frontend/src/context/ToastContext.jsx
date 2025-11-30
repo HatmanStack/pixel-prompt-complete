@@ -13,6 +13,11 @@ let toastIdCounter = 0;
 export function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([]);
 
+  // Remove a toast by ID
+  const removeToast = useCallback((id) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  }, []);
+
   // Add a new toast
   const showToast = useCallback((message, type = 'info', duration = 3000) => {
     const id = toastIdCounter++;
@@ -28,12 +33,7 @@ export function ToastProvider({ children }) {
     }
 
     return id;
-  }, []);
-
-  // Remove a toast by ID
-  const removeToast = useCallback((id) => {
-    setToasts(prev => prev.filter(t => t.id !== id));
-  }, []);
+  }, [removeToast]);
 
   // Helper methods for different toast types
   const success = useCallback((message, duration) => {
@@ -68,6 +68,7 @@ export function ToastProvider({ children }) {
  * useToast Hook
  * Access toast context
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export function useToast() {
   const context = useContext(ToastContext);
 

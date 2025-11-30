@@ -28,7 +28,6 @@ class ContentFilter:
             # Add more as needed based on requirements
         ]
 
-        print(f"Content filter initialized with {len(self.blocked_keywords)} blocked keywords")
 
     def check_prompt(self, prompt: str) -> bool:
         """
@@ -49,7 +48,6 @@ class ContentFilter:
         # Check each blocked keyword
         for keyword in self.blocked_keywords:
             if keyword in prompt_lower:
-                print(f"Content filter triggered: found '{keyword}' in prompt")
                 return True
 
         # Prompt is safe
@@ -77,7 +75,6 @@ class ContentFilter:
         keyword_lower = keyword.lower()
         if keyword_lower not in self.blocked_keywords:
             self.blocked_keywords.append(keyword_lower)
-            print(f"Added blocked keyword: {keyword_lower}")
 
     def remove_blocked_keyword(self, keyword: str) -> None:
         """
@@ -89,7 +86,6 @@ class ContentFilter:
         keyword_lower = keyword.lower()
         if keyword_lower in self.blocked_keywords:
             self.blocked_keywords.remove(keyword_lower)
-            print(f"Removed blocked keyword: {keyword_lower}")
 
     def get_blocked_keywords(self) -> List[str]:
         """

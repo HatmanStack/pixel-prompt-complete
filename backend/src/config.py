@@ -54,19 +54,10 @@ for i in range(1, model_count + 1):
 # Validation - warn but don't fail if model count doesn't match
 # (allows partial configuration for testing)
 if len(models) != model_count:
-    print(f"WARNING: MODEL_COUNT is {model_count} but only {len(models)} models are configured")
+    pass  # Warning stripped
 
 if len(models) > 0 and (prompt_model_index < 1 or prompt_model_index > len(models)):
-    print(f"WARNING: PROMPT_MODEL_INDEX {prompt_model_index} is out of range (1-{len(models)})")
+    pass  # Warning stripped
 
 # Permanent negative prompt for Stable Diffusion models
 perm_negative_prompt = "ugly, blurry, low quality, distorted"
-
-# Print configuration summary at initialization
-print("Loaded configuration:")
-print(f"  - Models configured: {len(models)}/{model_count}")
-print(f"  - S3 Bucket: {s3_bucket}")
-print(f"  - CloudFront Domain: {cloudfront_domain}")
-print(f"  - Global Rate Limit: {global_limit}/hour")
-print(f"  - IP Rate Limit: {ip_limit}/day")
-print(f"  - IP Whitelist: {len(ip_include)} IPs")

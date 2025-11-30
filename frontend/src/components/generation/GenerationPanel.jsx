@@ -31,7 +31,6 @@ function GenerationPanel() {
 
   const [errorMessage, setErrorMessage] = useState(null);
   const [modelNames, setModelNames] = useState([]);
-  const [viewingGallery, setViewingGallery] = useState(false);
 
   // Poll job status when we have a job ID
   const { jobStatus, error: pollingError } = useJobPolling(
@@ -75,7 +74,7 @@ function GenerationPanel() {
         setErrorMessage('Generation failed. Please try again.');
       }
     }
-  }, [jobStatus, loadedImages]);
+  }, [jobStatus, loadedImages, setCurrentJob, setGeneratedImages, setIsGenerating]);
 
   // Handle polling errors
   useEffect(() => {
@@ -83,7 +82,7 @@ function GenerationPanel() {
       setIsGenerating(false);
       setErrorMessage(pollingError);
     }
-  }, [pollingError]);
+  }, [pollingError, setIsGenerating]);
 
   const handleGenerate = async () => {
     if (!prompt.trim()) {
@@ -169,6 +168,7 @@ function GenerationPanel() {
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prompt, isGenerating]);
 
   const getProgressText = () => {
@@ -187,11 +187,8 @@ function GenerationPanel() {
   // Handle gallery selection - populate grid with gallery images
   const handleGallerySelect = (gallery) => {
     if (!gallery) {
-      setViewingGallery(false);
       return;
     }
-
-    setViewingGallery(true);
 
     // Convert gallery images to generatedImages format
     const galleryImages = gallery.images.map((img, index) => ({

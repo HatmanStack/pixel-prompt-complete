@@ -36,9 +36,8 @@ function useSound() {
     });
 
     soundsRef.current = sounds;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSoundsLoaded(true);
-
-    console.log('Sound effects preloaded');
 
     // Cleanup
     return () => {
@@ -73,10 +72,8 @@ function useSound() {
       // Reset to start and play
       audio.currentTime = 0;
       audio.play().catch((err) => {
-        // Handle autoplay restrictions gracefully
-        if (err.name === 'NotAllowedError') {
-          console.log('Sound autoplay blocked by browser. User interaction required.');
-        } else {
+        // Handle autoplay restrictions gracefully - NotAllowedError is expected
+        if (err.name !== 'NotAllowedError') {
           console.warn(`Failed to play sound "${soundName}":`, err.message);
         }
       });

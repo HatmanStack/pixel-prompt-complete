@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.coverage
+htmlcov/
+
+# Build artifacts
+dist/
+build/
+.aws-sam/
+
+# Environment and secrets
+.env
+.env.local
+*.pem
+*.key
+samconfig.toml
+parameters.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

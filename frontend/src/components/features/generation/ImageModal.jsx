@@ -11,15 +11,17 @@ import styles from './ImageModal.module.css';
 
 function ImageModal({ isOpen, onClose, images, currentIndex, onNavigate }) {
   const [imageError, setImageError] = useState(false);
+  const [prevIndex, setPrevIndex] = useState(currentIndex);
 
   const currentImage = images[currentIndex];
   const hasPrevious = currentIndex > 0;
   const hasNext = currentIndex < images.length - 1;
 
-  // Reset error when image changes
-  useEffect(() => {
+  // Reset error when image changes (without useEffect)
+  if (currentIndex !== prevIndex) {
     setImageError(false);
-  }, [currentIndex]);
+    setPrevIndex(currentIndex);
+  }
 
   // Handle keyboard navigation
   useEffect(() => {

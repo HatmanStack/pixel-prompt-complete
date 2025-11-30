@@ -54,7 +54,6 @@ class RateLimiter:
         """
         # Check whitelist
         if ip_address in self.ip_whitelist:
-            print(f"IP {ip_address} is whitelisted, bypassing rate limit")
             return False
 
         # Load rate limit data
@@ -69,14 +68,12 @@ class RateLimiter:
         # Check global limit
         global_count = len(rate_data['global_requests'])
         if global_count >= self.global_limit:
-            print(f"Global rate limit exceeded: {global_count}/{self.global_limit}")
             return True
 
         # Check IP limit
         ip_requests = rate_data['ip_requests'].get(ip_address, [])
         ip_count = len(ip_requests)
         if ip_count >= self.ip_limit:
-            print(f"IP rate limit exceeded for {ip_address}: {ip_count}/{self.ip_limit}")
             return True
 
         # Add current request
@@ -113,7 +110,6 @@ class RateLimiter:
         except ClientError as e:
             if e.response['Error']['Code'] == 'NoSuchKey':
                 # Initialize empty rate data
-                print("Rate limit data not found, creating new")
                 return {
                     'global_requests': [],
                     'ip_requests': {}

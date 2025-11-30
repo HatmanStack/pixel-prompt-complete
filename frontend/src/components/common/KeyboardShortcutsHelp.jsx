@@ -4,18 +4,16 @@
  * Platform-aware (shows Ctrl on Windows/Linux, Cmd on Mac)
  */
 
-import { useEffect, useState } from 'react';
+import { useMemo } from 'react';
 import Modal from './Modal';
 import styles from './KeyboardShortcutsHelp.module.css';
 
 function KeyboardShortcutsHelp({ isOpen, onClose }) {
-  const [isMac, setIsMac] = useState(false);
-
-  useEffect(() => {
-    // Detect if user is on Mac (defensive for non-browser/SSR)
+  const isMac = useMemo(() => {
     if (typeof navigator !== 'undefined' && navigator.platform) {
-      setIsMac(navigator.platform.toUpperCase().includes('MAC'));
+      return navigator.platform.toUpperCase().includes('MAC');
     }
+    return false;
   }, []);
 
   const modifier = isMac ? '⌘' : 'Ctrl';

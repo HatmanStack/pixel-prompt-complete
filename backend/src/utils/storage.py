@@ -10,7 +10,6 @@ import base64
 import io
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
-import boto3
 from botocore.exceptions import ClientError
 from PIL import Image
 
@@ -80,7 +79,6 @@ class ImageStorage:
             content_type='application/json'
         )
 
-        print(f"Saved image to S3: {key}")
 
         # Generate and save thumbnail
         try:
@@ -103,10 +101,9 @@ class ImageStorage:
                 content_type='application/json'
             )
 
-            print(f"Saved thumbnail to S3: {thumbnail_key}")
-        except Exception as e:
-            print(f"Warning: Failed to generate thumbnail: {e}")
+        except Exception:
             # Continue even if thumbnail fails - not critical
+            pass
 
         return key
 
@@ -147,7 +144,6 @@ class ImageStorage:
 
         except ClientError as e:
             if e.response['Error']['Code'] == 'NoSuchKey':
-                print(f"Image {image_key} not found in S3")
                 return None
             else:
                 raise
@@ -195,12 +191,10 @@ class ImageStorage:
             # Sort by timestamp (newest first)
             galleries.sort(reverse=True)
 
-            print(f"Found {len(galleries)} galleries")
 
             return galleries
 
-        except Exception as e:
-            print(f"Error listing galleries: {e}")
+        except Exception:
             return []
 
     def list_gallery_images(self, gallery_folder: str) -> List[str]:
@@ -230,12 +224,10 @@ class ImageStorage:
                     if key.endswith('.json'):
                         images.append(key)
 
-            print(f"Found {len(images)} images in gallery {gallery_folder}")
 
             return images
 
-        except Exception as e:
-            print(f"Error listing gallery images: {e}")
+        except Exception:
             return []
 
     def get_cloudfront_url(self, s3_key: str) -> str:
@@ -290,7 +282,6 @@ class ImageStorage:
         # Encode to base64
         thumbnail_base64 = base64.b64encode(buffer.read()).decode('utf-8')
 
-        print(f"Generated thumbnail: {len(base64_image)} bytes -> {len(thumbnail_base64)} bytes")
 
         return thumbnail_base64
 

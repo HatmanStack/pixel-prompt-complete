@@ -6,7 +6,6 @@
 import { createContext, useContext, useState } from 'react';
 import useSound from '../hooks/useSound';
 
-// Create context
 const AppContext = createContext(null);
 
 /**
@@ -101,6 +100,7 @@ export function AppProvider({ children }) {
  * Custom hook to access app context
  * @returns {Object} App context value
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export function useApp() {
   const context = useContext(AppContext);
 

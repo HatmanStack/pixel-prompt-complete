@@ -31,11 +31,13 @@ function useJobPolling(jobId, interval = DEFAULT_INTERVAL) {
     // Reset mounted flag
     isMountedRef.current = true;
 
-    // Reset state when jobId changes
+    // Reset state when jobId changes - this is a valid synchronization use case
     if (!jobId) {
+      /* eslint-disable react-hooks/set-state-in-effect */
       setJobStatus(null);
       setIsPolling(false);
       setError(null);
+      /* eslint-enable react-hooks/set-state-in-effect */
       return;
     }
 

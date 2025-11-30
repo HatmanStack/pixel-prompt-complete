@@ -16,9 +16,28 @@ function PromptEnhancer({ currentPrompt = '', onUsePrompt, disabled = false }) {
 
   // Listen for keyboard shortcut (Ctrl+E)
   useEffect(() => {
-    const handleEnhancePromptTrigger = () => {
+    const handleEnhancePromptTrigger = async () => {
       if (!disabled && !isEnhancing && currentPrompt.trim()) {
-        handleEnhance();
+        setIsEnhancing(true);
+        setError(null);
+        setEnhancedPrompt(null);
+        try {
+          const response = await enhancePrompt(currentPrompt);
+          if (response.short_prompt || response.long_prompt) {
+            setEnhancedPrompt({
+              short: response.short_prompt || currentPrompt,
+              long: response.long_prompt || response.short_prompt || currentPrompt,
+              original: currentPrompt,
+            });
+          } else {
+            throw new Error('No enhanced prompt received');
+          }
+        } catch (err) {
+          console.error('Enhancement error:', err);
+          setError(err.message || 'Failed to enhance prompt');
+        } finally {
+          setIsEnhancing(false);
+        }
       }
     };
 

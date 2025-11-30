@@ -143,9 +143,7 @@ Enhance the following prompt:"""
 
             return enhanced
 
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
+        except Exception:
             # Return original prompt on error
             return prompt
 

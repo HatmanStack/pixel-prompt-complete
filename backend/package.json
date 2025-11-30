@@ -1,0 +1,9 @@
+{
+  "name": "pixel-prompt-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "node scripts/deploy.js"
+  }
+}

@@ -29,14 +29,19 @@ function RandomPromptButton({ onSelectPrompt, disabled = false }) {
   // Listen for keyboard shortcut (Ctrl+R)
   useEffect(() => {
     const handleRandomPromptTrigger = () => {
-      handleClick();
+      if (disabled) return;
+      setIsAnimating(true);
+      setTimeout(() => setIsAnimating(false), 300);
+      const randomPrompt = getRandomPrompt(lastPrompt);
+      setLastPrompt(randomPrompt);
+      onSelectPrompt(randomPrompt);
     };
 
     document.addEventListener('random-prompt-trigger', handleRandomPromptTrigger);
     return () => {
       document.removeEventListener('random-prompt-trigger', handleRandomPromptTrigger);
     };
-  }, [disabled, lastPrompt]); // Re-create listener when disabled or lastPrompt changes
+  }, [disabled, lastPrompt, onSelectPrompt]);
 
   return (
     <button

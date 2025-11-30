@@ -7,7 +7,7 @@ Provides JSON-formatted logging with correlation ID support for CloudWatch Logs.
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any
+from typing import Optional
 
 
 # Configure Python logging for CloudWatch

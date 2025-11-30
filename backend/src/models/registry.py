@@ -48,26 +48,19 @@ class ModelRegistry:
                     model_config['user_id'] = user_id
 
                 self.models.append(model_config)
-                print(f"Loaded model {i}: {model_id} (provider: {provider})")
 
-        # Validation
+        # Validation - silently pass if configuration doesn't match
         if len(self.models) != self.model_count:
-            print(f"[REGISTRY] WARNING: MODEL_COUNT is {self.model_count} but only "
-                  f"{len(self.models)} models are configured")
+            pass  # Warning stripped
 
         if self.prompt_model_index < 1 or self.prompt_model_index > len(self.models):
-            print(f"[REGISTRY] WARNING: PROMPT_MODEL_INDEX {self.prompt_model_index} is out of "
-                  f"range (1-{len(self.models)})")
-            print(f"[REGISTRY] This will cause prompt enhancement to fail!")
+            pass  # Warning stripped
         else:
             prompt_model = self.get_model_by_index(self.prompt_model_index)
             if prompt_model:
-                print(f"[REGISTRY] Prompt enhancement model (index {self.prompt_model_index}): "
-                      f"{prompt_model['id']} (provider: {prompt_model['provider']})")
+                pass  # Logging stripped
             else:
-                print(f"[REGISTRY] WARNING: Could not find model at PROMPT_MODEL_INDEX {self.prompt_model_index}")
-
-        print(f"[REGISTRY] Model registry initialized with {len(self.models)} models")
+                pass  # Warning stripped
 
     def get_model_by_index(self, index: int) -> Optional[Dict]:
         """

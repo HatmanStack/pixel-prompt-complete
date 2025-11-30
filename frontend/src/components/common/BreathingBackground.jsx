@@ -3,21 +3,14 @@
  * Subtle animated background gradient that "breathes"
  */
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import styles from './BreathingBackground.module.css';
 
 function BreathingBackground() {
-  const [isEnabled, setIsEnabled] = useState(() => {
-    // Load preference from localStorage
+  const [isEnabled] = useState(() => {
     const saved = localStorage.getItem('breathingBackgroundEnabled');
-    // Default to enabled if not set
     return saved === null ? true : saved === 'true';
   });
-
-  // Save preference to localStorage when it changes
-  useEffect(() => {
-    localStorage.setItem('breathingBackgroundEnabled', isEnabled.toString());
-  }, [isEnabled]);
 
   // Don't render if disabled
   if (!isEnabled) {

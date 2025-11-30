@@ -3,11 +3,14 @@
   "version": "1.0.0",
   "description": "Full-stack serverless text-to-image generation platform",
   "private": true,
+  "type": "module",
   "scripts": {
-    "update-env": "node scripts/update-frontend-env.js",
-    "update-env:dev": "node scripts/update-frontend-env.js pixel-prompt-dev",
-    "update-env:staging": "node scripts/update-frontend-env.js pixel-prompt-staging",
-    "update-env:prod": "node scripts/update-frontend-env.js pixel-prompt-prod"
+    "test": "cd frontend && npx vitest run --passWithNoTests",
+    "test:backend": "cd backend && PYTHONPATH=src pytest ../tests/backend -v --tb=short",
+    "lint": "cd frontend && npm run lint",
+    "lint:backend": "uvx ruff check backend/src/",
+    "check": "npm run lint && npm run lint:backend && npm test && npm run test:backend",
+    "deploy": "node ./backend/scripts/deploy.js"
   },
   "keywords": ["aws", "lambda", "sam", "react", "vite", "ai", "image-generation"],
   "author": "",
