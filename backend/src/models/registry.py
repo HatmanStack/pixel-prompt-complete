@@ -6,6 +6,7 @@ No provider detection - users specify provider explicitly.
 """
 
 import os
+import warnings
 from typing import List, Dict, Optional
 
 
@@ -49,18 +50,16 @@ class ModelRegistry:
 
                 self.models.append(model_config)
 
-        # Validation - silently pass if configuration doesn't match
+        # Validation - warn if configuration doesn't match
         if len(self.models) != self.model_count:
-            pass  # Warning stripped
+            warnings.warn(f"MODEL_COUNT={self.model_count} but only {len(self.models)} models configured")
 
         if self.prompt_model_index < 1 or self.prompt_model_index > len(self.models):
-            pass  # Warning stripped
+            warnings.warn(f"PROMPT_MODEL_INDEX={self.prompt_model_index} is out of range (1-{len(self.models)})")
         else:
             prompt_model = self.get_model_by_index(self.prompt_model_index)
-            if prompt_model:
-                pass  # Logging stripped
-            else:
-                pass  # Warning stripped
+            if not prompt_model:
+                warnings.warn(f"Prompt model at index {self.prompt_model_index} not found")
 
     def get_model_by_index(self, index: int) -> Optional[Dict]:
         """

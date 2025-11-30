@@ -5,11 +5,11 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import PromptEnhancer from '../../../src/components/generation/PromptEnhancer';
-import * as apiClient from '../../../src/api/client';
+import PromptEnhancer from '@/components/generation/PromptEnhancer';
+import * as apiClient from '@/api/client';
 
 // Mock the API client
-vi.mock('../../../src/api/client');
+vi.mock('@/api/client');
 
 describe('PromptEnhancer', () => {
   const mockOnUsePrompt = vi.fn();

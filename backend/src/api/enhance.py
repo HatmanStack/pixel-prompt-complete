@@ -4,6 +4,7 @@ Prompt Enhancement module for Pixel Prompt Complete.
 Uses configured LLM to expand short prompts into detailed image generation prompts.
 """
 
+import warnings
 from typing import Optional
 from openai import OpenAI
 from google import genai
@@ -143,8 +144,9 @@ Enhance the following prompt:"""
 
             return enhanced
 
-        except Exception:
-            # Return original prompt on error
+        except Exception as e:
+            # Return original prompt on error, but warn about failure
+            warnings.warn(f"Prompt enhancement failed: {e}")
             return prompt
 
     def enhance_safe(self, prompt: str) -> str:

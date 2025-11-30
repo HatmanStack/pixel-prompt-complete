@@ -6,16 +6,16 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import React from 'react';
-import ErrorBoundary from '../../../src/components/features/errors/ErrorBoundary';
-import { logError } from '../../../src/utils/logger';
+import ErrorBoundary from '@/components/features/errors/ErrorBoundary';
+import { logError } from '@/utils/logger';
 
 // Mock the logger
-vi.mock('../../../src/utils/logger', () => ({
+vi.mock('@/utils/logger', () => ({
   logError: vi.fn(),
 }));
 
 // Mock correlation ID generation
-vi.mock('../../../src/utils/correlation', () => ({
+vi.mock('@/utils/correlation', () => ({
   generateCorrelationId: () => 'test-correlation-id',
 }));
 

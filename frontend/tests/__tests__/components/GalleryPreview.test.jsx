@@ -5,7 +5,7 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import GalleryPreview from '../../../src/components/gallery/GalleryPreview';
+import GalleryPreview from '@/components/gallery/GalleryPreview';
 
 describe('GalleryPreview', () => {
   const mockOnClick = vi.fn();

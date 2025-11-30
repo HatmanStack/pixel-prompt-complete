@@ -6,11 +6,14 @@
 import { useState } from 'react';
 import styles from './BreathingBackground.module.css';
 
+// Shared helper for reading localStorage preference
+const getBreathingBackgroundEnabled = () => {
+  const saved = localStorage.getItem('breathingBackgroundEnabled');
+  return saved === null ? true : saved === 'true';
+};
+
 function BreathingBackground() {
-  const [isEnabled] = useState(() => {
-    const saved = localStorage.getItem('breathingBackgroundEnabled');
-    return saved === null ? true : saved === 'true';
-  });
+  const [isEnabled] = useState(getBreathingBackgroundEnabled);
 
   // Don't render if disabled
   if (!isEnabled) {
@@ -28,10 +31,7 @@ function BreathingBackground() {
 
 // Export toggle control component
 export function BreathingBackgroundToggle() {
-  const [isEnabled, setIsEnabled] = useState(() => {
-    const saved = localStorage.getItem('breathingBackgroundEnabled');
-    return saved === null ? true : saved === 'true';
-  });
+  const [isEnabled, setIsEnabled] = useState(getBreathingBackgroundEnabled);
 
   const handleToggle = () => {
     const newValue = !isEnabled;

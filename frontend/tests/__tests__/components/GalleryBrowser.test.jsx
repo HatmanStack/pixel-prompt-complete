@@ -5,11 +5,11 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import GalleryBrowser from '../../../src/components/gallery/GalleryBrowser';
-import * as useGalleryHook from '../../../src/hooks/useGallery';
+import GalleryBrowser from '@/components/gallery/GalleryBrowser';
+import * as useGalleryHook from '@/hooks/useGallery';
 
 // Mock the useGallery hook
-vi.mock('../../../src/hooks/useGallery');
+vi.mock('@/hooks/useGallery');
 
 describe('GalleryBrowser', () => {
   const mockOnGallerySelect = vi.fn();

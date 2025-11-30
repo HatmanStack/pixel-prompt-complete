@@ -167,7 +167,6 @@ class TestBedrockHandlers:
             mock_boto3.return_value = mock_client
 
             # Setup mock response - Nova returns images array
-            import io
             response_body = f'{{"images": ["{SAMPLE_IMAGE_BASE64}"]}}'
             mock_stream = Mock()
             mock_stream.read.return_value = response_body.encode()

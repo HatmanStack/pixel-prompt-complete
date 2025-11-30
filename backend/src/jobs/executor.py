@@ -5,6 +5,7 @@ Executes image generation across multiple AI models concurrently using threading
 """
 
 import time
+import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict
 from models.handlers import get_handler
@@ -70,8 +71,8 @@ class JobExecutor:
                     # Mark as error
                     try:
                         self.job_manager.mark_model_error(job_id, model['id'], str(e))
-                    except Exception:
-                        pass  # Update error handling stripped
+                    except Exception as update_error:
+                        warnings.warn(f"Failed to update job status for {model['id']}: {update_error}")
 
 
     def _execute_model(

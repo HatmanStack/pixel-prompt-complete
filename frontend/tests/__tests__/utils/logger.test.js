@@ -10,7 +10,7 @@ import {
   logDebug,
   serializeError,
   getBrowserMetadata,
-} from '../../../src/utils/logger';
+} from '@/utils/logger';
 
 // Mock fetch globally
 globalThis.fetch = vi.fn();

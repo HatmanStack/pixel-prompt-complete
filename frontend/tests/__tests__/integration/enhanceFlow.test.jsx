@@ -6,14 +6,14 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import GenerationPanel from '../../../src/components/generation/GenerationPanel';
-import { AppProvider } from '../../../src/context/AppContext';
-import { ToastProvider } from '../../../src/context/ToastContext';
-import * as apiClient from '../../../src/api/client';
-import { mockEnhanceResponse, mockGenerateResponse, mockJobStatusCompleted } from '../../../src/fixtures/apiResponses';
+import GenerationPanel from '@/components/generation/GenerationPanel';
+import { AppProvider } from '@/context/AppContext';
+import { ToastProvider } from '@/context/ToastContext';
+import * as apiClient from '@/api/client';
+import { mockEnhanceResponse, mockGenerateResponse, mockJobStatusCompleted } from '@/fixtures/apiResponses';
 
 // Mock the API client
-vi.mock('../../../src/api/client');
+vi.mock('@/api/client');
 
 describe('Enhance Prompt Flow - Integration', () => {
   beforeEach(() => {

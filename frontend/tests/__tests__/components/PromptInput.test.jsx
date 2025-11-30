@@ -5,7 +5,7 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import PromptInput from '../../../src/components/generation/PromptInput';
+import PromptInput from '@/components/generation/PromptInput';
 
 describe('PromptInput', () => {
   const mockOnChange = vi.fn();

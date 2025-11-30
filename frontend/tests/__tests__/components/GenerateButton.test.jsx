@@ -5,7 +5,7 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import GenerateButton from '../../../src/components/generation/GenerateButton';
+import GenerateButton from '@/components/generation/GenerateButton';
 
 describe('GenerateButton', () => {
   const mockOnClick = vi.fn();

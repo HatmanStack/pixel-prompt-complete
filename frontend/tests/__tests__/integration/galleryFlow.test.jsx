@@ -7,15 +7,15 @@ import { useState, useEffect } from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import GalleryBrowser from '../../../src/components/gallery/GalleryBrowser';
-import * as apiClient from '../../../src/api/client';
-import { mockGalleryListResponse, mockGalleryDetailResponse } from '../../../src/fixtures/apiResponses';
+import GalleryBrowser from '@/components/gallery/GalleryBrowser';
+import * as apiClient from '@/api/client';
+import { mockGalleryListResponse, mockGalleryDetailResponse } from '@/fixtures/apiResponses';
 
 // Mock the API client
-vi.mock('../../../src/api/client');
+vi.mock('@/api/client');
 
 // Mock the useGallery hook to use real API calls
-vi.mock('../../../src/hooks/useGallery', () => ({
+vi.mock('@/hooks/useGallery', () => ({
   default: function useGallery() {
     const [galleries, setGalleries] = useState([]);
     const [selectedGallery, setSelectedGallery] = useState(null);

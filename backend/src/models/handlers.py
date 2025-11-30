@@ -9,6 +9,7 @@ import base64
 import json
 import requests
 import time
+import warnings
 from typing import Dict, Callable
 from openai import OpenAI
 import boto3
@@ -634,6 +635,6 @@ def get_handler(provider: str) -> Callable:
 
     handler = handlers.get(provider, handle_generic)
     if provider not in handlers:
-        pass  # Warning stripped
+        warnings.warn(f"Unknown provider '{provider}', falling back to generic handler")
 
     return handler

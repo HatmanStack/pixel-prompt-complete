@@ -5,11 +5,11 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi } from 'vitest';
-import { ToastProvider } from '../../../src/context/ToastContext';
-import ImageGrid from '../../../src/components/generation/ImageGrid';
+import { ToastProvider } from '@/context/ToastContext';
+import ImageGrid from '@/components/generation/ImageGrid';
 
 // Mock imageHelpers
-vi.mock('../../../src/utils/imageHelpers', () => ({
+vi.mock('@/utils/imageHelpers', () => ({
   downloadImage: vi.fn()
 }));
 

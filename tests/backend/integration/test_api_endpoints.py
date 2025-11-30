@@ -2,7 +2,7 @@
 Integration tests for Pixel Prompt Complete API endpoints.
 
 These tests require a deployed backend or local SAM environment.
-Run with: pytest tests/integration/test_api_endpoints.py -v
+Run with: pytest tests/backend/integration/test_api_endpoints.py -v
 
 Prerequisites:
 - Set API_ENDPOINT environment variable to your deployed API

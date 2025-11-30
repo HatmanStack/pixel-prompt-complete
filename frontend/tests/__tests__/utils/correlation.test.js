@@ -8,7 +8,7 @@ import {
   getCorrelationId,
   clearCorrelationId,
   setCorrelationId,
-} from '../../../src/utils/correlation';
+} from '@/utils/correlation';
 
 describe('Correlation ID Utility', () => {
   beforeEach(() => {
