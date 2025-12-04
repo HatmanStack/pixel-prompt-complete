@@ -32,7 +32,7 @@ export default defineConfig({
     outDir: 'dist',
     rollupOptions: {
       output: {
-        manualChunks(id) {
+        manualChunks(id: string) {
           // React core libraries
           if (id.includes('node_modules')) {
             if (id.includes('react') || id.includes('react-dom')) {
@@ -57,14 +57,15 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'jsdom',
-    setupFiles: './tests/setupTests.js',
-    include: ['tests/**/*.test.{js,jsx}'],
+    setupFiles: './tests/setupTests.ts',
+    include: ['tests/**/*.test.{js,jsx,ts,tsx}'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
-      include: ['src/**/*.{js,jsx}'],
+      include: ['src/**/*.{js,jsx,ts,tsx}'],
       exclude: [
         'src/main.jsx',
+        'src/main.tsx',
       ],
     },
   },
