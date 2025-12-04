@@ -2,7 +2,7 @@
  * Tests for ErrorBoundary and ErrorFallback components
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { ErrorBoundary } from '../../../../../src/components/features/errors/ErrorBoundary';
 import { ErrorFallback } from '../../../../../src/components/features/errors/ErrorFallback';
