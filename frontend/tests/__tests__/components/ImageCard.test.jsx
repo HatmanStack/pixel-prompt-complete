@@ -2,7 +2,7 @@
  * Tests for ImageCard Component
  */
 
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import ImageCard from '@/components/generation/ImageCard';

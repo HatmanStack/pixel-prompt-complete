@@ -4,6 +4,37 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useAppStore } from '../../../src/stores/useAppStore';
+import type { Job, ImageResult, GalleryPreview } from '../../../src/types';
+
+// Helper to create mock Job objects
+const createMockJob = (overrides: Partial<Job> = {}): Job => ({
+  jobId: 'test-123',
+  status: 'in_progress',
+  prompt: 'test prompt',
+  createdAt: '2024-01-01T00:00:00Z',
+  results: [],
+  modelCount: 4,
+  ...overrides,
+});
+
+// Helper to create mock ImageResult objects
+const createMockImageResult = (overrides: Partial<ImageResult> = {}): ImageResult => ({
+  model: 'Test Model',
+  provider: 'test',
+  url: 'https://example.com/image.png',
+  status: 'success',
+  ...overrides,
+});
+
+// Helper to create mock GalleryPreview objects
+const createMockGalleryPreview = (overrides: Partial<GalleryPreview> = {}): GalleryPreview => ({
+  id: 'gal-1',
+  timestamp: '2024-01-01T00:00:00Z',
+  prompt: 'test prompt',
+  thumbnailUrl: 'https://example.com/thumb.png',
+  imageCount: 4,
+  ...overrides,
+});
 
 describe('useAppStore', () => {
   beforeEach(() => {
@@ -35,22 +66,22 @@ describe('useAppStore', () => {
 
   describe('job actions', () => {
     it('setCurrentJob sets job', () => {
-      const job = { jobId: 'test-123', status: 'in_progress' as const };
+      const job = createMockJob();
       useAppStore.getState().setCurrentJob(job);
 
       expect(useAppStore.getState().currentJob).toEqual(job);
     });
 
     it('setCurrentJob can clear job', () => {
-      useAppStore.getState().setCurrentJob({ jobId: 'test', status: 'completed' as const });
+      useAppStore.getState().setCurrentJob(createMockJob({ status: 'completed' }));
       useAppStore.getState().setCurrentJob(null);
 
       expect(useAppStore.getState().currentJob).toBeNull();
     });
 
     it('updateJobStatus updates current job', () => {
-      const initial = { jobId: 'test', status: 'in_progress' as const };
-      const updated = { jobId: 'test', status: 'completed' as const };
+      const initial = createMockJob({ status: 'in_progress' });
+      const updated = createMockJob({ status: 'completed' });
 
       useAppStore.getState().setCurrentJob(initial);
       useAppStore.getState().updateJobStatus(updated);
@@ -84,15 +115,15 @@ describe('useAppStore', () => {
 
   describe('image actions', () => {
     it('setGeneratedImages sets all images', () => {
-      const images = [{ model: 'Test', status: 'completed' }];
-      useAppStore.getState().setGeneratedImages(images as never);
+      const images = [createMockImageResult()];
+      useAppStore.getState().setGeneratedImages(images);
 
       expect(useAppStore.getState().generatedImages).toEqual(images);
     });
 
     it('updateGeneratedImage updates single image at index', () => {
-      const image = { model: 'DALL-E', status: 'completed' as const, image: 'url' };
-      useAppStore.getState().updateGeneratedImage(2, image as never);
+      const image = createMockImageResult({ model: 'DALL-E' });
+      useAppStore.getState().updateGeneratedImage(2, image);
 
       const images = useAppStore.getState().generatedImages;
       expect(images[2]).toEqual(image);
@@ -102,9 +133,9 @@ describe('useAppStore', () => {
 
     it('resetGeneration clears job, images, and generating flag', () => {
       // Set up some state
-      useAppStore.getState().setCurrentJob({ jobId: 'test', status: 'completed' as const });
+      useAppStore.getState().setCurrentJob(createMockJob({ status: 'completed' }));
       useAppStore.getState().setIsGenerating(true);
-      useAppStore.getState().updateGeneratedImage(0, { model: 'Test' } as never);
+      useAppStore.getState().updateGeneratedImage(0, createMockImageResult());
 
       // Reset
       useAppStore.getState().resetGeneration();
@@ -118,18 +149,18 @@ describe('useAppStore', () => {
 
   describe('gallery actions', () => {
     it('setSelectedGallery sets gallery', () => {
-      const gallery = { id: 'gal-1', timestamp: '2024-01-01', imageCount: 5 };
-      useAppStore.getState().setSelectedGallery(gallery as never);
+      const gallery = createMockGalleryPreview({ imageCount: 5 });
+      useAppStore.getState().setSelectedGallery(gallery);
 
       expect(useAppStore.getState().selectedGallery).toEqual(gallery);
     });
 
     it('setGalleries sets gallery list', () => {
       const galleries = [
-        { id: 'gal-1', timestamp: '2024-01-01' },
-        { id: 'gal-2', timestamp: '2024-01-02' },
+        createMockGalleryPreview({ id: 'gal-1' }),
+        createMockGalleryPreview({ id: 'gal-2', timestamp: '2024-01-02T00:00:00Z' }),
       ];
-      useAppStore.getState().setGalleries(galleries as never);
+      useAppStore.getState().setGalleries(galleries);
 
       expect(useAppStore.getState().galleries).toEqual(galleries);
     });
