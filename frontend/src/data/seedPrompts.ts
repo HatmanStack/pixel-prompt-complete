@@ -4,7 +4,9 @@
  * Categorized by style for variety
  */
 
-export const seedPrompts = [
+export type SeedPrompt = string;
+
+export const seedPrompts: SeedPrompt[] = [
   // Landscapes & Nature (15)
   'A serene mountain lake at sunset with reflections',
   'Cherry blossom trees in full bloom along a winding path',
@@ -90,10 +92,10 @@ export const seedPrompts = [
 
 /**
  * Get a random prompt from the collection
- * @param {string|null} lastPrompt - Previously selected prompt to avoid duplicates
- * @returns {string} Random seed prompt
+ * @param lastPrompt - Previously selected prompt to avoid duplicates
+ * @returns Random seed prompt
  */
-export function getRandomPrompt(lastPrompt = null) {
+export function getRandomPrompt(lastPrompt: SeedPrompt | null = null): SeedPrompt {
   if (seedPrompts.length === 0) {
     return '';
   }
