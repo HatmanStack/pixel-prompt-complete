@@ -4,23 +4,54 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { listGalleries, getGallery } from '../api/client';
-import { base64ToBlobUrl } from '../utils/imageHelpers';
+import { listGalleries, getGallery } from '@/api/client';
+import { base64ToBlobUrl } from '@/utils/imageHelpers';
+import type { GalleryPreview } from '@/types';
+
+interface GalleryImage {
+  model: string;
+  url?: string;
+  output?: string;
+  blobUrl?: string;
+}
+
+interface SelectedGallery {
+  id: string;
+  images: GalleryImage[];
+  total: number;
+}
+
+interface GalleryWithPreview extends GalleryPreview {
+  previewData?: string;
+  preview?: string;
+}
+
+interface UseGalleryReturn {
+  galleries: GalleryWithPreview[];
+  selectedGallery: SelectedGallery | null;
+  loading: boolean;
+  error: string | null;
+  fetchGalleries: () => Promise<void>;
+  loadGallery: (galleryId: string) => Promise<void>;
+  clearSelection: () => void;
+  refresh: () => void;
+  autoRefresh: boolean;
+  setAutoRefresh: (value: boolean) => void;
+}
 
 /**
  * Custom hook for gallery management
- * @returns {Object} Gallery state and functions
  */
-function useGallery() {
-  const [galleries, setGalleries] = useState([]);
-  const [selectedGallery, setSelectedGallery] = useState(null);
+function useGallery(): UseGalleryReturn {
+  const [galleries, setGalleries] = useState<GalleryWithPreview[]>([]);
+  const [selectedGallery, setSelectedGallery] = useState<SelectedGallery | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
 
   // Track blob URLs for cleanup to prevent memory leaks
-  const previewBlobUrlsRef = useRef([]);
-  const imageBlobUrlsRef = useRef([]);
+  const previewBlobUrlsRef = useRef<string[]>([]);
+  const imageBlobUrlsRef = useRef<string[]>([]);
 
   /**
    * Fetch list of all galleries
@@ -33,7 +64,7 @@ function useGallery() {
       const response = await listGalleries();
 
       // Revoke old preview blob URLs to prevent memory leaks
-      previewBlobUrlsRef.current.forEach(url => {
+      previewBlobUrlsRef.current.forEach((url) => {
         if (url && url.startsWith('blob:')) {
           URL.revokeObjectURL(url);
         }
@@ -41,7 +72,9 @@ function useGallery() {
       previewBlobUrlsRef.current = [];
 
       // Convert preview base64 data to blob URLs
-      const galleriesWithPreviews = (response.galleries || []).map(gallery => {
+      const galleriesWithPreviews = (
+        (response.galleries || []) as GalleryWithPreview[]
+      ).map((gallery) => {
         if (gallery.previewData) {
           try {
             const previewBlob = base64ToBlobUrl(gallery.previewData);
@@ -49,7 +82,7 @@ function useGallery() {
               previewBlobUrlsRef.current.push(previewBlob);
               return {
                 ...gallery,
-                preview: previewBlob,  // Replace URL with blob URL
+                preview: previewBlob,
               };
             }
           } catch (err) {
@@ -62,7 +95,7 @@ function useGallery() {
       setGalleries(galleriesWithPreviews);
     } catch (err) {
       console.error('Error fetching galleries:', err);
-      setError(err.message || 'Failed to load galleries');
+      setError(err instanceof Error ? err.message : 'Failed to load galleries');
       setGalleries([]);
     } finally {
       setLoading(false);
@@ -71,9 +104,8 @@ function useGallery() {
 
   /**
    * Load a specific gallery's images
-   * @param {string} galleryId - The gallery ID to load
    */
-  const loadGallery = useCallback(async (galleryId) => {
+  const loadGallery = useCallback(async (galleryId: string) => {
     if (!galleryId) {
       console.warn('loadGallery called with no galleryId');
       return;
@@ -84,7 +116,7 @@ function useGallery() {
 
     try {
       // Revoke old image blob URLs to prevent memory leaks
-      imageBlobUrlsRef.current.forEach(url => {
+      imageBlobUrlsRef.current.forEach((url) => {
         if (url && url.startsWith('blob:')) {
           URL.revokeObjectURL(url);
         }
@@ -94,16 +126,15 @@ function useGallery() {
       const response = await getGallery(galleryId);
 
       // Convert base64 images to blob URLs
-      const imagesWithBlobs = (response.images || []).map(img => {
+      const imagesWithBlobs = ((response.images || []) as GalleryImage[]).map((img) => {
         if (img.output) {
           try {
-            // Convert base64 to blob URL
             const blobUrl = base64ToBlobUrl(img.output);
             if (blobUrl) {
               imageBlobUrlsRef.current.push(blobUrl);
               return {
                 ...img,
-                blobUrl,  // Add blob URL for display
+                blobUrl,
               };
             }
           } catch (err) {
@@ -114,13 +145,13 @@ function useGallery() {
       });
 
       setSelectedGallery({
-        id: response.galleryId,
+        id: response.id,
         images: imagesWithBlobs,
-        total: response.total || 0,
+        total: response.images?.length || 0,
       });
     } catch (err) {
       console.error(`Error loading gallery ${galleryId}:`, err);
-      setError(err.message || 'Failed to load gallery');
+      setError(err instanceof Error ? err.message : 'Failed to load gallery');
       setSelectedGallery(null);
     } finally {
       setLoading(false);
@@ -135,7 +166,7 @@ function useGallery() {
   }, []);
 
   /**
-   * Refresh gallery list (for auto-refresh after generation)
+   * Refresh gallery list
    */
   const refresh = useCallback(() => {
     fetchGalleries();
@@ -146,29 +177,27 @@ function useGallery() {
     fetchGalleries();
   }, [fetchGalleries]);
 
-  // Auto-refresh galleries if enabled (useful during image generation)
+  // Auto-refresh galleries if enabled
   useEffect(() => {
     if (!autoRefresh) return;
 
     const interval = setInterval(() => {
       fetchGalleries();
-    }, 10000); // Refresh every 10 seconds
+    }, 10000);
 
     return () => clearInterval(interval);
   }, [autoRefresh, fetchGalleries]);
 
-  // Cleanup: Revoke all blob URLs on unmount to prevent memory leaks
+  // Cleanup: Revoke all blob URLs on unmount
   useEffect(() => {
     return () => {
-      // Revoke preview blob URLs
-      previewBlobUrlsRef.current.forEach(url => {
+      previewBlobUrlsRef.current.forEach((url) => {
         if (url && url.startsWith('blob:')) {
           URL.revokeObjectURL(url);
         }
       });
 
-      // Revoke image blob URLs
-      imageBlobUrlsRef.current.forEach(url => {
+      imageBlobUrlsRef.current.forEach((url) => {
         if (url && url.startsWith('blob:')) {
           URL.revokeObjectURL(url);
         }
