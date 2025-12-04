@@ -3,7 +3,7 @@
  * Sends frontend errors to backend /log endpoint for CloudWatch logging
  */
 
-import { API_BASE_URL } from '../api/config';
+import { API_BASE_URL } from '@/api/config';
 import { generateCorrelationId } from './correlation';
 
 /**
@@ -14,33 +14,46 @@ export const LogLevel = {
   WARNING: 'WARNING',
   INFO: 'INFO',
   DEBUG: 'DEBUG',
-};
+} as const;
+
+type LogLevelType = (typeof LogLevel)[keyof typeof LogLevel];
+
+interface LogPayload {
+  level: LogLevelType;
+  message: string;
+  stack?: string;
+  metadata: Record<string, unknown>;
+}
+
+interface LogOptions {
+  error?: Error | null;
+  correlationId?: string;
+  metadata?: Record<string, unknown>;
+}
+
+interface LogContext {
+  correlationId?: string;
+  [key: string]: unknown;
+}
 
 /**
  * Deduplication cache
- * Stores error hashes to prevent duplicate logging within time window
  */
-const errorCache = new Map();
+const errorCache = new Map<string, number>();
 const DEDUP_WINDOW_MS = 60000; // 1 minute
 
 /**
  * Generate hash for error deduplication
- * @param {string} message - Error message
- * @param {string} stack - Error stack trace
- * @returns {string} Hash string
  */
-function generateErrorHash(message, stack) {
-  // Simple hash based on message and first line of stack
+function generateErrorHash(message: string, stack: string): string {
   const stackFirstLine = stack ? stack.split('\n')[0] : '';
   return `${message}:${stackFirstLine}`;
 }
 
 /**
  * Check if error should be deduplicated
- * @param {string} hash - Error hash
- * @returns {boolean} True if error was recently logged
  */
-function shouldDeduplicate(hash) {
+function shouldDeduplicate(hash: string): boolean {
   const lastLogged = errorCache.get(hash);
   if (lastLogged && Date.now() - lastLogged < DEDUP_WINDOW_MS) {
     return true;
@@ -52,7 +65,7 @@ function shouldDeduplicate(hash) {
 /**
  * Clean up old entries from error cache
  */
-function cleanupErrorCache() {
+function cleanupErrorCache(): void {
   const now = Date.now();
   for (const [hash, timestamp] of errorCache.entries()) {
     if (now - timestamp > DEDUP_WINDOW_MS) {
@@ -66,11 +79,13 @@ setInterval(cleanupErrorCache, DEDUP_WINDOW_MS);
 
 /**
  * Serialize error object to loggable format
- * @param {Error} error - Error object
- * @returns {Object} Serialized error
  */
-function serializeError(error) {
-  if (!error) return {};
+export function serializeError(error: Error | null | undefined): {
+  message: string;
+  stack: string;
+  name: string;
+} {
+  if (!error) return { message: '', stack: '', name: 'Error' };
 
   return {
     message: error.message || String(error),
@@ -81,9 +96,8 @@ function serializeError(error) {
 
 /**
  * Get browser metadata
- * @returns {Object} Browser information
  */
-function getBrowserMetadata() {
+export function getBrowserMetadata(): Record<string, string> {
   return {
     userAgent: navigator.userAgent,
     viewport: `${window.innerWidth}x${window.innerHeight}`,
@@ -94,20 +108,16 @@ function getBrowserMetadata() {
 
 /**
  * Send log to backend endpoint
- * @param {string} level - Log level
- * @param {string} message - Log message
- * @param {Object} options - Additional options
- * @returns {Promise<void>}
  */
-async function sendLog(level, message, options = {}) {
-  const {
-    error,
-    correlationId = generateCorrelationId(),
-    metadata = {},
-  } = options;
+export async function sendLog(
+  level: LogLevelType,
+  message: string,
+  options: LogOptions = {}
+): Promise<void> {
+  const { error, correlationId = generateCorrelationId(), metadata = {} } = options;
 
   // Build log payload
-  const payload = {
+  const payload: LogPayload = {
     level,
     message,
     metadata: {
@@ -149,17 +159,18 @@ async function sendLog(level, message, options = {}) {
     }
   } catch (err) {
     // Fail silently - logging failure should not crash app
-    console.warn('Error sending log to backend:', err.message);
+    console.warn('Error sending log to backend:', err instanceof Error ? err.message : err);
   }
 }
 
 /**
  * Log an error
- * @param {string} message - Error message
- * @param {Error|Object} error - Error object
- * @param {Object} context - Additional context
  */
-export function logError(message, error = null, context = {}) {
+export function logError(
+  message: string,
+  error: Error | null = null,
+  context: LogContext = {}
+): Promise<void> {
   const { correlationId, ...metadata } = context;
 
   return sendLog(LogLevel.ERROR, message, {
@@ -171,10 +182,8 @@ export function logError(message, error = null, context = {}) {
 
 /**
  * Log a warning
- * @param {string} message - Warning message
- * @param {Object} context - Additional context
  */
-export function logWarning(message, context = {}) {
+export function logWarning(message: string, context: LogContext = {}): Promise<void> {
   const { correlationId, ...metadata } = context;
 
   return sendLog(LogLevel.WARNING, message, {
@@ -185,10 +194,8 @@ export function logWarning(message, context = {}) {
 
 /**
  * Log an info message
- * @param {string} message - Info message
- * @param {Object} context - Additional context
  */
-export function logInfo(message, context = {}) {
+export function logInfo(message: string, context: LogContext = {}): Promise<void> {
   const { correlationId, ...metadata } = context;
 
   return sendLog(LogLevel.INFO, message, {
@@ -199,10 +206,8 @@ export function logInfo(message, context = {}) {
 
 /**
  * Log a debug message
- * @param {string} message - Debug message
- * @param {Object} context - Additional context
  */
-export function logDebug(message, context = {}) {
+export function logDebug(message: string, context: LogContext = {}): Promise<void> {
   const { correlationId, ...metadata } = context;
 
   return sendLog(LogLevel.DEBUG, message, {
@@ -210,6 +215,3 @@ export function logDebug(message, context = {}) {
     metadata,
   });
 }
-
-// Export for testing
-export { sendLog, serializeError, getBrowserMetadata };

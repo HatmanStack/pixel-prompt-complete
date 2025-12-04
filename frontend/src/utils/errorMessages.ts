@@ -3,10 +3,28 @@
  * Maps HTTP status codes and error types to user-friendly messages
  */
 
+interface ErrorTemplate {
+  title: string;
+  message: string;
+  icon: string;
+  retryable: boolean;
+}
+
+interface FormattedError extends ErrorTemplate {
+  originalError: string;
+}
+
+interface ErrorWithMeta extends Error {
+  code?: string;
+  status?: number;
+  retryAfter?: number;
+  maxLength?: number;
+}
+
 /**
  * Error message templates based on HTTP status codes
  */
-export const ERROR_MESSAGES = {
+export const ERROR_MESSAGES: Record<number | string, ErrorTemplate> = {
   // Client Errors (4xx)
   400: {
     title: 'Invalid Request',
@@ -68,7 +86,8 @@ export const ERROR_MESSAGES = {
   // Network Errors
   NETWORK_ERROR: {
     title: 'Connection Failed',
-    message: 'Unable to connect to the server. Please check your internet connection and try again.',
+    message:
+      'Unable to connect to the server. Please check your internet connection and try again.',
     icon: '📡',
     retryable: true,
   },
@@ -91,7 +110,7 @@ export const ERROR_MESSAGES = {
 /**
  * Specific error code messages (override status code messages)
  */
-export const SPECIFIC_ERROR_MESSAGES = {
+export const SPECIFIC_ERROR_MESSAGES: Record<string, ErrorTemplate> = {
   RATE_LIMIT_EXCEEDED: {
     title: 'Rate Limit Exceeded',
     message: 'You have exceeded the rate limit. Please wait {retryAfter} before trying again.',
@@ -100,7 +119,8 @@ export const SPECIFIC_ERROR_MESSAGES = {
   },
   INAPPROPRIATE_CONTENT: {
     title: 'Content Filtered',
-    message: 'Your prompt contains inappropriate content and cannot be processed. Please revise your prompt.',
+    message:
+      'Your prompt contains inappropriate content and cannot be processed. Please revise your prompt.',
     icon: '🚫',
     retryable: false,
   },
@@ -131,11 +151,44 @@ export const SPECIFIC_ERROR_MESSAGES = {
 };
 
 /**
- * Get error message for a given error
- * @param {Error|Object} error - Error object or HTTP error response
- * @returns {Object} Error message object with title, message, icon, retryable
+ * Format retry-after time in human-readable format
  */
-export function getErrorMessage(error) {
+function formatRetryAfter(seconds: number): string {
+  if (seconds < 60) {
+    return `${seconds} second${seconds !== 1 ? 's' : ''}`;
+  }
+
+  const minutes = Math.ceil(seconds / 60);
+  return `${minutes} minute${minutes !== 1 ? 's' : ''}`;
+}
+
+/**
+ * Format error message with dynamic values
+ */
+function formatErrorMessage(template: ErrorTemplate, error: ErrorWithMeta): FormattedError {
+  let message = template.message;
+
+  // Replace {retryAfter} placeholder
+  if (error.retryAfter) {
+    message = message.replace('{retryAfter}', formatRetryAfter(error.retryAfter));
+  }
+
+  // Replace {maxLength} placeholder
+  if (error.maxLength) {
+    message = message.replace('{maxLength}', String(error.maxLength));
+  }
+
+  return {
+    ...template,
+    message,
+    originalError: error.message || String(error),
+  };
+}
+
+/**
+ * Get error message for a given error
+ */
+export function getErrorMessage(error: ErrorWithMeta): FormattedError {
   // Check for specific error code first
   if (error.code && SPECIFIC_ERROR_MESSAGES[error.code]) {
     return formatErrorMessage(SPECIFIC_ERROR_MESSAGES[error.code], error);
@@ -160,53 +213,10 @@ export function getErrorMessage(error) {
 }
 
 /**
- * Format error message with dynamic values
- * @param {Object} template - Error message template
- * @param {Error|Object} error - Error object
- * @returns {Object} Formatted error message
- */
-function formatErrorMessage(template, error) {
-  let message = template.message;
-
-  // Replace {retryAfter} placeholder
-  if (error.retryAfter) {
-    message = message.replace('{retryAfter}', formatRetryAfter(error.retryAfter));
-  }
-
-  // Replace {maxLength} placeholder
-  if (error.maxLength) {
-    message = message.replace('{maxLength}', error.maxLength);
-  }
-
-  return {
-    ...template,
-    message,
-    originalError: error.message || String(error),
-  };
-}
-
-/**
- * Format retry-after time in human-readable format
- * @param {number} seconds - Seconds until retry is allowed
- * @returns {string} Formatted time string
- */
-function formatRetryAfter(seconds) {
-  if (seconds < 60) {
-    return `${seconds} second${seconds !== 1 ? 's' : ''}`;
-  }
-
-  const minutes = Math.ceil(seconds / 60);
-  return `${minutes} minute${minutes !== 1 ? 's' : ''}`;
-}
-
-/**
  * Get field-specific error message for validation errors
- * @param {string} field - Field name
- * @param {string} constraint - Constraint that was violated
- * @returns {string} Specific error message
  */
-export function getValidationMessage(field, constraint) {
-  const messages = {
+export function getValidationMessage(field: string, constraint: string): string {
+  const messages: Record<string, Record<string, string>> = {
     prompt: {
       required: 'Prompt is required',
       tooLong: 'Prompt is too long (maximum 1000 characters)',
