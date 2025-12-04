@@ -6,10 +6,10 @@
   --color-primary: #25292e;
   --color-secondary: #3a3c3f;
 
-  /* Accent colors */
-  --color-accent: #B58392;
-  --color-accent-hover: #C99AAB;
-  --color-accent-muted: #958DA5;
+  /* Accent colors - adjusted for WCAG AA contrast compliance */
+  --color-accent: #C49AAB;
+  --color-accent-hover: #D5B0BF;
+  --color-accent-muted: #A9A1B5;
 
   /* Text */
   --color-text: #FFFFFF;
