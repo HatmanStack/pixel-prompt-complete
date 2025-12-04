@@ -8,7 +8,7 @@ import { useAppStore } from '@/stores/useAppStore';
 import useJobPolling from '@/hooks/useJobPolling';
 import useImageLoader from '@/hooks/useImageLoader';
 import { generateImages } from '@/api/client';
-import { useToast } from '@/context/ToastContext';
+import { useToast } from '@/stores/useToastStore';
 import { useSound } from '@/hooks/useSound';
 import PromptInput from './PromptInput';
 import RandomPromptButton from '@/components/features/generation/RandomPromptButton';
@@ -248,9 +248,10 @@ export const GenerationPanel: FC = () => {
     : 0;
 
   return (
-    <div className="w-full flex flex-col gap-8 md:gap-6">
+    <article className="w-full flex flex-col gap-8 md:gap-6" aria-label="Image Generation">
       {/* Input Section */}
-      <div className="flex flex-col gap-6 md:gap-4">
+      <section className="flex flex-col gap-6 md:gap-4" aria-labelledby="prompt-section-heading">
+        <h2 id="prompt-section-heading" className="sr-only">Create Your Image</h2>
         <PromptInput disabled={isGenerating} />
 
         <div className="flex gap-4 flex-col md:flex-row">
@@ -300,28 +301,30 @@ export const GenerationPanel: FC = () => {
 
         {/* Progress */}
         {isGenerating && (
-          <div className="flex flex-col gap-2" aria-live="polite">
+          <div className="flex flex-col gap-2" role="progressbar" aria-valuenow={Math.round(progressPercent)} aria-valuemin={0} aria-valuemax={100} aria-label="Generation progress">
             <div className="w-full h-2 bg-secondary rounded-full overflow-hidden">
               <div
                 className="h-full bg-gradient-to-r from-accent to-accent-muted rounded-full transition-all duration-200"
                 style={{ width: `${progressPercent}%` }}
               />
             </div>
-            <p className="text-sm text-text-secondary text-center m-0">{getProgressText()}</p>
+            <p className="text-sm text-text-secondary text-center m-0" aria-live="polite">{getProgressText()}</p>
           </div>
         )}
-      </div>
+      </section>
 
       {/* Gallery Section */}
-      <div>
+      <section aria-labelledby="gallery-section-heading">
+        <h2 id="gallery-section-heading" className="sr-only">Previous Generations</h2>
         <GalleryBrowser onGallerySelect={handleGallerySelect} />
-      </div>
+      </section>
 
       {/* Results Section */}
-      <div className="w-full">
+      <section className="w-full" aria-labelledby="results-section-heading">
+        <h2 id="results-section-heading" className="sr-only">Generated Images</h2>
         <ImageGrid images={generatedImages} modelNames={modelNames} />
-      </div>
-    </div>
+      </section>
+    </article>
   );
 };
 

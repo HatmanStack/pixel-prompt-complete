@@ -72,9 +72,13 @@ export const PromptInput: FC<PromptInputProps> = ({
 
   return (
     <div className="flex w-full flex-col gap-2">
+      <label htmlFor="prompt-input" className="sr-only">
+        Image prompt
+      </label>
       <div className="relative w-full">
         <textarea
           ref={textareaRef}
+          id="prompt-input"
           className="
             w-full min-h-[120px] max-h-[300px]
             p-4 pr-12
@@ -94,7 +98,7 @@ export const PromptInput: FC<PromptInputProps> = ({
           placeholder={placeholder}
           disabled={disabled}
           rows={3}
-          aria-label="Image prompt"
+          aria-describedby="prompt-hint"
         />
 
         {prompt && !disabled && (
@@ -130,7 +134,7 @@ export const PromptInput: FC<PromptInputProps> = ({
           {prompt.length} / {maxLength}
         </span>
 
-        <span className="text-xs text-text-secondary/70 text-right hidden md:block">
+        <span id="prompt-hint" className="text-xs text-text-secondary/70 text-right hidden md:block">
           Press Ctrl+Enter to generate • Esc to clear
         </span>
       </div>
