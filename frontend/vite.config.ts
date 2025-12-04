@@ -33,9 +33,13 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id: string) {
-          // React core libraries
+          // React core + state management libraries
           if (id.includes('node_modules')) {
-            if (id.includes('react') || id.includes('react-dom')) {
+            if (
+              id.includes('react') ||
+              id.includes('react-dom') ||
+              id.includes('zustand')
+            ) {
               return 'vendor';
             }
             if (id.includes('uuid')) {
@@ -47,9 +51,6 @@ export default defineConfig({
           if (id.includes('/components/gallery/')) {
             return 'gallery';
           }
-
-          // Keep generation components in main bundle (frequently used)
-          // API client and utilities stay in main bundle for immediate access
         },
       },
     },
