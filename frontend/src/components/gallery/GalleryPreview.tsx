@@ -65,10 +65,11 @@ const GalleryPreview: FC<GalleryPreviewProps> = ({ gallery, isSelected = false, 
         bg-secondary border-2 rounded-lg
         overflow-hidden cursor-pointer
         transition-all duration-200
+        motion-reduce:transition-none
         min-w-[150px] max-w-[200px]
         md:min-w-[120px] md:max-w-[150px]
         hover:-translate-y-1 hover:scale-[1.02] hover:shadow-lg hover:border-accent
-        focus:outline-2 focus:outline-accent focus:outline-offset-2
+        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-primary
         ${isSelected ? 'border-accent shadow-[0_0_0_3px_rgba(181,131,146,0.3)]' : 'border-accent/30'}
       `}
       onClick={handleClick}
