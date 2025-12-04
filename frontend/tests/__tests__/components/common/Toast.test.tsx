@@ -75,7 +75,7 @@ describe('Toast', () => {
       <Toast id={42} message="Test" type="info" onDismiss={handleDismiss} />
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /close/i }));
+    fireEvent.click(screen.getByRole('button', { name: /dismiss/i }));
 
     expect(handleDismiss).toHaveBeenCalledWith(42);
   });
@@ -127,7 +127,7 @@ describe('ToastContainer', () => {
     render(<ToastContainer />);
     expect(screen.getByText('Dismissable toast')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /close/i }));
+    fireEvent.click(screen.getByRole('button', { name: /dismiss/i }));
     expect(screen.queryByText('Dismissable toast')).not.toBeInTheDocument();
   });
 

@@ -12,7 +12,7 @@ describe('LoadingSpinner', () => {
     render(<LoadingSpinner />);
 
     expect(screen.getByText('Loading...')).toBeInTheDocument();
-    expect(screen.getByRole('status', { name: 'Loading' })).toBeInTheDocument();
+    expect(screen.getByRole('status')).toBeInTheDocument();
   });
 
   it('renders with custom message', () => {
@@ -28,11 +28,14 @@ describe('LoadingSpinner', () => {
   });
 
   it('applies size classes', () => {
-    const { rerender } = render(<LoadingSpinner size="sm" />);
-    expect(screen.getByRole('status')).toHaveClass('w-4', 'h-4');
+    const { container, rerender } = render(<LoadingSpinner size="sm" />);
+    // Size classes are on the spinner div, not the outer container
+    const spinner = container.querySelector('[aria-hidden="true"]');
+    expect(spinner).toHaveClass('w-4', 'h-4');
 
     rerender(<LoadingSpinner size="lg" />);
-    expect(screen.getByRole('status')).toHaveClass('w-12', 'h-12');
+    const largeSpinner = container.querySelector('[aria-hidden="true"]');
+    expect(largeSpinner).toHaveClass('w-12', 'h-12');
   });
 
   it('applies custom className', () => {
@@ -42,15 +45,16 @@ describe('LoadingSpinner', () => {
   });
 
   it('has spin animation class', () => {
-    render(<LoadingSpinner />);
-
-    expect(screen.getByRole('status')).toHaveClass('animate-spin');
+    const { container } = render(<LoadingSpinner />);
+    // Custom spin animation with bounce effect
+    const spinner = container.querySelector('[aria-hidden="true"]');
+    expect(spinner?.className).toContain('animate-[spinBounce');
   });
 
   it('has motion-reduce support', () => {
-    render(<LoadingSpinner />);
-
-    expect(screen.getByRole('status')).toHaveClass('motion-reduce:animate-none');
+    const { container } = render(<LoadingSpinner />);
+    const spinner = container.querySelector('[aria-hidden="true"]');
+    expect(spinner).toHaveClass('motion-reduce:animate-none');
   });
 });
 
@@ -99,10 +103,10 @@ describe('LoadingSkeleton', () => {
     expect(element.style.height).toBe('30px');
   });
 
-  it('has pulse animation', () => {
+  it('has shimmer animation', () => {
     const { container } = render(<LoadingSkeleton />);
-
-    expect(container.firstChild).toHaveClass('animate-pulse');
+    // Custom shimmer animation instead of pulse
+    expect((container.firstChild as HTMLElement).className).toContain('animate-[shimmer');
   });
 
   it('applies custom className', () => {

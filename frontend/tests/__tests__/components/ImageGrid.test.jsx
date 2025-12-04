@@ -108,7 +108,7 @@ describe('ImageGrid', () => {
 
     render(<ImageGrid images={images} />);
 
-    expect(screen.getByText('Generation failed')).toBeInTheDocument();
+    expect(screen.getByText(/Model A.*Generation failed/)).toBeInTheDocument();
     expect(screen.getByText('⚠')).toBeInTheDocument();
   });
 

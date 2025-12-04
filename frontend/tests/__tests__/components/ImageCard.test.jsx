@@ -49,13 +49,13 @@ describe('ImageCard', () => {
 
   it('shows error state when status is error', () => {
     render(<ImageCard status="error" model="Test Model" image={null} error="Generation failed" />);
-    expect(screen.getByText('Generation failed')).toBeInTheDocument();
+    expect(screen.getByText(/Test Model.*Generation failed/)).toBeInTheDocument();
     expect(screen.getByText('⚠')).toBeInTheDocument();
   });
 
   it('shows default error message when error prop is missing', () => {
     render(<ImageCard status="error" model="Test Model" image={null} />);
-    expect(screen.getByText('Failed to load')).toBeInTheDocument();
+    expect(screen.getByText(/Test Model.*Failed to load/)).toBeInTheDocument();
   });
 
   it('displays image when status is completed', () => {
@@ -170,7 +170,7 @@ describe('ImageCard', () => {
     fireEvent.error(img);
 
     // Should show error UI
-    expect(screen.getByText('Failed to load')).toBeInTheDocument();
+    expect(screen.getByText(/Test Model.*Failed to load/)).toBeInTheDocument();
   });
 
   it('has lazy loading attribute on image', () => {
