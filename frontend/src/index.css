@@ -1,5 +1,68 @@
 @import "tailwindcss";
 
+/* Custom Design Tokens (from Phase-0 spec) */
+@theme {
+  /* Primary backgrounds */
+  --color-primary: #25292e;
+  --color-secondary: #3a3c3f;
+
+  /* Accent colors */
+  --color-accent: #B58392;
+  --color-accent-hover: #C99AAB;
+  --color-accent-muted: #958DA5;
+
+  /* Text */
+  --color-text: #FFFFFF;
+  --color-text-secondary: #CCCCCC;
+  --color-text-dark: #000000;
+
+  /* Interactive */
+  --color-button: #958DA5;
+  --color-button-pressed: #7A7085;
+  --color-button-success: #9DA58D;
+  --color-button-danger: #FF6B6B;
+
+  /* Semantic */
+  --color-success: #9DA58D;
+  --color-error: #FF6B6B;
+  --color-warning: #FFB347;
+  --color-info: #87CEEB;
+
+  /* Typography */
+  --font-display: 'Sigmar', cursive;
+  --font-body: system-ui, sans-serif;
+
+  /* Custom animations */
+  --animate-breathe: breathe 4s ease-in-out infinite;
+  --animate-pulse-soft: pulse-soft 2s ease-in-out infinite;
+
+  /* Custom spacing */
+  --spacing-container: 1rem;
+  --spacing-section: 2rem;
+  --spacing-element: 0.5rem;
+}
+
+/* Custom keyframes */
+@keyframes breathe {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.02);
+    opacity: 0.9;
+  }
+}
+
+@keyframes pulse-soft {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
 :root {
   font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
