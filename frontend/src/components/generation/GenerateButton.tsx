@@ -39,7 +39,7 @@ export const GenerateButton: FC<GenerateButtonProps> = ({
         active:translate-y-0 active:shadow-sm
         transition-all duration-200
         motion-reduce:transform-none motion-reduce:transition-none
-        ${isGenerating ? 'from-button to-accent animate-pulse motion-reduce:animate-none' : ''}
+        ${isGenerating ? 'from-button to-accent animate-[gentlePulse_1.5s_ease-in-out_infinite] motion-reduce:animate-none' : ''}
         ${className}
       `}
       aria-label={buttonText}

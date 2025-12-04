@@ -1,6 +1,6 @@
 /**
  * LoadingSpinner Component
- * Animated spinner with size variants
+ * Animated spinner with playful bounce effect and size variants
  */
 
 import type { FC } from 'react';
@@ -12,9 +12,9 @@ interface LoadingSpinnerProps {
 }
 
 const sizeStyles: Record<string, string> = {
-  sm: 'w-4 h-4',
-  md: 'w-8 h-8',
-  lg: 'w-12 h-12',
+  sm: 'w-4 h-4 border-2',
+  md: 'w-8 h-8 border-4',
+  lg: 'w-12 h-12 border-4',
 };
 
 export const LoadingSpinner: FC<LoadingSpinnerProps> = ({
@@ -28,20 +28,25 @@ export const LoadingSpinner: FC<LoadingSpinnerProps> = ({
         flex flex-col items-center justify-center gap-3
         ${className}
       `}
+      role="status"
+      aria-busy="true"
+      aria-live="polite"
     >
       <div
         className={`
           ${sizeStyles[size]}
-          border-4 border-accent/30 border-t-accent
+          border-accent/30 border-t-accent
           rounded-full
-          animate-spin
+          animate-[spinBounce_1s_ease-in-out_infinite]
           motion-reduce:animate-none motion-reduce:border-accent
         `}
-        role="status"
-        aria-label="Loading"
+        aria-hidden="true"
       />
       {message && (
-        <p className="text-sm text-text-secondary animate-pulse motion-reduce:animate-none">
+        <p
+          className="text-sm text-text-secondary animate-[gentlePulse_2s_ease-in-out_infinite] motion-reduce:animate-none"
+          aria-live="polite"
+        >
           {message}
         </p>
       )}

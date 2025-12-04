@@ -5,7 +5,7 @@
  */
 
 import { useState, memo, type FC, type KeyboardEvent, type MouseEvent } from 'react';
-import { useToast } from '@/context/ToastContext';
+import { useToast } from '@/stores/useToastStore';
 import { downloadImage } from '@/utils/imageHelpers';
 import { useSound } from '@/hooks/useSound';
 
@@ -86,9 +86,16 @@ const ImageCard: FC<ImageCardProps> = ({
   const renderContent = () => {
     if (status === 'pending' || status === 'loading') {
       return (
-        <div className="flex flex-col items-center justify-center gap-4 bg-primary/30 absolute inset-0">
-          <div className="w-12 h-12 border-4 border-secondary border-t-accent rounded-full animate-pulse" />
-          <span className="text-sm text-text-secondary">
+        <div
+          className="flex flex-col items-center justify-center gap-4 bg-primary/30 absolute inset-0"
+          role="status"
+          aria-busy="true"
+        >
+          <div
+            className="w-12 h-12 border-4 border-accent/30 border-t-accent rounded-full animate-[spinBounce_1s_ease-in-out_infinite] motion-reduce:animate-none"
+            aria-hidden="true"
+          />
+          <span className="text-sm text-text-secondary animate-[gentlePulse_2s_ease-in-out_infinite] motion-reduce:animate-none">
             {status === 'loading' ? 'Generating...' : 'Waiting...'}
           </span>
         </div>

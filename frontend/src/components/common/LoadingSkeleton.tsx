@@ -1,6 +1,6 @@
 /**
  * LoadingSkeleton Component
- * Animated loading placeholder with shape variants
+ * Animated loading placeholder with shimmer effect using accent colors
  */
 
 import type { FC } from 'react';
@@ -30,8 +30,9 @@ export const LoadingSkeleton: FC<LoadingSkeletonProps> = ({
   return (
     <div
       className={`
-        bg-secondary/50
-        animate-pulse
+        bg-gradient-to-r from-secondary via-accent/20 to-secondary
+        bg-[length:200%_100%]
+        animate-[shimmer_1.5s_ease-in-out_infinite]
         motion-reduce:animate-none motion-reduce:bg-secondary
         ${shapeStyles[shape]}
         ${className}
