@@ -13,7 +13,8 @@
     "test:coverage": "vitest --coverage",
     "test:watch": "vitest --watch",
     "analyze": "vite build && echo 'Bundle analysis saved to dist/stats.html'",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "migrate": "npx ts-node scripts/migrate-to-tsx.ts"
   },
   "dependencies": {
     "react": "^19.2.0",
