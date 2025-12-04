@@ -1,10 +1,11 @@
 /**
  * Toast Component
  * Individual toast notification with variants
+ * Uses proper ARIA roles for screen reader announcements
  */
 
 import type { FC } from 'react';
-import type { ToastType } from '@/context/ToastContext';
+import type { ToastType } from '@/stores/useToastStore';
 
 interface ToastProps {
   id: number;
@@ -27,7 +28,18 @@ const icons: Record<ToastType, string> = {
   info: 'ℹ',
 };
 
+// Accessible type labels for screen readers
+const typeLabels: Record<ToastType, string> = {
+  success: 'Success',
+  error: 'Error',
+  warning: 'Warning',
+  info: 'Information',
+};
+
 export const Toast: FC<ToastProps> = ({ id, message, type, onDismiss }) => {
+  // Error toasts should be announced as alerts (more urgent)
+  const role = type === 'error' ? 'alert' : 'status';
+
   return (
     <div
       className={`
@@ -38,11 +50,12 @@ export const Toast: FC<ToastProps> = ({ id, message, type, onDismiss }) => {
         motion-reduce:animate-none
         ${typeStyles[type]}
       `}
-      role="status"
+      role={role}
     >
       <span className="text-lg font-bold" aria-hidden="true">
         {icons[type]}
       </span>
+      <span className="sr-only">{typeLabels[type]}:</span>
       <span className="flex-1 text-sm font-medium">{message}</span>
       <button
         onClick={() => onDismiss(id)}
@@ -52,7 +65,7 @@ export const Toast: FC<ToastProps> = ({ id, message, type, onDismiss }) => {
           focus:outline-none focus:ring-2 focus:ring-current
           transition-opacity
         "
-        aria-label="Close notification"
+        aria-label={`Dismiss ${typeLabels[type].toLowerCase()} notification`}
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"

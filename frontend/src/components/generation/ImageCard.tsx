@@ -104,12 +104,16 @@ const ImageCard: FC<ImageCardProps> = ({
 
     if (status === 'error' || imageError) {
       return (
-        <div className="flex flex-col items-center justify-center gap-2 bg-error/10 p-4 absolute inset-0">
+        <div
+          className="flex flex-col items-center justify-center gap-2 bg-error/10 p-4 absolute inset-0"
+          role="alert"
+          aria-live="polite"
+        >
           <span className="text-3xl text-error" aria-hidden="true">
             ⚠
           </span>
           <span className="text-sm text-error text-center max-w-[90%] break-words">
-            {error || 'Failed to load'}
+            {model}: {error || 'Failed to load'}
           </span>
         </div>
       );
@@ -199,7 +203,12 @@ const ImageCard: FC<ImageCardProps> = ({
         >
           {model}
         </span>
-        {isCompleted && <span className="text-sm text-success">✓</span>}
+        {isCompleted && (
+          <span className="text-sm text-success" aria-label="Generation complete">
+            <span aria-hidden="true">✓</span>
+            <span className="sr-only">Complete</span>
+          </span>
+        )}
       </div>
     </div>
   );
