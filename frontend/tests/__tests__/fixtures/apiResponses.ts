@@ -2,13 +2,37 @@
  * Mock API responses for integration testing
  */
 
-export const mockGenerateResponse = {
+import type {
+  GenerateResponse,
+  EnhanceResponse,
+  GalleryListResponse,
+  GalleryDetailResponse,
+  ApiError,
+} from '@/types';
+
+interface MockJobResult {
+  model: string;
+  status: 'pending' | 'loading' | 'completed' | 'error';
+  imageKey?: string;
+  imageUrl?: string;
+  completedAt?: string;
+}
+
+interface MockJobStatus {
+  jobId: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'failed';
+  totalModels: number;
+  completedModels: number;
+  results: MockJobResult[];
+}
+
+export const mockGenerateResponse: GenerateResponse = {
   jobId: 'test-job-123',
+  status: 'pending',
   message: 'Job created successfully',
-  totalModels: 9
 };
 
-export const mockJobStatusPending = {
+export const mockJobStatusPending: MockJobStatus = {
   jobId: 'test-job-123',
   status: 'in_progress',
   totalModels: 9,
@@ -26,7 +50,7 @@ export const mockJobStatusPending = {
   ]
 };
 
-export const mockJobStatusPartial = {
+export const mockJobStatusPartial: MockJobStatus = {
   jobId: 'test-job-123',
   status: 'in_progress',
   totalModels: 9,
@@ -62,7 +86,7 @@ export const mockJobStatusPartial = {
   ]
 };
 
-export const mockJobStatusCompleted = {
+export const mockJobStatusCompleted: MockJobStatus = {
   jobId: 'test-job-123',
   status: 'completed',
   totalModels: 9,
@@ -134,63 +158,66 @@ export const mockJobStatusCompleted = {
   ]
 };
 
-export const mockEnhanceResponse = {
-  original: 'cat',
-  enhanced: 'A majestic orange tabby cat sitting regally on a velvet cushion, photographed in soft natural lighting',
-  short_prompt: 'An orange tabby cat on a velvet cushion',
-  long_prompt: 'A majestic orange tabby cat sitting regally on a velvet cushion, photographed in soft natural lighting with a shallow depth of field, warm color palette, professional pet photography style'
+export const mockEnhanceResponse: EnhanceResponse = {
+  original_prompt: 'cat',
+  enhanced_prompt: 'A majestic orange tabby cat sitting regally on a velvet cushion, photographed in soft natural lighting',
 };
 
-export const mockGalleryListResponse = {
+export const mockGalleryListResponse: GalleryListResponse = {
   galleries: [
     {
       id: '2025-11-16-10-30-00',
       timestamp: '2025-11-16T10:30:00Z',
-      preview: 'https://cdn.example.com/preview-1.png',
+      prompt: 'test prompt',
+      thumbnailUrl: 'https://cdn.example.com/preview-1.png',
       imageCount: 9
     },
     {
       id: '2025-11-15-14-20-00',
       timestamp: '2025-11-15T14:20:00Z',
-      preview: 'https://cdn.example.com/preview-2.png',
+      prompt: 'another prompt',
+      thumbnailUrl: 'https://cdn.example.com/preview-2.png',
       imageCount: 8
     }
   ],
   total: 2
 };
 
-export const mockGalleryDetailResponse = {
-  galleryId: '2025-11-16-10-30-00',
+export const mockGalleryDetailResponse: GalleryDetailResponse = {
+  id: '2025-11-16-10-30-00',
+  prompt: 'test prompt',
+  timestamp: '2025-11-16T10:30:00Z',
   images: [
     {
-      key: 'images/gallery-1.png',
-      url: 'https://cdn.example.com/gallery-1.png',
       model: 'DALL-E 3',
-      prompt: 'test prompt',
-      steps: 28,
-      guidance: 5,
-      timestamp: '2025-11-16T10:30:00Z'
+      provider: 'openai',
+      url: 'https://cdn.example.com/gallery-1.png',
+      status: 'success',
     },
     {
-      key: 'images/gallery-2.png',
-      url: 'https://cdn.example.com/gallery-2.png',
       model: 'Stable Diffusion 3.5',
-      prompt: 'test prompt',
-      steps: 28,
-      guidance: 5,
-      timestamp: '2025-11-16T10:30:05Z'
+      provider: 'stability',
+      url: 'https://cdn.example.com/gallery-2.png',
+      status: 'success',
     }
   ],
-  total: 2
 };
 
-export const mockErrorResponse = {
+export const mockErrorResponse: ApiError = {
   error: 'Rate limit exceeded',
   message: 'Too many requests. Please try again later.'
 };
 
-export const mockNetworkError = new Error('Network request failed');
-mockNetworkError.code = 'NETWORK_ERROR';
+interface ExtendedError extends Error {
+  code?: string;
+}
 
-export const mockTimeoutError = new Error('Request timeout - server took too long to respond');
-mockTimeoutError.code = 'TIMEOUT';
+export const mockNetworkError: ExtendedError = Object.assign(
+  new Error('Network request failed'),
+  { code: 'NETWORK_ERROR' }
+);
+
+export const mockTimeoutError: ExtendedError = Object.assign(
+  new Error('Request timeout - server took too long to respond'),
+  { code: 'TIMEOUT' }
+);
