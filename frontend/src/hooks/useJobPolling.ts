@@ -4,26 +4,33 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
-import { getJobStatus } from '../api/client';
+import { getJobStatus } from '@/api/client';
+import type { StatusResponse } from '@/types';
 
 // Polling configuration
 const DEFAULT_INTERVAL = 2000; // 2 seconds
 const TIMEOUT_DURATION = 300000; // 5 minutes
 const MAX_CONSECUTIVE_ERRORS = 5;
 
+interface UseJobPollingReturn {
+  jobStatus: StatusResponse | null;
+  isPolling: boolean;
+  error: string | null;
+}
+
 /**
  * Custom hook for polling job status
- * @param {string} jobId - The job ID to poll
- * @param {number} interval - Polling interval in milliseconds
- * @returns {Object} { jobStatus, isPolling, error }
  */
-function useJobPolling(jobId, interval = DEFAULT_INTERVAL) {
-  const [jobStatus, setJobStatus] = useState(null);
+function useJobPolling(
+  jobId: string | null | undefined,
+  interval: number = DEFAULT_INTERVAL
+): UseJobPollingReturn {
+  const [jobStatus, setJobStatus] = useState<StatusResponse | null>(null);
   const [isPolling, setIsPolling] = useState(false);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const pollingTimeoutRef = useRef(null);
-  const startTimeRef = useRef(null);
+  const pollingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startTimeRef = useRef<number | null>(null);
   const consecutiveErrorsRef = useRef(0);
   const isMountedRef = useRef(true);
 
@@ -31,13 +38,11 @@ function useJobPolling(jobId, interval = DEFAULT_INTERVAL) {
     // Reset mounted flag
     isMountedRef.current = true;
 
-    // Reset state when jobId changes - this is a valid synchronization use case
+    // Reset state when jobId changes
     if (!jobId) {
-      /* eslint-disable react-hooks/set-state-in-effect */
       setJobStatus(null);
       setIsPolling(false);
       setError(null);
-      /* eslint-enable react-hooks/set-state-in-effect */
       return;
     }
 
@@ -55,7 +60,7 @@ function useJobPolling(jobId, interval = DEFAULT_INTERVAL) {
 
       try {
         // Check for timeout (5 minutes)
-        const elapsed = Date.now() - startTimeRef.current;
+        const elapsed = Date.now() - (startTimeRef.current || 0);
         if (elapsed > TIMEOUT_DURATION) {
           setError('Job polling timed out after 5 minutes');
           setIsPolling(false);
@@ -76,7 +81,12 @@ function useJobPolling(jobId, interval = DEFAULT_INTERVAL) {
         consecutiveErrorsRef.current = 0;
 
         // Stop polling if job is complete, partial, or failed
-        if (status.status === 'completed' || status.status === 'partial' || status.status === 'failed') {
+        if (
+          status.status === 'completed' ||
+          // @ts-expect-error - 'partial' may be returned by API but not in JobStatus type
+          status.status === 'partial' ||
+          status.status === 'failed'
+        ) {
           setIsPolling(false);
           return;
         }
