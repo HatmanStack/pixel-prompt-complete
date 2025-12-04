@@ -50,11 +50,11 @@ Migrate the core feature components: prompt input, image generation, image displ
 - Style placeholder text appropriately
 
 **Verification Checklist:**
-- [ ] Text input works and updates store
-- [ ] Styling matches reference aesthetic (accent border)
-- [ ] Clear button clears input and plays sound
-- [ ] Placeholder text visible and styled
-- [ ] Responsive sizing correct
+- [x] Text input works and updates store
+- [x] Styling matches reference aesthetic (accent border)
+- [x] Clear button clears input and plays sound
+- [x] Placeholder text visible and styled
+- [x] Responsive sizing correct
 
 **Testing Instructions:**
 - Unit test input updates store state
@@ -99,11 +99,11 @@ Add clear button with sound effect
 - Handle API errors gracefully with toast notification
 
 **Verification Checklist:**
-- [ ] Enhance button triggers API call
-- [ ] Loading state visible during request
-- [ ] Enhanced prompt updates input field
-- [ ] Sound plays on completion
-- [ ] Errors show toast notification
+- [x] Enhance button triggers API call
+- [x] Loading state visible during request
+- [x] Enhanced prompt updates input field
+- [x] Sound plays on completion
+- [x] Errors show toast notification
 
 **Testing Instructions:**
 - Unit test with mocked API response
@@ -149,11 +149,11 @@ Integrate sound effect on completion
 - Add fun animation or visual feedback on selection
 
 **Verification Checklist:**
-- [ ] Random prompt selected on click
-- [ ] Different prompt each click (within reason)
-- [ ] Sound plays on selection
-- [ ] Prompt updates in input field
-- [ ] Button styled consistently
+- [x] Random prompt selected on click
+- [x] Different prompt each click (within reason)
+- [x] Sound plays on selection
+- [x] Prompt updates in input field
+- [x] Button styled consistently
 
 **Testing Instructions:**
 - Unit test random selection logic
@@ -196,11 +196,11 @@ Use consistent Button styling
 - Make panel responsive (stacks vertically on mobile)
 
 **Verification Checklist:**
-- [ ] Panel renders all child components
-- [ ] Layout is clean and well-spaced
-- [ ] Responsive stacking works on mobile
-- [ ] All child component interactions work
-- [ ] Styling matches playful aesthetic
+- [x] Panel renders all child components
+- [x] Layout is clean and well-spaced
+- [x] Responsive stacking works on mobile
+- [x] All child component interactions work
+- [x] Styling matches playful aesthetic
 
 **Testing Instructions:**
 - Unit test panel renders children
@@ -243,11 +243,11 @@ Add responsive layout behavior
 - Return typed status and error information
 
 **Verification Checklist:**
-- [ ] Polling starts when job ID provided
-- [ ] Status updates flow to store
-- [ ] Polling stops on completion
-- [ ] Polling stops on component unmount
-- [ ] Error state handled correctly
+- [x] Polling starts when job ID provided
+- [x] Status updates flow to store
+- [x] Polling stops on completion
+- [x] Polling stops on component unmount
+- [x] Error state handled correctly
 
 **Testing Instructions:**
 - Unit test with mocked timer and API
@@ -292,12 +292,12 @@ Integrate with Zustand store
 - Make card responsive (size adjusts to grid)
 
 **Verification Checklist:**
-- [ ] Image displays correctly in card
-- [ ] Loading skeleton shows before load
-- [ ] Click opens modal with expand sound
-- [ ] Model badge displays provider info
-- [ ] Hover effects applied
-- [ ] Error state shows placeholder
+- [x] Image displays correctly in card
+- [x] Loading skeleton shows before load
+- [x] Click opens modal with expand sound
+- [x] Model badge displays provider info
+- [x] Hover effects applied
+- [x] Error state shows placeholder
 
 **Testing Instructions:**
 - Unit test card renders image
@@ -344,11 +344,11 @@ Integrate expand sound on click
 - Add navigation if multiple images (prev/next)
 
 **Verification Checklist:**
-- [ ] Modal displays full-size image
-- [ ] Metadata shows correctly
-- [ ] Download button works
-- [ ] Keyboard navigation works (arrows for prev/next)
-- [ ] Close on escape or click outside
+- [x] Modal displays full-size image
+- [x] Metadata shows correctly
+- [x] Download button works
+- [x] Keyboard navigation works (arrows for prev/next)
+- [x] Close on escape or click outside
 
 **Testing Instructions:**
 - Unit test modal renders image
@@ -393,11 +393,11 @@ Show image metadata
 - Integrate with useAppStore for image data
 
 **Verification Checklist:**
-- [ ] Grid displays images in responsive columns
-- [ ] Empty state shows when no images
-- [ ] Loading skeletons show during generation
-- [ ] New images animate in
-- [ ] Grid adapts to screen size
+- [x] Grid displays images in responsive columns
+- [x] Empty state shows when no images
+- [x] Loading skeletons show during generation
+- [x] New images animate in
+- [x] Grid adapts to screen size
 
 **Testing Instructions:**
 - Unit test grid renders correct number of cards
@@ -443,12 +443,12 @@ Animate new image appearance
 - Play switch sound when selecting gallery item
 
 **Verification Checklist:**
-- [ ] Gallery items display correctly
-- [ ] Click loads selected session
-- [ ] Loading state shows spinner
-- [ ] Empty state shows helpful message
-- [ ] Sound plays on selection
-- [ ] Scrollable when many items
+- [x] Gallery items display correctly
+- [x] Click loads selected session
+- [x] Loading state shows spinner
+- [x] Empty state shows helpful message
+- [x] Sound plays on selection
+- [x] Scrollable when many items
 
 **Testing Instructions:**
 - Unit test with mocked gallery data
@@ -492,11 +492,11 @@ Integrate switch sound on selection
 - On mobile, this becomes toggle button for gallery drawer/modal
 
 **Verification Checklist:**
-- [ ] Preview shows recent items
-- [ ] Compact design fits sidebar
-- [ ] Click expands or navigates to full view
-- [ ] Mobile toggle behavior works
-- [ ] Styling consistent with overall design
+- [x] Preview shows recent items
+- [x] Compact design fits sidebar
+- [x] Click expands or navigates to full view
+- [x] Mobile toggle behavior works
+- [x] Styling consistent with overall design
 
 **Testing Instructions:**
 - Unit test preview renders items
@@ -540,11 +540,11 @@ Show recent generation thumbnails
 - Return typed data and status
 
 **Verification Checklist:**
-- [ ] Hook fetches gallery data
-- [ ] Loading state exposed
-- [ ] Error handling works
-- [ ] Refresh function refetches
-- [ ] Return type is fully typed
+- [x] Hook fetches gallery data
+- [x] Loading state exposed
+- [x] Error handling works
+- [x] Refresh function refetches
+- [x] Return type is fully typed
 
 **Testing Instructions:**
 - Unit test with mocked API
@@ -589,11 +589,11 @@ Add cache and refresh capability
 - Add request/response interceptors if needed
 
 **Verification Checklist:**
-- [ ] All API methods are typed
-- [ ] Errors are properly typed
-- [ ] Config values are typed
-- [ ] No `any` types in client
-- [ ] IDE autocomplete works for API calls
+- [x] All API methods are typed
+- [x] Errors are properly typed
+- [x] Config values are typed
+- [x] No `any` types in client
+- [x] IDE autocomplete works for API calls
 
 **Testing Instructions:**
 - Type check passes on client file
@@ -638,11 +638,11 @@ Remove any types
 - Verify no context imports remain
 
 **Verification Checklist:**
-- [ ] No context providers in App
-- [ ] All state accessed via stores
-- [ ] Toast system works via store
-- [ ] No context imports in codebase
-- [ ] App functionality unchanged
+- [x] No context providers in App
+- [x] All state accessed via stores
+- [x] Toast system works via store
+- [x] No context imports in codebase
+- [x] App functionality unchanged
 
 **Testing Instructions:**
 - Run full app and verify all features work
@@ -682,10 +682,10 @@ Delete context files
 - Clean up event listeners on unmount
 
 **Verification Checklist:**
-- [ ] Hook compiles without errors
-- [ ] Loading states properly typed
-- [ ] Image load/error handling works
-- [ ] Cleanup on unmount
+- [x] Hook compiles without errors
+- [x] Loading states properly typed
+- [x] Image load/error handling works
+- [x] Cleanup on unmount
 
 **Testing Instructions:**
 - Unit test with mocked Image object
@@ -722,10 +722,10 @@ Handle image events with proper types
 - Maintain useCallback semantics
 
 **Verification Checklist:**
-- [ ] Hook compiles without errors
-- [ ] Generic types work correctly
-- [ ] Callback memoization works
-- [ ] Dependencies typed properly
+- [x] Hook compiles without errors
+- [x] Generic types work correctly
+- [x] Callback memoization works
+- [x] Dependencies typed properly
 
 **Testing Instructions:**
 - Unit test callback memoization
@@ -766,11 +766,11 @@ Maintain memoization semantics
 - Ensure no breaking changes to function signatures
 
 **Verification Checklist:**
-- [ ] All utility files are .ts
-- [ ] All functions have typed parameters
-- [ ] All functions have typed returns
-- [ ] No `any` types
-- [ ] Consuming code still works
+- [x] All utility files are .ts
+- [x] All functions have typed parameters
+- [x] All functions have typed returns
+- [x] No `any` types
+- [x] Consuming code still works
 
 **Testing Instructions:**
 - Run existing utility tests
