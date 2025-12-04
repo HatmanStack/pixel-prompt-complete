@@ -50,11 +50,11 @@ Migrate core structural components to TypeScript with Tailwind styling. This pha
 - Match reference project's column proportions (roughly 50/50 or gallery slightly narrower)
 
 **Verification Checklist:**
-- [ ] Desktop (≥1024px) shows two-column layout
-- [ ] Mobile (<1024px) shows single-column layout
-- [ ] Layout transition is smooth (no jarring reflows)
-- [ ] useBreakpoint hook updates on resize
-- [ ] TypeScript types for props are complete
+- [x] Desktop (≥1024px) shows two-column layout
+- [x] Mobile (<1024px) shows single-column layout
+- [x] Layout transition is smooth (no jarring reflows)
+- [x] useBreakpoint hook updates on resize
+- [x] TypeScript types for props are complete
 
 **Testing Instructions:**
 - Unit test useBreakpoint hook with mocked matchMedia
@@ -101,11 +101,11 @@ Add useBreakpoint hook for responsive detection
 - Respect prefers-reduced-motion by disabling animation
 
 **Verification Checklist:**
-- [ ] All 12 characters animate independently
-- [ ] Animation is smooth at 60fps
-- [ ] Font is Sigmar with correct styling
-- [ ] Responsive sizing works (smaller on mobile)
-- [ ] Animation stops with prefers-reduced-motion
+- [x] All 12 characters animate independently
+- [x] Animation is smooth at 60fps
+- [x] Font is Sigmar with correct styling
+- [x] Responsive sizing works (smaller on mobile)
+- [x] Animation stops with prefers-reduced-motion
 
 **Testing Instructions:**
 - Unit test component renders all characters
@@ -150,11 +150,11 @@ Add responsive sizing and reduced motion support
 - Ensure sounds don't overlap (stop previous before playing new)
 
 **Verification Checklist:**
-- [ ] Each sound type plays correct audio file
-- [ ] Sounds preload after first user interaction
-- [ ] Mute toggle works globally
-- [ ] No console errors during playback
-- [ ] Sounds work across browsers (Chrome, Firefox, Safari)
+- [x] Each sound type plays correct audio file
+- [x] Sounds preload after first user interaction
+- [x] Mute toggle works globally
+- [x] No console errors during playback
+- [x] Sounds work across browsers (Chrome, Firefox, Safari)
 
 **Testing Instructions:**
 - Unit test useSound with mocked Audio API
@@ -198,11 +198,11 @@ Add SoundToggle component
 - Make responsive with Tailwind breakpoints
 
 **Verification Checklist:**
-- [ ] Header renders without TypeScript errors
-- [ ] Breathing animation displays correctly
-- [ ] Sound toggle visible and functional
-- [ ] Styling matches playful aesthetic
-- [ ] Responsive behavior correct
+- [x] Header renders without TypeScript errors
+- [x] Breathing animation displays correctly
+- [x] Sound toggle visible and functional
+- [x] Styling matches playful aesthetic
+- [x] Responsive behavior correct
 
 **Testing Instructions:**
 - Unit test Header renders children correctly
@@ -249,11 +249,11 @@ Integrate breathing animation and sound toggle
 - Add proper disabled states and focus rings for accessibility
 
 **Verification Checklist:**
-- [ ] Button variants display correctly
-- [ ] Click sound plays on press
-- [ ] Loading state shows spinner
-- [ ] Disabled state is visually distinct
-- [ ] Focus ring visible for keyboard navigation
+- [x] Button variants display correctly
+- [x] Click sound plays on press
+- [x] Loading state shows spinner
+- [x] Disabled state is visually distinct
+- [x] Focus ring visible for keyboard navigation
 
 **Testing Instructions:**
 - Unit test Button renders all variants
@@ -299,12 +299,12 @@ Migrate GenerateButton to use base component
 - Style panel with design tokens (dark background, accent border)
 
 **Verification Checklist:**
-- [ ] Modal opens and closes correctly
-- [ ] Overlay covers entire screen
-- [ ] Expand sound plays on open
-- [ ] Escape key closes modal
-- [ ] Focus trapped within modal
-- [ ] Clicking overlay closes modal
+- [x] Modal opens and closes correctly
+- [x] Overlay covers entire screen
+- [x] Expand sound plays on open
+- [x] Escape key closes modal
+- [x] Focus trapped within modal
+- [x] Clicking overlay closes modal
 
 **Testing Instructions:**
 - Unit test Modal open/close behavior
@@ -352,11 +352,11 @@ Implement focus trap and keyboard handling
 - Add manual dismiss button
 
 **Verification Checklist:**
-- [ ] Toast variants display with correct colors
-- [ ] Toasts stack correctly (newest on top or bottom)
-- [ ] Auto-dismiss works after timeout
-- [ ] Manual dismiss works
-- [ ] Swoosh sound plays on appear
+- [x] Toast variants display with correct colors
+- [x] Toasts stack correctly (newest on top or bottom)
+- [x] Auto-dismiss works after timeout
+- [x] Manual dismiss works
+- [x] Swoosh sound plays on appear
 
 **Testing Instructions:**
 - Unit test Toast renders correct variant
@@ -403,10 +403,10 @@ Integrate swoosh sound on appear
 - Add playful touch to loading states (could use accent colors)
 
 **Verification Checklist:**
-- [ ] Spinner animates smoothly
-- [ ] Skeleton pulses with correct colors
-- [ ] Size variants work correctly
-- [ ] Animations respect reduced-motion preference
+- [x] Spinner animates smoothly
+- [x] Skeleton pulses with correct colors
+- [x] Size variants work correctly
+- [x] Animations respect reduced-motion preference
 
 **Testing Instructions:**
 - Unit test components render with different sizes
@@ -451,10 +451,10 @@ Use Tailwind animations with accent colors
 - Keep components simple and focused
 
 **Verification Checklist:**
-- [ ] Container constrains content width correctly
-- [ ] Footer displays at bottom of page
-- [ ] Responsive padding works
-- [ ] No TypeScript errors
+- [x] Container constrains content width correctly
+- [x] Footer displays at bottom of page
+- [x] Responsive padding works
+- [x] No TypeScript errors
 
 **Testing Instructions:**
 - Unit test Container renders children
@@ -498,10 +498,10 @@ Replace CSS Modules with Tailwind
 - Make error message user-friendly, not technical
 
 **Verification Checklist:**
-- [ ] ErrorBoundary catches component errors
-- [ ] ErrorFallback displays user-friendly message
-- [ ] Retry button triggers reset
-- [ ] Styling matches overall design
+- [x] ErrorBoundary catches component errors
+- [x] ErrorFallback displays user-friendly message
+- [x] Retry button triggers reset
+- [x] Styling matches overall design
 
 **Testing Instructions:**
 - Unit test ErrorBoundary catches thrown errors
@@ -542,10 +542,10 @@ Add retry functionality with Button component
 - Ensure consistent with ErrorFallback styling
 
 **Verification Checklist:**
-- [ ] ErrorMessage renders with message prop
-- [ ] Styling uses error semantic color
-- [ ] Component is accessible
-- [ ] No TypeScript errors
+- [x] ErrorMessage renders with message prop
+- [x] Styling uses error semantic color
+- [x] Component is accessible
+- [x] No TypeScript errors
 
 **Testing Instructions:**
 - Unit test renders with different messages
@@ -584,10 +584,10 @@ Replace CSS with Tailwind styling
 - Add smooth height animation with Tailwind
 
 **Verification Checklist:**
-- [ ] Expand/collapse works smoothly
-- [ ] Sound plays on expand
-- [ ] Animation respects reduced motion
-- [ ] No TypeScript errors
+- [x] Expand/collapse works smoothly
+- [x] Sound plays on expand
+- [x] Animation respects reduced motion
+- [x] No TypeScript errors
 
 **Testing Instructions:**
 - Unit test toggle behavior
@@ -626,10 +626,10 @@ Add expand sound integration
 - Ensure proper accessibility for screen readers
 
 **Verification Checklist:**
-- [ ] Shortcuts display correctly
-- [ ] Modal-like behavior works
-- [ ] Keyboard key styling is clear
-- [ ] Accessible to screen readers
+- [x] Shortcuts display correctly
+- [x] Modal-like behavior works
+- [x] Keyboard key styling is clear
+- [x] Accessible to screen readers
 
 **Testing Instructions:**
 - Unit test renders shortcut list
@@ -674,11 +674,11 @@ Style keyboard shortcuts clearly
 - Ensure all imports resolve correctly
 
 **Verification Checklist:**
-- [ ] App renders without errors
-- [ ] Layout switches based on screen size
-- [ ] ErrorBoundary wraps content
-- [ ] Toast notifications work
-- [ ] Hot reload still functions
+- [x] App renders without errors
+- [x] Layout switches based on screen size
+- [x] ErrorBoundary wraps content
+- [x] Toast notifications work
+- [x] Hot reload still functions
 
 **Testing Instructions:**
 - Run `npm run dev` and verify app loads
