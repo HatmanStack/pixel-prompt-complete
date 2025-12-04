@@ -54,6 +54,18 @@
   }
 }
 
+/* Letter breathing animation for header */
+@keyframes letter-breathe {
+  0%, 100% {
+    transform: scale(1) translateY(0);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.15) translateY(-2px);
+    opacity: 0.8;
+  }
+}
+
 @keyframes pulse-soft {
   0%, 100% {
     opacity: 1;

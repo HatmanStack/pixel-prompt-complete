@@ -18,6 +18,7 @@ build/
 # Environment and secrets
 .env
 .env.local
+.env.deploy
 *.pem
 *.key
 samconfig.toml

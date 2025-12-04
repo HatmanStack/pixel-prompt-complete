@@ -19,11 +19,26 @@ class ModelRegistry:
 
     def __init__(self):
         """Initialize the model registry from environment variables."""
-        # Load model count
+        # Load model count for image generation models
         self.model_count = int(os.environ.get('MODEL_COUNT', 9))
-        self.prompt_model_index = int(os.environ.get('PROMPT_MODEL_INDEX', 1))
 
-        # Load all models
+        # Load prompt enhancement model (separate from image models)
+        prompt_provider = os.environ.get('PROMPT_MODEL_PROVIDER', '')
+        prompt_id = os.environ.get('PROMPT_MODEL_ID', '')
+        prompt_api_key = os.environ.get('PROMPT_MODEL_API_KEY', '')
+
+        if prompt_provider and prompt_id:
+            self.prompt_model: Optional[Dict] = {
+                'provider': prompt_provider,
+                'id': prompt_id,
+            }
+            if prompt_api_key:
+                self.prompt_model['api_key'] = prompt_api_key
+        else:
+            self.prompt_model = None
+            warnings.warn("Prompt enhancement model not configured (PROMPT_MODEL_PROVIDER/ID missing)")
+
+        # Load image generation models
         self.models: List[Dict] = []
         for i in range(1, self.model_count + 1):
             provider = os.environ.get(f'MODEL_{i}_PROVIDER', '')
@@ -52,14 +67,7 @@ class ModelRegistry:
 
         # Validation - warn if configuration doesn't match
         if len(self.models) != self.model_count:
-            warnings.warn(f"MODEL_COUNT={self.model_count} but only {len(self.models)} models configured")
-
-        if self.prompt_model_index < 1 or self.prompt_model_index > len(self.models):
-            warnings.warn(f"PROMPT_MODEL_INDEX={self.prompt_model_index} is out of range (1-{len(self.models)})")
-        else:
-            prompt_model = self.get_model_by_index(self.prompt_model_index)
-            if not prompt_model:
-                warnings.warn(f"Prompt model at index {self.prompt_model_index} not found")
+            warnings.warn(f"MODEL_COUNT={self.model_count} but only {len(self.models)} image models configured")
 
     def get_model_by_index(self, index: int) -> Optional[Dict]:
         """
@@ -81,9 +89,9 @@ class ModelRegistry:
         Get the model configured for prompt enhancement.
 
         Returns:
-            Model configuration dict for prompt enhancement or None if not found
+            Model configuration dict for prompt enhancement or None if not configured
         """
-        return self.get_model_by_index(self.prompt_model_index)
+        return self.prompt_model
 
     def get_all_models(self) -> List[Dict]:
         """

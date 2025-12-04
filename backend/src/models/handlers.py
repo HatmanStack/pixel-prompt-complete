@@ -19,49 +19,66 @@ from google.genai import types
 
 def handle_openai(model_config: Dict, prompt: str, _params: Dict) -> Dict:
     """
-    Handle image generation for OpenAI (DALL-E 3).
+    Handle image generation for OpenAI (DALL-E 2/3 and gpt-image-1).
 
     Args:
-        model_config: Model configuration dict with 'name' and 'key'
+        model_config: Model configuration dict with 'id' and 'api_key'
         prompt: Text prompt for image generation
-        _params: Generation parameters (unused - DALL-E 3 has fixed settings)
+        _params: Generation parameters (unused - uses default settings)
 
     Returns:
         Standardized response dict with status and image data
     """
     try:
+        model_id = model_config["id"]
 
         # Initialize OpenAI client with timeout
         client = OpenAI(api_key=model_config.get('api_key') or None, timeout=120.0)
 
-        # Call DALL-E 3 image generation
-        response = client.images.generate(
-            model=model_config["id"],
-            prompt=prompt,
-            size="1024x1024",
-            quality="standard",
-            n=1
-        )
+        # gpt-image-1 uses different parameters and returns base64 directly
+        if model_id == "gpt-image-1":
+            response = client.images.generate(
+                model=model_id,
+                prompt=prompt,
+                size="1024x1024",
+                quality="medium",
+            )
 
-        # Validate response structure
-        if not response.data or len(response.data) == 0:
-            raise ValueError("OpenAI returned empty data array")
+            # Validate response structure
+            if not response.data or len(response.data) == 0:
+                raise ValueError("OpenAI returned empty data array")
 
-        # Extract image URL from response
-        image_url = response.data[0].url
+            # gpt-image-1 returns base64 directly
+            image_base64 = response.data[0].b64_json
 
-        # Download image
-        img_response = requests.get(image_url, timeout=30)
-        img_response.raise_for_status()
+        else:
+            # DALL-E 2/3 returns URLs
+            response = client.images.generate(
+                model=model_id,
+                prompt=prompt,
+                size="1024x1024",
+                quality="standard",
+                n=1
+            )
 
-        # Convert to base64
-        image_base64 = base64.b64encode(img_response.content).decode('utf-8')
+            # Validate response structure
+            if not response.data or len(response.data) == 0:
+                raise ValueError("OpenAI returned empty data array")
 
+            # Extract image URL from response
+            image_url = response.data[0].url
+
+            # Download image
+            img_response = requests.get(image_url, timeout=30)
+            img_response.raise_for_status()
+
+            # Convert to base64
+            image_base64 = base64.b64encode(img_response.content).decode('utf-8')
 
         return {
             'status': 'success',
             'image': image_base64,
-            'model': model_config['id'],
+            'model': model_id,
             'provider': 'openai'
         }
 

@@ -8,7 +8,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const DEPLOY_CONFIG_PATH = path.join(__dirname, '..', '.deploy-config.json');
-const SAM_CONFIG_PATH = path.join(__dirname, '..', 'samconfig.toml');
 const FRONTEND_ENV_PATH = path.join(__dirname, '..', '..', 'frontend', '.env');
 
 export function createInterface() {
@@ -72,139 +71,224 @@ export function validateConfig(config) {
     }
   }
 
-  // Validate rate limits
-  if (config.globalRateLimit) {
-    const limit = parseInt(config.globalRateLimit, 10);
-    if (isNaN(limit) || limit < 1) {
-      errors.push(`Invalid globalRateLimit: ${config.globalRateLimit}. Must be a positive integer.`);
-    }
-  }
-
-  if (config.ipRateLimit) {
-    const limit = parseInt(config.ipRateLimit, 10);
-    if (isNaN(limit) || limit < 1) {
-      errors.push(`Invalid ipRateLimit: ${config.ipRateLimit}. Must be a positive integer.`);
-    }
-  }
-
   return {
     valid: errors.length === 0,
     errors
   };
 }
 
+// Default model IDs for each provider
+const DEFAULT_MODEL_IDS = {
+  openai: 'gpt-image-1',
+  google_gemini: 'gemini-2.0-flash-preview-image-generation',
+  bedrock_nova: 'amazon.nova-canvas-v1:0',
+  bedrock_sd: 'stability.sd3-5-large-v1:0',
+  bfl: 'flux-pro-1.1',
+  recraft: 'recraft-v3',
+  stability: 'stable-diffusion-xl-1024-v1-0'
+};
+
+const PROMPT_MODEL_IDS = {
+  openai: 'gpt-4o',
+  google_gemini: 'gemini-2.0-flash'
+};
+
+// Helper to mask API keys for display
+function maskKey(key) {
+  if (!key) return '(not set)';
+  return `****${key.slice(-4)}`;
+}
+
 export async function loadOrPromptConfig(rl) {
-  let config = {};
+  // Load existing config as defaults
+  let saved = {};
   if (fs.existsSync(DEPLOY_CONFIG_PATH)) {
     try {
-      config = JSON.parse(fs.readFileSync(DEPLOY_CONFIG_PATH, 'utf8'));
-      console.log('Loaded configuration from .deploy-config.json');
-
-      // Validate loaded config
-      const validation = validateConfig(config);
-      if (!validation.valid) {
-        console.warn('Configuration validation errors:');
-        validation.errors.forEach(err => console.warn(`  - ${err}`));
-        console.warn('Please fix .deploy-config.json or delete it to re-prompt.');
-        process.exit(1);
-      }
+      saved = JSON.parse(fs.readFileSync(DEPLOY_CONFIG_PATH, 'utf8'));
+      console.log('Loading saved configuration as defaults...\n');
     } catch (e) {
-      console.warn('Failed to parse .deploy-config.json, prompting for new config.');
+      console.warn('Failed to parse .deploy-config.json, using system defaults.\n');
     }
   }
 
-  // Defaults based on template.yaml
-  const defaults = {
-    region: 'us-east-1',
+  // System defaults (used if no saved config)
+  const systemDefaults = {
+    region: 'us-west-2',
     stackName: 'pixel-prompt-dev',
     lambdaMemory: '3008',
     lambdaTimeout: '900',
-    modelCount: '1',
-    promptModelIndex: '1',
     globalRateLimit: '1000',
     ipRateLimit: '100',
     s3RetentionDays: '30'
   };
 
-  // 1. Basic Config
-  if (!config.region) {
-    const input = await question(rl, `Enter AWS Region [${defaults.region}]: `);
-    config.region = input.trim() || defaults.region;
+  // Merge saved config with system defaults
+  const defaults = { ...systemDefaults, ...saved };
+  const config = {};
+
+  // 1. Basic Config - always prompt
+  const regionInput = await question(rl, `AWS Region [${defaults.region}]: `);
+  config.region = regionInput.trim() || defaults.region;
+
+  const stackInput = await question(rl, `Stack Name [${defaults.stackName}]: `);
+  config.stackName = stackInput.trim() || defaults.stackName;
+
+  // 2. Lambda Configuration - use saved/defaults silently
+  config.lambdaMemory = defaults.lambdaMemory;
+  config.lambdaTimeout = defaults.lambdaTimeout;
+  config.globalRateLimit = defaults.globalRateLimit;
+  config.ipRateLimit = defaults.ipRateLimit;
+  config.s3RetentionDays = defaults.s3RetentionDays;
+
+  // 3. Prompt Enhancement Model - always prompt
+  console.log('\n=== Prompt Enhancement Model ===');
+  console.log('Enhances short prompts into detailed image generation prompts.');
+  console.log('Supported: openai, google_gemini\n');
+
+  const savedPrompt = defaults.promptModel || {};
+  const promptProviderDefault = savedPrompt.provider || 'openai';
+  const promptProviderInput = await question(rl, `Provider [${promptProviderDefault}]: `);
+  const promptProvider = promptProviderInput.trim() || promptProviderDefault;
+
+  const promptIdDefault = savedPrompt.id || PROMPT_MODEL_IDS[promptProvider] || 'gpt-4o';
+  const promptIdInput = await question(rl, `Model ID [${promptIdDefault}]: `);
+  const promptId = promptIdInput.trim() || promptIdDefault;
+
+  const promptKeyDefault = savedPrompt.apiKey || '';
+  const promptKeyPrompt = promptKeyDefault
+    ? `API Key [${maskKey(promptKeyDefault)}]: `
+    : 'API Key: ';
+  const promptKeyInput = await question(rl, promptKeyPrompt);
+  const promptApiKey = promptKeyInput.trim() || promptKeyDefault;
+
+  config.promptModel = {
+    provider: promptProvider,
+    id: promptId,
+    apiKey: promptApiKey
+  };
+
+  // 4. Image Generation Models - always prompt
+  console.log('\n=== Image Generation Models ===');
+  console.log('Supported: openai, google_gemini, bedrock_nova, bedrock_sd, bfl, recraft, stability\n');
+
+  const savedModels = defaults.models || [];
+  const modelCountDefault = savedModels.length || 1;
+  const countInput = await question(rl, `How many models? [${modelCountDefault}]: `);
+  const modelCount = parseInt(countInput.trim() || modelCountDefault, 10);
+
+  config.models = [];
+
+  for (let i = 0; i < modelCount; i++) {
+    console.log(`\n--- Model ${i + 1} ---`);
+    const existing = savedModels[i] || {};
+
+    const providerDefault = existing.provider || '';
+    const providerPrompt = providerDefault
+      ? `Provider [${providerDefault}]: `
+      : 'Provider: ';
+    const providerInput = await question(rl, providerPrompt);
+    const provider = providerInput.trim() || providerDefault;
+
+    if (!provider) {
+      console.error('Provider is required.');
+      i--;
+      continue;
+    }
+
+    const idDefault = existing.id || DEFAULT_MODEL_IDS[provider] || '';
+    const idPrompt = idDefault ? `Model ID [${idDefault}]: ` : 'Model ID: ';
+    const idInput = await question(rl, idPrompt);
+    const id = idInput.trim() || idDefault;
+
+    if (!id) {
+      console.error('Model ID is required.');
+      i--;
+      continue;
+    }
+
+    let apiKey = '';
+    if (!provider.startsWith('bedrock')) {
+      const keyDefault = existing.apiKey || '';
+      const keyPrompt = keyDefault
+        ? `API Key [${maskKey(keyDefault)}]: `
+        : 'API Key: ';
+      const keyInput = await question(rl, keyPrompt);
+      apiKey = keyInput.trim() || keyDefault;
+    } else {
+      console.log('  (Bedrock uses IAM role - no API key needed)');
+    }
+
+    config.models.push({ provider, id, apiKey });
   }
 
-  if (!config.stackName) {
-    const input = await question(rl, `Enter Stack Name [${defaults.stackName}]: `);
-    config.stackName = input.trim() || defaults.stackName;
-  }
+  config.modelCount = String(config.models.length);
 
-  // 2. Lambda Configuration
-  if (!config.lambdaMemory) {
-    const input = await question(rl, `Enter Lambda Memory (MB) [${defaults.lambdaMemory}]: `);
-    config.lambdaMemory = input.trim() || defaults.lambdaMemory;
-  }
-
-  if (!config.lambdaTimeout) {
-    const input = await question(rl, `Enter Lambda Timeout (seconds) [${defaults.lambdaTimeout}]: `);
-    config.lambdaTimeout = input.trim() || defaults.lambdaTimeout;
-  }
-
-  // 3. Model Configuration
-  if (!config.modelCount) {
-    const input = await question(rl, `Enter Model Count (1-20) [${defaults.modelCount}]: `);
-    config.modelCount = input.trim() || defaults.modelCount;
-  }
-
-  if (!config.promptModelIndex) {
-    const input = await question(rl, `Enter Prompt Model Index (1-${config.modelCount}) [${defaults.promptModelIndex}]: `);
-    config.promptModelIndex = input.trim() || defaults.promptModelIndex;
-  }
-
-  // 4. Rate Limiting (use defaults, advanced users can edit config file)
-  if (!config.globalRateLimit) {
-    config.globalRateLimit = defaults.globalRateLimit;
-  }
-  if (!config.ipRateLimit) {
-    config.ipRateLimit = defaults.ipRateLimit;
-  }
-  if (!config.s3RetentionDays) {
-    config.s3RetentionDays = defaults.s3RetentionDays;
+  // Validate before saving
+  const validation = validateConfig(config);
+  if (!validation.valid) {
+    console.error('\nConfiguration validation errors:');
+    validation.errors.forEach(err => console.error(`  - ${err}`));
+    process.exit(1);
   }
 
   // Save config
   fs.writeFileSync(DEPLOY_CONFIG_PATH, JSON.stringify(config, null, 2));
-  console.log('Configuration saved to .deploy-config.json\n');
+  console.log('\n✓ Configuration saved to .deploy-config.json\n');
   return config;
 }
 
-export function generateSamConfig(config) {
-  // Build SAM parameter overrides from config
-  // Note: API keys and model configs are not stored - SAM will prompt if missing
+export function buildParameterOverrides(config) {
   const overrides = [
     `LambdaMemory=${config.lambdaMemory}`,
     `LambdaTimeout=${config.lambdaTimeout}`,
-    `ModelCount=${config.modelCount}`,
-    `PromptModelIndex=${config.promptModelIndex}`,
+    `ModelCount=${config.models.length}`,
     `GlobalRateLimit=${config.globalRateLimit}`,
     `IPRateLimit=${config.ipRateLimit}`,
-    `S3RetentionDays=${config.s3RetentionDays}`
+    `S3RetentionDays=${config.s3RetentionDays}`,
+    // Prompt enhancement model
+    `PromptModelProvider=${config.promptModel.provider}`,
+    `PromptModelId=${config.promptModel.id}`
   ];
 
-  const parameterOverrides = overrides.join(' ');
+  if (config.promptModel.apiKey) {
+    overrides.push(`PromptModelApiKey=${config.promptModel.apiKey}`);
+  }
 
-  const content = `version = 0.1
-[default.deploy.parameters]
-stack_name = "${config.stackName}"
-region = "${config.region}"
-capabilities = "CAPABILITY_IAM"
-parameter_overrides = "${parameterOverrides}"
-resolve_s3 = true
-`;
-  fs.writeFileSync(SAM_CONFIG_PATH, content);
-  console.log('Generated samconfig.toml');
-  return content;
+  // Image generation models
+  config.models.forEach((model, index) => {
+    const n = index + 1;
+    overrides.push(`Model${n}Provider=${model.provider}`);
+    overrides.push(`Model${n}Id=${model.id}`);
+    if (model.apiKey) {
+      overrides.push(`Model${n}ApiKey=${model.apiKey}`);
+    }
+  });
+
+  return overrides;
 }
 
-async function buildAndDeploy() {
+function ensureDeploymentBucket(stackName, region) {
+  const bucketName = `sam-deploy-${stackName}-${region}`;
+  console.log(`Checking deployment bucket: ${bucketName}...`);
+
+  try {
+    execSync(`aws s3 ls s3://${bucketName} --region ${region}`, { stdio: 'ignore' });
+    console.log('✓ Deployment bucket exists\n');
+  } catch (e) {
+    console.log('Creating deployment bucket...');
+    try {
+      execSync(`aws s3 mb s3://${bucketName} --region ${region}`, { stdio: 'inherit' });
+      console.log('✓ Deployment bucket created\n');
+    } catch (createErr) {
+      console.error(`Failed to create deployment bucket: ${createErr.message}`);
+      process.exit(1);
+    }
+  }
+
+  return bucketName;
+}
+
+async function buildAndDeploy(config) {
   console.log('Building SAM application...');
   try {
     execSync('sam build', { stdio: 'inherit', cwd: path.join(__dirname, '..') });
@@ -213,11 +297,28 @@ async function buildAndDeploy() {
     process.exit(1);
   }
 
+  // Create deployment bucket if needed
+  const deployBucket = ensureDeploymentBucket(config.stackName, config.region);
+
   console.log('\nDeploying SAM application...');
   console.log('This may take several minutes...\n');
 
+  const paramOverrides = buildParameterOverrides(config);
+
   return new Promise((resolve, reject) => {
-    const deploy = spawn('sam', ['deploy', '--no-confirm-changeset', '--no-fail-on-empty-changeset'], {
+    const args = [
+      'deploy',
+      '--stack-name', config.stackName,
+      '--region', config.region,
+      '--s3-bucket', deployBucket,
+      '--s3-prefix', config.stackName,
+      '--capabilities', 'CAPABILITY_IAM',
+      '--no-confirm-changeset',
+      '--no-fail-on-empty-changeset',
+      '--parameter-overrides', ...paramOverrides
+    ];
+
+    const deploy = spawn('sam', args, {
       cwd: path.join(__dirname, '..'),
       shell: true
     });
@@ -267,7 +368,6 @@ async function getStackOutputs(stackName, region) {
 }
 
 function updateFrontendEnv(apiUrl, cloudfrontDomain, s3Bucket, environment) {
-  // Build new env content
   const newEnvContent = `# Auto-generated by deploy.js on ${new Date().toISOString()}
 # Environment: ${environment}
 
@@ -296,10 +396,19 @@ async function main() {
   const config = await loadOrPromptConfig(rl);
   rl.close();
 
-  generateSamConfig(config);
+  // Display configuration summary
+  console.log('=== Configuration Summary ===');
+  console.log(`Region:       ${config.region}`);
+  console.log(`Stack:        ${config.stackName}`);
+  console.log(`\nPrompt Model: ${config.promptModel.provider} / ${config.promptModel.id}`);
+  console.log(`\nImage Models: ${config.models.length}`);
+  config.models.forEach((m, i) => {
+    console.log(`  ${i + 1}: ${m.provider} / ${m.id}`);
+  });
+  console.log('');
 
   try {
-    await buildAndDeploy();
+    await buildAndDeploy(config);
   } catch (e) {
     console.error('Deployment error:', e.message);
     process.exit(1);

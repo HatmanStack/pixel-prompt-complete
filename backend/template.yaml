@@ -14,9 +14,14 @@ Metadata:
           default: "Model Configuration"
         Parameters:
           - ModelCount
-          - PromptModelIndex
       - Label:
-          default: "Model 1"
+          default: "Prompt Enhancement Model (Text/Chat)"
+        Parameters:
+          - PromptModelProvider
+          - PromptModelId
+          - PromptModelApiKey
+      - Label:
+          default: "Image Model 1"
         Parameters:
           - Model1Provider
           - Model1Id
@@ -196,16 +201,29 @@ Parameters:
     Default: 9
     MinValue: 1
     MaxValue: 20
-    Description: Number of AI models to configure (1-20)
+    Description: Number of image generation models to configure (1-20)
 
-  PromptModelIndex:
-    Type: Number
-    Default: 1
-    MinValue: 1
-    MaxValue: 20
-    Description: Which model to use for prompt enhancement (1-based index)
+  # Prompt Enhancement Model (separate from image models)
+  PromptModelProvider:
+    Type: String
+    Default: "openai"
+    AllowedValues:
+      - openai
+      - google_gemini
+    Description: Provider for prompt enhancement (text/chat model)
 
-  # Model 1 Parameters
+  PromptModelId:
+    Type: String
+    Default: "gpt-4o"
+    Description: Model ID for prompt enhancement (e.g., gpt-4o, gemini-2.0-flash)
+
+  PromptModelApiKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: API key for prompt enhancement model
+
+  # Image Generation Model 1 Parameters
   Model1Provider:
     Type: String
     Default: "openai"
@@ -1085,8 +1103,11 @@ Resources:
           MODEL_20_API_KEY: !Ref Model20ApiKey
           MODEL_20_BASE_URL: !Ref Model20BaseUrl
           MODEL_20_USER_ID: !Ref Model20UserId
+          # Prompt Enhancement Model (separate text/chat model)
+          PROMPT_MODEL_PROVIDER: !Ref PromptModelProvider
+          PROMPT_MODEL_ID: !Ref PromptModelId
+          PROMPT_MODEL_API_KEY: !Ref PromptModelApiKey
           # Additional Configuration
-          PROMPT_MODEL_INDEX: !Ref PromptModelIndex
           GLOBAL_LIMIT: !Ref GlobalRateLimit
           IP_LIMIT: !Ref IPRateLimit
           IP_INCLUDE: !Ref IPWhitelist
