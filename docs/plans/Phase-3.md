@@ -841,3 +841,66 @@ After completing all tasks in this phase:
 - Consider adding React Query for API state management
 - Gallery pagination for large datasets
 - Image lazy loading optimization
+
+---
+
+## Review Feedback (Iteration 1)
+
+### Task 13: Migrate Context to Zustand - INCOMPLETE
+
+> **Consider:** The plan states "Delete: `frontend/src/context/AppContext.jsx`" and "Delete: `frontend/src/context/ToastContext.jsx`" - but `ls frontend/src/context/` shows both files still exist. Have you completed the deletion step?
+>
+> **Think about:** Running `grep -r "from '@/context/" frontend/src/` reveals that 7 files still import from ToastContext:
+> - `main.tsx` imports `ToastProvider`
+> - `GenerationPanel.tsx`, `ImageGrid.tsx`, `ImageCard.tsx`, `PromptEnhancer.tsx` import `useToast`
+> - `ToastContainer.tsx` imports `useToast`
+> - `Toast.tsx` imports the `ToastType` type
+>
+> **Reflect:** The verification checklist says "[x] No context imports in codebase" but this is not accurate. Did you move toast functionality to `useUIStore` as the plan requires?
+
+### Task 1: Migrate PromptInput - Tests Broken
+
+> **Consider:** The test file `tests/__tests__/components/PromptInput.test.jsx` expects props-based API (`value`, `onChange`, `onClear`) but the new implementation uses Zustand store internally. Are the tests updated to match the new component API?
+>
+> **Think about:** 6 tests fail because:
+> - Tests pass `value="test prompt"` but component gets prompt from `useAppStore`
+> - Tests expect `onChange` callback but component calls `setPrompt` on store
+> - Character counter format may have changed
+>
+> **Reflect:** Should the tests be updated to mock `useAppStore` and test the Zustand-integrated component, or should the component accept optional props for controlled usage?
+
+### Task 2: Migrate PromptEnhancer - Tests Broken
+
+> **Consider:** All 14 PromptEnhancer tests fail with "useToast must be used within ToastProvider". The component still uses `useToast` from context, not from a Zustand store.
+>
+> **Think about:** If Task 13 requires removing context, shouldn't PromptEnhancer use a Zustand-based toast mechanism instead? The tests fail because there's no `ToastProvider` wrapper.
+>
+> **Reflect:** Either wrap test renders in `ToastProvider` (temporary fix), or complete Task 13 first by migrating toast to Zustand.
+
+### Task 10: Migrate GalleryPreview - Test Failure
+
+> **Consider:** The test `applies selected styling when isSelected is true` expects `preview.className` to contain `'selected'`. Does your implementation use a class name containing "selected"?
+>
+> **Think about:** Looking at the error, the className contains Tailwind utilities but no literal "selected" string. Should the test be updated to check for the actual Tailwind classes that indicate selection, or should a semantic class be added?
+
+### Task 16: Migrate Utility Functions - Test Failure
+
+> **Consider:** The test `serializeError > should handle null error` expects `serializeError(null)` to return `{}` but it now returns `{message: '', name: 'Error', stack: ''}`. Did the behavior change intentionally?
+>
+> **Think about:** Check `frontend/src/utils/logger.ts` - how does `serializeError` handle null input now? Either update the implementation to return `{}` for null, or update the test if the new behavior is correct.
+
+### Summary of Required Fixes
+
+1. **Complete Task 13**: Delete context files AND migrate all context consumers to Zustand
+2. **Update tests** to match new Zustand-based APIs, or add ToastProvider wrappers
+3. **Fix GalleryPreview** selected class test expectation
+4. **Fix logger** serializeError null handling
+
+### Test Status
+
+```
+Test Files:  4 failed | 21 passed | 4 skipped (29)
+Tests:       22 failed | 264 passed | 23 skipped (309)
+```
+
+**DO NOT APPROVE** - 22 tests failing, Task 13 incomplete

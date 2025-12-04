@@ -6,7 +6,7 @@
 
 import { useEffect, type FC } from 'react';
 import { createPortal } from 'react-dom';
-import { useToast } from '@/context/ToastContext';
+import { useToast } from '@/stores/useToastStore';
 import { useSound } from '@/hooks/useSound';
 import { Toast } from './Toast';
 

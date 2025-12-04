@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import { Toast } from '../../../../src/components/common/Toast';
 import { ToastContainer } from '../../../../src/components/common/ToastContainer';
-import { ToastProvider, useToast } from '../../../../src/context/ToastContext';
+import { useToastStore } from '../../../../src/stores/useToastStore';
 import { useUIStore } from '../../../../src/stores/useUIStore';
 
 // Mock Audio
@@ -91,6 +91,9 @@ describe('Toast', () => {
 
 describe('ToastContainer', () => {
   beforeEach(() => {
+    // Reset toast store
+    useToastStore.setState({ toasts: [] });
+
     useUIStore.setState({
       isMuted: false,
       volume: 0.5,
@@ -99,54 +102,29 @@ describe('ToastContainer', () => {
   });
 
   it('renders nothing when no toasts', () => {
-    render(
-      <ToastProvider>
-        <ToastContainer />
-      </ToastProvider>
-    );
+    render(<ToastContainer />);
 
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
-  it('renders toasts from context', () => {
-    // Component that adds a toast
-    const TestComponent = () => {
-      const { success } = useToast();
+  it('renders toasts from store', () => {
+    // Add toast to store
+    act(() => {
+      useToastStore.getState().success('Test toast');
+    });
 
-      return (
-        <button onClick={() => success('Test toast')}>Add Toast</button>
-      );
-    };
-
-    render(
-      <ToastProvider>
-        <TestComponent />
-        <ToastContainer />
-      </ToastProvider>
-    );
-
-    fireEvent.click(screen.getByText('Add Toast'));
+    render(<ToastContainer />);
 
     expect(screen.getByText('Test toast')).toBeInTheDocument();
   });
 
   it('removes toast when dismissed', () => {
-    const TestComponent = () => {
-      const { info } = useToast();
+    // Add toast with duration 0 (no auto-dismiss)
+    act(() => {
+      useToastStore.getState().info('Dismissable toast', 0);
+    });
 
-      return (
-        <button onClick={() => info('Dismissable toast', 0)}>Add Toast</button>
-      );
-    };
-
-    render(
-      <ToastProvider>
-        <TestComponent />
-        <ToastContainer />
-      </ToastProvider>
-    );
-
-    fireEvent.click(screen.getByText('Add Toast'));
+    render(<ToastContainer />);
     expect(screen.getByText('Dismissable toast')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /close/i }));
@@ -154,22 +132,11 @@ describe('ToastContainer', () => {
   });
 
   it('has proper ARIA attributes', () => {
-    const TestComponent = () => {
-      const { info } = useToast();
+    act(() => {
+      useToastStore.getState().info('Accessible toast', 0);
+    });
 
-      return (
-        <button onClick={() => info('Accessible toast', 0)}>Add Toast</button>
-      );
-    };
-
-    render(
-      <ToastProvider>
-        <TestComponent />
-        <ToastContainer />
-      </ToastProvider>
-    );
-
-    fireEvent.click(screen.getByText('Add Toast'));
+    render(<ToastContainer />);
 
     const container = screen.getByRole('status').parentElement?.parentElement;
     expect(container).toHaveAttribute('aria-live', 'polite');
@@ -178,22 +145,11 @@ describe('ToastContainer', () => {
   it('auto-dismisses after duration', async () => {
     vi.useFakeTimers();
 
-    const TestComponent = () => {
-      const { info } = useToast();
+    act(() => {
+      useToastStore.getState().info('Auto dismiss', 1000);
+    });
 
-      return (
-        <button onClick={() => info('Auto dismiss', 1000)}>Add Toast</button>
-      );
-    };
-
-    render(
-      <ToastProvider>
-        <TestComponent />
-        <ToastContainer />
-      </ToastProvider>
-    );
-
-    fireEvent.click(screen.getByText('Add Toast'));
+    render(<ToastContainer />);
     expect(screen.getByText('Auto dismiss')).toBeInTheDocument();
 
     act(() => {

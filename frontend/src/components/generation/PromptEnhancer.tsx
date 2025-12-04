@@ -7,7 +7,7 @@
 import { useState, useEffect, useCallback, type FC } from 'react';
 import { enhancePrompt } from '@/api/client';
 import { useAppStore } from '@/stores/useAppStore';
-import { useToast } from '@/context/ToastContext';
+import { useToast } from '@/stores/useToastStore';
 import { useSound } from '@/hooks/useSound';
 
 interface EnhancedPromptData {

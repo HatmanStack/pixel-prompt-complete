@@ -8,7 +8,7 @@
  */
 
 import { useState, useCallback, useMemo, useEffect, type FC } from 'react';
-import { useToast } from '@/context/ToastContext';
+import { useToast } from '@/stores/useToastStore';
 import { downloadImage } from '@/utils/imageHelpers';
 import ImageCard from './ImageCard';
 import ImageModal from '@/components/features/generation/ImageModal';
