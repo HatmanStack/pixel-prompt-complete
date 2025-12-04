@@ -3,13 +3,15 @@
  * Functions for handling image loading, conversion, and blob URLs
  */
 
+interface ImageJsonData {
+  output?: string;
+  [key: string]: unknown;
+}
+
 /**
  * Convert base64 string to Blob
- * @param {string} base64 - Base64 encoded image
- * @param {string} mimeType - MIME type (default: image/png)
- * @returns {Blob} Blob object
  */
-export function base64ToBlob(base64, mimeType = 'image/png') {
+export function base64ToBlob(base64: string, mimeType = 'image/png'): Blob {
   // Remove data URL prefix if present
   const base64Data = base64.replace(/^data:image\/\w+;base64,/, '');
 
@@ -26,18 +28,15 @@ export function base64ToBlob(base64, mimeType = 'image/png') {
 
 /**
  * Create object URL from Blob
- * @param {Blob} blob - Blob object
- * @returns {string} Object URL
  */
-export function createBlobUrl(blob) {
+export function createBlobUrl(blob: Blob): string {
   return URL.createObjectURL(blob);
 }
 
 /**
  * Revoke object URL to prevent memory leaks
- * @param {string} url - Object URL to revoke
  */
-export function revokeBlobUrl(url) {
+export function revokeBlobUrl(url: string | null | undefined): void {
   if (url && url.startsWith('blob:')) {
     URL.revokeObjectURL(url);
   }
@@ -45,11 +44,11 @@ export function revokeBlobUrl(url) {
 
 /**
  * Fetch image JSON from S3/CloudFront
- * @param {string} imageKey - S3 key or CloudFront URL
- * @param {string} cloudFrontDomain - CloudFront domain
- * @returns {Promise<Object>} Image JSON data
  */
-export async function fetchImageFromS3(imageKey, cloudFrontDomain) {
+export async function fetchImageFromS3(
+  imageKey: string,
+  cloudFrontDomain: string
+): Promise<ImageJsonData> {
   try {
     // Build CloudFront URL
     const url = imageKey.startsWith('http')
@@ -62,7 +61,7 @@ export async function fetchImageFromS3(imageKey, cloudFrontDomain) {
       throw new Error(`Failed to fetch image: ${response.status}`);
     }
 
-    const data = await response.json();
+    const data: ImageJsonData = await response.json();
     return data;
   } catch (error) {
     console.error('Error fetching image from S3:', error);
@@ -72,20 +71,16 @@ export async function fetchImageFromS3(imageKey, cloudFrontDomain) {
 
 /**
  * Convert base64 image to blob URL
- * @param {string} base64 - Base64 encoded image
- * @returns {string} Blob URL
  */
-export function base64ToBlobUrl(base64) {
+export function base64ToBlobUrl(base64: string): string {
   const blob = base64ToBlob(base64);
   return createBlobUrl(blob);
 }
 
 /**
  * Preload image to ensure it's cached
- * @param {string} url - Image URL
- * @returns {Promise<void>}
  */
-export function preloadImage(url) {
+export function preloadImage(url: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve();
@@ -96,10 +91,8 @@ export function preloadImage(url) {
 
 /**
  * Download image to user's device
- * @param {string} url - Image URL (blob or http)
- * @param {string} filename - Filename for download
  */
-export function downloadImage(url, filename) {
+export function downloadImage(url: string, filename: string): void {
   const link = document.createElement('a');
   link.href = url;
   link.download = filename;

@@ -4,31 +4,49 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
-import { base64ToBlobUrl, revokeBlobUrl, fetchImageFromS3 } from '../utils/imageHelpers';
+import { base64ToBlobUrl, revokeBlobUrl, fetchImageFromS3 } from '@/utils/imageHelpers';
+import type { StatusResponse, ImageResult } from '@/types';
+
+interface JobResult extends ImageResult {
+  output?: string;
+  imageUrl?: string;
+  completedAt?: string;
+}
+
+interface UseImageLoaderReturn {
+  images: (string | null)[];
+  loadingStates: boolean[];
+  errors: (string | null)[];
+}
+
+interface BlobUrlsRef {
+  urls: string[];
+  jobId?: string;
+}
 
 /**
  * Custom hook for loading images progressively as they complete
- * @param {Object} jobStatus - Job status object from polling
- * @param {string} cloudFrontDomain - CloudFront domain for S3 images
- * @returns {Object} { images, loadingStates, errors }
  */
-function useImageLoader(jobStatus, cloudFrontDomain = '') {
-  const [images, setImages] = useState(Array(9).fill(null));
-  const [loadingStates, setLoadingStates] = useState(Array(9).fill(false));
-  const [errors, setErrors] = useState(Array(9).fill(null));
+function useImageLoader(
+  jobStatus: StatusResponse | null,
+  cloudFrontDomain = ''
+): UseImageLoaderReturn {
+  const [images, setImages] = useState<(string | null)[]>(Array(9).fill(null));
+  const [loadingStates, setLoadingStates] = useState<boolean[]>(Array(9).fill(false));
+  const [errors, setErrors] = useState<(string | null)[]>(Array(9).fill(null));
 
   // Track blob URLs for cleanup
-  const blobUrlsRef = useRef([]);
+  const blobUrlsRef = useRef<BlobUrlsRef>({ urls: [] });
   // Track which images have been fetched
-  const fetchedRef = useRef(new Set());
+  const fetchedRef = useRef<Set<string>>(new Set());
   // Track current job ID to prevent cross-job contamination
-  const currentJobIdRef = useRef(null);
+  const currentJobIdRef = useRef<string | null>(null);
 
   // Cleanup blob URLs on unmount
   useEffect(() => {
     return () => {
-      blobUrlsRef.current.forEach(url => revokeBlobUrl(url));
-      blobUrlsRef.current = [];
+      blobUrlsRef.current.urls.forEach((url) => revokeBlobUrl(url));
+      blobUrlsRef.current.urls = [];
     };
   }, []);
 
@@ -41,7 +59,7 @@ function useImageLoader(jobStatus, cloudFrontDomain = '') {
     const currentJobId = jobStatus.jobId;
     currentJobIdRef.current = currentJobId;
 
-    const loadImage = async (result, index) => {
+    const loadImage = async (result: JobResult, index: number) => {
       // Skip if already fetched
       const fetchKey = `${index}-${result.completedAt || ''}`;
       if (fetchedRef.current.has(fetchKey)) {
@@ -54,19 +72,19 @@ function useImageLoader(jobStatus, cloudFrontDomain = '') {
       }
 
       // Mark as loading (only after confirming we have data to load)
-      setLoadingStates(prev => {
+      setLoadingStates((prev) => {
         const newStates = [...prev];
         newStates[index] = true;
         return newStates;
       });
 
       try {
-        let imageUrl;
+        let imageUrl: string;
 
         // If result has base64 output, convert it
         if (result.output) {
           imageUrl = base64ToBlobUrl(result.output);
-          blobUrlsRef.current.push(imageUrl);
+          blobUrlsRef.current.urls.push(imageUrl);
         }
         // If result has imageUrl (S3 key), fetch from CloudFront
         else if (result.imageUrl) {
@@ -79,12 +97,11 @@ function useImageLoader(jobStatus, cloudFrontDomain = '') {
 
           if (imageData.output) {
             imageUrl = base64ToBlobUrl(imageData.output);
-            blobUrlsRef.current.push(imageUrl);
+            blobUrlsRef.current.urls.push(imageUrl);
           } else {
             throw new Error('No image data in response');
           }
-        }
-        else {
+        } else {
           throw new Error('No image source available');
         }
 
@@ -94,14 +111,14 @@ function useImageLoader(jobStatus, cloudFrontDomain = '') {
         }
 
         // Update image
-        setImages(prev => {
+        setImages((prev) => {
           const newImages = [...prev];
           newImages[index] = imageUrl;
           return newImages;
         });
 
         // Mark as loaded
-        setLoadingStates(prev => {
+        setLoadingStates((prev) => {
           const newStates = [...prev];
           newStates[index] = false;
           return newStates;
@@ -118,14 +135,14 @@ function useImageLoader(jobStatus, cloudFrontDomain = '') {
         }
 
         // Set error
-        setErrors(prev => {
+        setErrors((prev) => {
           const newErrors = [...prev];
-          newErrors[index] = error.message || 'Failed to load image';
+          newErrors[index] = error instanceof Error ? error.message : 'Failed to load image';
           return newErrors;
         });
 
         // Mark as not loading
-        setLoadingStates(prev => {
+        setLoadingStates((prev) => {
           const newStates = [...prev];
           newStates[index] = false;
           return newStates;
@@ -134,8 +151,8 @@ function useImageLoader(jobStatus, cloudFrontDomain = '') {
     };
 
     // Load all completed images
-    jobStatus.results.forEach((result, index) => {
-      if (result.status === 'completed' && !images[index]) {
+    (jobStatus.results as JobResult[]).forEach((result, index) => {
+      if (result.status === 'success' && !images[index]) {
         loadImage(result, index);
       }
     });
@@ -146,9 +163,8 @@ function useImageLoader(jobStatus, cloudFrontDomain = '') {
   useEffect(() => {
     if (jobStatus?.jobId !== blobUrlsRef.current.jobId) {
       // Cleanup old blob URLs
-      blobUrlsRef.current.forEach(url => revokeBlobUrl(url));
-      blobUrlsRef.current = [];
-      blobUrlsRef.current.jobId = jobStatus?.jobId;
+      blobUrlsRef.current.urls.forEach((url) => revokeBlobUrl(url));
+      blobUrlsRef.current = { urls: [], jobId: jobStatus?.jobId };
 
       // Reset state
       setImages(Array(9).fill(null));
