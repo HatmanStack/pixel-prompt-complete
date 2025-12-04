@@ -31,8 +31,10 @@ export interface GenerateResponse {
 export interface StatusResponse extends Job {}
 
 export interface EnhanceResponse {
-  enhanced_prompt: string;
-  original_prompt: string;
+  short_prompt?: string;
+  long_prompt?: string;
+  enhanced_prompt?: string;
+  original_prompt?: string;
 }
 
 export interface GalleryPreview {
