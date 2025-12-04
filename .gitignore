@@ -34,4 +34,3 @@ parameters.json
 # OS
 .DS_Store
 Thumbs.db
-backend/.deploy-config.json

@@ -1,24 +1,78 @@
 import fs from 'fs';
 import path from 'path';
-import readline from 'readline';
 import { spawn, execSync, execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const DEPLOY_CONFIG_PATH = path.join(__dirname, '..', '.deploy-config.json');
+const ENV_DEPLOY_PATH = path.join(__dirname, '..', '.env.deploy');
 const FRONTEND_ENV_PATH = path.join(__dirname, '..', '..', 'frontend', '.env');
 
-export function createInterface() {
-  return readline.createInterface({
-    input: process.stdin,
-    output: process.stdout
+/**
+ * Parse .env.deploy file into config object
+ */
+function parseEnvFile(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return null;
+  }
+
+  const content = fs.readFileSync(filePath, 'utf8');
+  const config = {};
+
+  content.split('\n').forEach(line => {
+    // Skip comments and empty lines
+    if (!line.trim() || line.trim().startsWith('#')) {
+      return;
+    }
+
+    const eqIndex = line.indexOf('=');
+    if (eqIndex === -1) return;
+
+    const key = line.slice(0, eqIndex).trim();
+    const value = line.slice(eqIndex + 1).trim();
+    config[key] = value;
   });
+
+  return config;
 }
 
-export function question(rl, query) {
-  return new Promise(resolve => rl.question(query, resolve));
+/**
+ * Convert env vars to structured config
+ */
+function envToConfig(env) {
+  const config = {
+    region: env.AWS_REGION || 'us-west-2',
+    stackName: env.STACK_NAME || 'pixel-prompt-dev',
+    lambdaMemory: env.LAMBDA_MEMORY || '3008',
+    lambdaTimeout: env.LAMBDA_TIMEOUT || '900',
+    globalRateLimit: env.GLOBAL_RATE_LIMIT || '1000',
+    ipRateLimit: env.IP_RATE_LIMIT || '100',
+    s3RetentionDays: env.S3_RETENTION_DAYS || '30',
+    promptModel: {
+      provider: env.PROMPT_MODEL_PROVIDER || 'openai',
+      id: env.PROMPT_MODEL_ID || 'gpt-4o',
+      apiKey: env.PROMPT_MODEL_API_KEY || ''
+    },
+    models: []
+  };
+
+  const modelCount = parseInt(env.MODEL_COUNT || '1', 10);
+
+  for (let i = 1; i <= modelCount; i++) {
+    const provider = env[`MODEL_${i}_PROVIDER`];
+    const id = env[`MODEL_${i}_ID`];
+    const apiKey = env[`MODEL_${i}_API_KEY`] || '';
+    const baseUrl = env[`MODEL_${i}_BASE_URL`] || '';
+    const userId = env[`MODEL_${i}_USER_ID`] || '';
+
+    if (provider && id) {
+      config.models.push({ provider, id, apiKey, baseUrl, userId });
+    }
+  }
+
+  config.modelCount = String(config.models.length);
+  return config;
 }
 
 async function checkPrerequisites() {
@@ -41,34 +95,34 @@ async function checkPrerequisites() {
 
 /**
  * Validate configuration values
- * @param {object} config - Configuration object to validate
- * @returns {object} - { valid: boolean, errors: string[] }
  */
 export function validateConfig(config) {
   const errors = [];
 
-  // Validate Lambda memory (128-10240 MB)
-  if (config.lambdaMemory) {
-    const memoryNum = parseInt(config.lambdaMemory, 10);
-    if (isNaN(memoryNum) || memoryNum < 128 || memoryNum > 10240) {
-      errors.push(`Invalid lambdaMemory: ${config.lambdaMemory}. Must be between 128-10240 MB.`);
-    }
+  if (!config.region) {
+    errors.push('AWS_REGION is required');
   }
 
-  // Validate Lambda timeout (1-900 seconds)
-  if (config.lambdaTimeout) {
-    const timeoutNum = parseInt(config.lambdaTimeout, 10);
-    if (isNaN(timeoutNum) || timeoutNum < 1 || timeoutNum > 900) {
-      errors.push(`Invalid lambdaTimeout: ${config.lambdaTimeout}. Must be between 1-900 seconds.`);
-    }
+  if (!config.stackName) {
+    errors.push('STACK_NAME is required');
   }
 
-  // Validate model count (1-20)
-  if (config.modelCount) {
-    const count = parseInt(config.modelCount, 10);
-    if (isNaN(count) || count < 1 || count > 20) {
-      errors.push(`Invalid modelCount: ${config.modelCount}. Must be between 1-20.`);
-    }
+  const memoryNum = parseInt(config.lambdaMemory, 10);
+  if (isNaN(memoryNum) || memoryNum < 128 || memoryNum > 10240) {
+    errors.push(`Invalid LAMBDA_MEMORY: ${config.lambdaMemory}. Must be between 128-10240 MB.`);
+  }
+
+  const timeoutNum = parseInt(config.lambdaTimeout, 10);
+  if (isNaN(timeoutNum) || timeoutNum < 1 || timeoutNum > 900) {
+    errors.push(`Invalid LAMBDA_TIMEOUT: ${config.lambdaTimeout}. Must be between 1-900 seconds.`);
+  }
+
+  if (config.models.length === 0) {
+    errors.push('At least one image generation model is required (MODEL_1_PROVIDER, MODEL_1_ID)');
+  }
+
+  if (config.models.length > 20) {
+    errors.push('Maximum 20 models supported');
   }
 
   return {
@@ -77,164 +131,22 @@ export function validateConfig(config) {
   };
 }
 
-// Default model IDs for each provider
-const DEFAULT_MODEL_IDS = {
-  openai: 'gpt-image-1',
-  google_gemini: 'gemini-2.0-flash-preview-image-generation',
-  bedrock_nova: 'amazon.nova-canvas-v1:0',
-  bedrock_sd: 'stability.sd3-5-large-v1:0',
-  bfl: 'flux-pro-1.1',
-  recraft: 'recraft-v3',
-  stability: 'stable-diffusion-xl-1024-v1-0'
-};
-
-const PROMPT_MODEL_IDS = {
-  openai: 'gpt-4o',
-  google_gemini: 'gemini-2.0-flash'
-};
-
-// Helper to mask API keys for display
 function maskKey(key) {
   if (!key) return '(not set)';
   return `****${key.slice(-4)}`;
 }
 
-export async function loadOrPromptConfig(rl) {
-  // Load existing config as defaults
-  let saved = {};
-  if (fs.existsSync(DEPLOY_CONFIG_PATH)) {
-    try {
-      saved = JSON.parse(fs.readFileSync(DEPLOY_CONFIG_PATH, 'utf8'));
-      console.log('Loading saved configuration as defaults...\n');
-    } catch (e) {
-      console.warn('Failed to parse .deploy-config.json, using system defaults.\n');
-    }
-  }
+export function loadConfig() {
+  const env = parseEnvFile(ENV_DEPLOY_PATH);
 
-  // System defaults (used if no saved config)
-  const systemDefaults = {
-    region: 'us-west-2',
-    stackName: 'pixel-prompt-dev',
-    lambdaMemory: '3008',
-    lambdaTimeout: '900',
-    globalRateLimit: '1000',
-    ipRateLimit: '100',
-    s3RetentionDays: '30'
-  };
-
-  // Merge saved config with system defaults
-  const defaults = { ...systemDefaults, ...saved };
-  const config = {};
-
-  // 1. Basic Config - always prompt
-  const regionInput = await question(rl, `AWS Region [${defaults.region}]: `);
-  config.region = regionInput.trim() || defaults.region;
-
-  const stackInput = await question(rl, `Stack Name [${defaults.stackName}]: `);
-  config.stackName = stackInput.trim() || defaults.stackName;
-
-  // 2. Lambda Configuration - use saved/defaults silently
-  config.lambdaMemory = defaults.lambdaMemory;
-  config.lambdaTimeout = defaults.lambdaTimeout;
-  config.globalRateLimit = defaults.globalRateLimit;
-  config.ipRateLimit = defaults.ipRateLimit;
-  config.s3RetentionDays = defaults.s3RetentionDays;
-
-  // 3. Prompt Enhancement Model - always prompt
-  console.log('\n=== Prompt Enhancement Model ===');
-  console.log('Enhances short prompts into detailed image generation prompts.');
-  console.log('Supported: openai, google_gemini\n');
-
-  const savedPrompt = defaults.promptModel || {};
-  const promptProviderDefault = savedPrompt.provider || 'openai';
-  const promptProviderInput = await question(rl, `Provider [${promptProviderDefault}]: `);
-  const promptProvider = promptProviderInput.trim() || promptProviderDefault;
-
-  const promptIdDefault = savedPrompt.id || PROMPT_MODEL_IDS[promptProvider] || 'gpt-4o';
-  const promptIdInput = await question(rl, `Model ID [${promptIdDefault}]: `);
-  const promptId = promptIdInput.trim() || promptIdDefault;
-
-  const promptKeyDefault = savedPrompt.apiKey || '';
-  const promptKeyPrompt = promptKeyDefault
-    ? `API Key [${maskKey(promptKeyDefault)}]: `
-    : 'API Key: ';
-  const promptKeyInput = await question(rl, promptKeyPrompt);
-  const promptApiKey = promptKeyInput.trim() || promptKeyDefault;
-
-  config.promptModel = {
-    provider: promptProvider,
-    id: promptId,
-    apiKey: promptApiKey
-  };
-
-  // 4. Image Generation Models - always prompt
-  console.log('\n=== Image Generation Models ===');
-  console.log('Supported: openai, google_gemini, bedrock_nova, bedrock_sd, bfl, recraft, stability\n');
-
-  const savedModels = defaults.models || [];
-  const modelCountDefault = savedModels.length || 1;
-  const countInput = await question(rl, `How many models? [${modelCountDefault}]: `);
-  const modelCount = parseInt(countInput.trim() || modelCountDefault, 10);
-
-  config.models = [];
-
-  for (let i = 0; i < modelCount; i++) {
-    console.log(`\n--- Model ${i + 1} ---`);
-    const existing = savedModels[i] || {};
-
-    const providerDefault = existing.provider || '';
-    const providerPrompt = providerDefault
-      ? `Provider [${providerDefault}]: `
-      : 'Provider: ';
-    const providerInput = await question(rl, providerPrompt);
-    const provider = providerInput.trim() || providerDefault;
-
-    if (!provider) {
-      console.error('Provider is required.');
-      i--;
-      continue;
-    }
-
-    const idDefault = existing.id || DEFAULT_MODEL_IDS[provider] || '';
-    const idPrompt = idDefault ? `Model ID [${idDefault}]: ` : 'Model ID: ';
-    const idInput = await question(rl, idPrompt);
-    const id = idInput.trim() || idDefault;
-
-    if (!id) {
-      console.error('Model ID is required.');
-      i--;
-      continue;
-    }
-
-    let apiKey = '';
-    if (!provider.startsWith('bedrock')) {
-      const keyDefault = existing.apiKey || '';
-      const keyPrompt = keyDefault
-        ? `API Key [${maskKey(keyDefault)}]: `
-        : 'API Key: ';
-      const keyInput = await question(rl, keyPrompt);
-      apiKey = keyInput.trim() || keyDefault;
-    } else {
-      console.log('  (Bedrock uses IAM role - no API key needed)');
-    }
-
-    config.models.push({ provider, id, apiKey });
-  }
-
-  config.modelCount = String(config.models.length);
-
-  // Validate before saving
-  const validation = validateConfig(config);
-  if (!validation.valid) {
-    console.error('\nConfiguration validation errors:');
-    validation.errors.forEach(err => console.error(`  - ${err}`));
+  if (!env) {
+    console.error(`Error: ${ENV_DEPLOY_PATH} not found.`);
+    console.error('Copy .env.deploy.example to .env.deploy and configure it.');
     process.exit(1);
   }
 
-  // Save config
-  fs.writeFileSync(DEPLOY_CONFIG_PATH, JSON.stringify(config, null, 2));
-  console.log('\n✓ Configuration saved to .deploy-config.json\n');
-  return config;
+  console.log('Loading configuration from .env.deploy...\n');
+  return envToConfig(env);
 }
 
 export function buildParameterOverrides(config) {
@@ -245,7 +157,6 @@ export function buildParameterOverrides(config) {
     `GlobalRateLimit=${config.globalRateLimit}`,
     `IPRateLimit=${config.ipRateLimit}`,
     `S3RetentionDays=${config.s3RetentionDays}`,
-    // Prompt enhancement model
     `PromptModelProvider=${config.promptModel.provider}`,
     `PromptModelId=${config.promptModel.id}`
   ];
@@ -254,13 +165,18 @@ export function buildParameterOverrides(config) {
     overrides.push(`PromptModelApiKey=${config.promptModel.apiKey}`);
   }
 
-  // Image generation models
   config.models.forEach((model, index) => {
     const n = index + 1;
     overrides.push(`Model${n}Provider=${model.provider}`);
     overrides.push(`Model${n}Id=${model.id}`);
     if (model.apiKey) {
       overrides.push(`Model${n}ApiKey=${model.apiKey}`);
+    }
+    if (model.baseUrl) {
+      overrides.push(`Model${n}BaseUrl=${model.baseUrl}`);
+    }
+    if (model.userId) {
+      overrides.push(`Model${n}UserId=${model.userId}`);
     }
   });
 
@@ -297,7 +213,6 @@ async function buildAndDeploy(config) {
     process.exit(1);
   }
 
-  // Create deployment bucket if needed
   const deployBucket = ensureDeploymentBucket(config.stackName, config.region);
 
   console.log('\nDeploying SAM application...');
@@ -392,18 +307,25 @@ async function main() {
   console.log('=== Pixel Prompt Backend Deployment ===\n');
 
   await checkPrerequisites();
-  const rl = createInterface();
-  const config = await loadOrPromptConfig(rl);
-  rl.close();
+  const config = loadConfig();
+
+  // Validate
+  const validation = validateConfig(config);
+  if (!validation.valid) {
+    console.error('Configuration errors:');
+    validation.errors.forEach(err => console.error(`  - ${err}`));
+    process.exit(1);
+  }
 
   // Display configuration summary
   console.log('=== Configuration Summary ===');
   console.log(`Region:       ${config.region}`);
   console.log(`Stack:        ${config.stackName}`);
-  console.log(`\nPrompt Model: ${config.promptModel.provider} / ${config.promptModel.id}`);
+  console.log(`\nPrompt Model: ${config.promptModel.provider} / ${config.promptModel.id} [${maskKey(config.promptModel.apiKey)}]`);
   console.log(`\nImage Models: ${config.models.length}`);
   config.models.forEach((m, i) => {
-    console.log(`  ${i + 1}: ${m.provider} / ${m.id}`);
+    const keyInfo = m.provider.startsWith('bedrock') ? '(IAM)' : `[${maskKey(m.apiKey)}]`;
+    console.log(`  ${i + 1}: ${m.provider} / ${m.id} ${keyInfo}`);
   });
   console.log('');
 
@@ -432,7 +354,6 @@ async function main() {
     console.warn('Could not find ApiEndpoint in stack outputs.');
   }
 
-  // Summary
   console.log('\n=== Deployment Complete ===\n');
   console.log(`Stack Name:        ${config.stackName}`);
   console.log(`API Endpoint:      ${apiUrlOutput?.OutputValue || 'N/A'}`);
