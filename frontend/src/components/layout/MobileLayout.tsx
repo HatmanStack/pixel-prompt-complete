@@ -64,7 +64,7 @@ export const MobileLayout: FC<MobileLayoutProps> = ({
       {/* Gallery drawer overlay */}
       {isGalleryDrawerOpen && (
         <div
-          className="fixed inset-0 z-40 bg-black/50 transition-opacity"
+          className="fixed inset-0 z-40 bg-black/50 animate-[fadeIn_200ms_ease-out] motion-reduce:animate-none"
           onClick={toggleGalleryDrawer}
           aria-hidden="true"
         />
@@ -77,6 +77,7 @@ export const MobileLayout: FC<MobileLayoutProps> = ({
           w-4/5 max-w-sm
           bg-secondary shadow-xl
           transform transition-transform duration-300 ease-in-out
+          motion-reduce:transition-none
           ${isGalleryDrawerOpen ? 'translate-x-0' : '-translate-x-full'}
         `}
         aria-label="Gallery drawer"

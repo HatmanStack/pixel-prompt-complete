@@ -174,9 +174,11 @@ const ImageCard: FC<ImageCardProps> = ({
         flex flex-col
         bg-secondary border border-accent/30 rounded-lg
         overflow-hidden
-        transition-all duration-150
-        ${isClickable ? 'cursor-pointer hover:-translate-y-1 hover:shadow-lg hover:border-accent' : ''}
-        ${isClickable ? 'focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2' : ''}
+        shadow-md
+        transition-all duration-200 ease-out
+        motion-reduce:transition-none
+        ${isClickable ? 'cursor-pointer hover:-translate-y-1 hover:scale-[1.02] hover:shadow-xl hover:border-accent' : ''}
+        ${isClickable ? 'focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 focus-visible:scale-[1.02]' : ''}
       `}
       onClick={handleClick}
       onKeyDown={handleKeyDown}

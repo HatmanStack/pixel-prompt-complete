@@ -146,6 +146,18 @@
   }
 }
 
+/* Card hover scale animation */
+@keyframes cardHover {
+  from {
+    transform: translateY(0) scale(1);
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+  }
+  to {
+    transform: translateY(-4px) scale(1.02);
+    box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.2);
+  }
+}
+
 :root {
   font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
