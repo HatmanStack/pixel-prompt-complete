@@ -118,22 +118,3 @@ def retry_with_backoff(max_retries=3, base_delay=1.0, max_delay=8.0, correlation
 
         return wrapper
     return decorator
-
-
-# Convenience decorator with default settings
-def retry_s3(correlation_id=None):
-    """
-    Convenience decorator for S3 operations with default retry settings.
-
-    Args:
-        correlation_id: Optional correlation ID for logging
-
-    Returns:
-        Decorated function with S3 retry logic
-    """
-    return retry_with_backoff(
-        max_retries=3,
-        base_delay=1.0,
-        max_delay=4.0,
-        correlation_id=correlation_id
-    )

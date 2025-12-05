@@ -13,8 +13,7 @@
     "test:coverage": "vitest --coverage",
     "test:watch": "vitest --watch",
     "analyze": "vite build && echo 'Bundle analysis saved to dist/stats.html'",
-    "typecheck": "tsc --noEmit",
-    "migrate": "npx ts-node scripts/migrate-to-tsx.ts"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "react": "^19.2.0",
@@ -40,7 +39,6 @@
     "eslint-plugin-react-refresh": "^0.4.24",
     "globals": "^16.5.0",
     "jsdom": "^23.0.1",
-    "prop-types": "^15.8.1",
     "rollup-plugin-visualizer": "^6.0.5",
     "typescript": "^5.9.3",
     "vite": "^7.2.2",

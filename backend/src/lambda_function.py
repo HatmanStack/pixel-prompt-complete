@@ -5,6 +5,7 @@ status checking, and prompt enhancement.
 """
 
 import json
+import random
 import traceback
 from datetime import datetime, timezone
 import boto3
@@ -345,7 +346,6 @@ def handle_gallery_list(event, correlation_id=None):
             preview_data = None
             if thumbnails:
                 # Use random thumbnail as preview for variety
-                import random
                 thumbnail_key = random.choice(thumbnails)
 
                 # Fetch thumbnail data (small, ~10-20KB each)

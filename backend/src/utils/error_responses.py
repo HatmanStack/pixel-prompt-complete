@@ -47,78 +47,6 @@ def error_response(
     return response
 
 
-# Common error responses
-
-def bad_request(message: str, details: Optional[str] = None, **kwargs) -> Dict[str, Any]:
-    """400 Bad Request"""
-    return error_response(
-        status_code=400,
-        error_code="BAD_REQUEST",
-        message=message,
-        details=details,
-        **kwargs
-    )
-
-
-def validation_error(field: str, constraint: str, **kwargs) -> Dict[str, Any]:
-    """400 Validation Error"""
-    messages = {
-        "prompt": {
-            "required": "Prompt is required",
-            "too_long": "Prompt is too long (maximum 1000 characters)",
-            "too_short": "Prompt is too short (minimum 3 characters)",
-        },
-        "steps": {
-            "min": "Steps must be at least 1",
-            "max": "Steps cannot exceed 100",
-        },
-        "guidance": {
-            "min": "Guidance must be at least 1",
-            "max": "Guidance cannot exceed 20",
-        },
-    }
-
-    message = messages.get(field, {}).get(constraint, f"{field} is invalid")
-
-    return error_response(
-        status_code=400,
-        error_code="VALIDATION_ERROR",
-        message=message,
-        details=f"Field '{field}' failed validation: {constraint}",
-        field=field,
-        constraint=constraint,
-        **kwargs
-    )
-
-
-def unauthorized(message: str = "Unauthorized") -> Dict[str, Any]:
-    """401 Unauthorized"""
-    return error_response(
-        status_code=401,
-        error_code="UNAUTHORIZED",
-        message=message
-    )
-
-
-def forbidden(message: str = "Access denied") -> Dict[str, Any]:
-    """403 Forbidden"""
-    return error_response(
-        status_code=403,
-        error_code="FORBIDDEN",
-        message=message
-    )
-
-
-def not_found(resource: str = "Resource", **kwargs) -> Dict[str, Any]:
-    """404 Not Found"""
-    return error_response(
-        status_code=404,
-        error_code="NOT_FOUND",
-        message=f"{resource} not found",
-        **kwargs
-    )
-
-
 def rate_limit_exceeded(retry_after: int, limit_type: str = "requests", **kwargs) -> Dict[str, Any]:
     """429 Rate Limit Exceeded"""
     minutes = (retry_after + 59) // 60  # Round up to nearest minute
@@ -138,16 +66,6 @@ def internal_server_error(message: str = "Internal server error", **kwargs) -> D
     return error_response(
         status_code=500,
         error_code="INTERNAL_SERVER_ERROR",
-        message=message,
-        **kwargs
-    )
-
-
-def service_unavailable(message: str = "Service temporarily unavailable", **kwargs) -> Dict[str, Any]:
-    """503 Service Unavailable"""
-    return error_response(
-        status_code=503,
-        error_code="SERVICE_UNAVAILABLE",
         message=message,
         **kwargs
     )

@@ -165,15 +165,3 @@ class RateLimiter:
         data['ip_requests'] = cleaned_ip_requests
 
         return data
-
-    def is_rate_limited(self, ip_address: str) -> bool:
-        """
-        Alias for check_rate_limit for backwards compatibility.
-
-        Args:
-            ip_address: Client IP address
-
-        Returns:
-            True if rate limited, False if allowed
-        """
-        return self.check_rate_limit(ip_address)

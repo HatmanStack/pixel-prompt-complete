@@ -4,8 +4,6 @@ Content Moderation module for Pixel Prompt Complete.
 Implements keyword-based NSFW and inappropriate content filtering.
 """
 
-from typing import List
-
 
 class ContentFilter:
     """
@@ -52,46 +50,3 @@ class ContentFilter:
 
         # Prompt is safe
         return False
-
-    def is_safe(self, prompt: str) -> bool:
-        """
-        Check if prompt is safe (opposite of check_prompt).
-
-        Args:
-            prompt: Text prompt to check
-
-        Returns:
-            True if safe, False if inappropriate
-        """
-        return not self.check_prompt(prompt)
-
-    def add_blocked_keyword(self, keyword: str) -> None:
-        """
-        Add a keyword to the blocked list.
-
-        Args:
-            keyword: Keyword to block (will be converted to lowercase)
-        """
-        keyword_lower = keyword.lower()
-        if keyword_lower not in self.blocked_keywords:
-            self.blocked_keywords.append(keyword_lower)
-
-    def remove_blocked_keyword(self, keyword: str) -> None:
-        """
-        Remove a keyword from the blocked list.
-
-        Args:
-            keyword: Keyword to unblock
-        """
-        keyword_lower = keyword.lower()
-        if keyword_lower in self.blocked_keywords:
-            self.blocked_keywords.remove(keyword_lower)
-
-    def get_blocked_keywords(self) -> List[str]:
-        """
-        Get list of all blocked keywords.
-
-        Returns:
-            List of blocked keywords
-        """
-        return self.blocked_keywords.copy()

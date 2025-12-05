@@ -24,7 +24,6 @@ class TestContentFilter:
 
         for prompt in safe_prompts:
             assert content_filter.check_prompt(prompt) is False, f"Safe prompt was blocked: {prompt}"
-            assert content_filter.is_safe(prompt) is True, f"Safe prompt marked unsafe: {prompt}"
 
     def test_nsfw_keywords_blocked(self):
         """Test that NSFW keywords are blocked"""
@@ -45,7 +44,6 @@ class TestContentFilter:
 
         for prompt in nsfw_prompts:
             assert content_filter.check_prompt(prompt) is True, f"NSFW prompt was not blocked: {prompt}"
-            assert content_filter.is_safe(prompt) is False, f"NSFW prompt marked safe: {prompt}"
 
     def test_violence_keywords_blocked(self):
         """Test that violent content keywords are blocked"""
@@ -95,7 +93,6 @@ class TestContentFilter:
 
         assert content_filter.check_prompt("") is False
         assert content_filter.check_prompt(None) is False
-        assert content_filter.is_safe("") is True
 
     def test_keyword_within_larger_prompt(self):
         """Test that keywords are detected within larger prompts"""
@@ -109,80 +106,6 @@ class TestContentFilter:
 
         # Keyword at end
         assert content_filter.check_prompt("artistic portrait that is explicit") is True
-
-    def test_add_blocked_keyword(self):
-        """Test adding new blocked keywords"""
-        content_filter = ContentFilter()
-
-        # Initially safe
-        assert content_filter.check_prompt("unicorn fantasy") is False
-
-        # Add keyword
-        content_filter.add_blocked_keyword("unicorn")
-
-        # Now should be blocked
-        assert content_filter.check_prompt("unicorn fantasy") is True
-
-        # Case insensitive
-        assert content_filter.check_prompt("UNICORN adventure") is True
-
-    def test_remove_blocked_keyword(self):
-        """Test removing blocked keywords"""
-        content_filter = ContentFilter()
-
-        # Initially blocked
-        assert content_filter.check_prompt("nude portrait") is True
-
-        # Remove keyword
-        content_filter.remove_blocked_keyword("nude")
-
-        # Now should be safe
-        assert content_filter.check_prompt("nude portrait") is False
-
-    def test_get_blocked_keywords(self):
-        """Test retrieving list of blocked keywords"""
-        content_filter = ContentFilter()
-
-        keywords = content_filter.get_blocked_keywords()
-
-        # Should return a list
-        assert isinstance(keywords, list)
-
-        # Should contain expected keywords
-        assert 'nude' in keywords
-        assert 'nsfw' in keywords
-        assert 'gore' in keywords
-
-        # Should be a copy (not reference)
-        keywords.append('test')
-        assert 'test' not in content_filter.get_blocked_keywords()
-
-    def test_add_duplicate_keyword(self):
-        """Test that adding duplicate keywords doesn't create duplicates"""
-        content_filter = ContentFilter()
-
-        initial_count = len(content_filter.get_blocked_keywords())
-
-        # Add keyword that already exists
-        content_filter.add_blocked_keyword("nude")
-
-        final_count = len(content_filter.get_blocked_keywords())
-
-        assert initial_count == final_count
-
-    def test_remove_nonexistent_keyword(self):
-        """Test removing a keyword that doesn't exist"""
-        content_filter = ContentFilter()
-
-        initial_keywords = content_filter.get_blocked_keywords()
-
-        # Remove keyword that doesn't exist
-        content_filter.remove_blocked_keyword("nonexistent_keyword_12345")
-
-        final_keywords = content_filter.get_blocked_keywords()
-
-        # Should remain unchanged
-        assert initial_keywords == final_keywords
 
     def test_partial_word_match(self):
         """Test that keywords match as substrings"""

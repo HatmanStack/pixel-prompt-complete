@@ -69,21 +69,6 @@ class ModelRegistry:
         if len(self.models) != self.model_count:
             warnings.warn(f"MODEL_COUNT={self.model_count} but only {len(self.models)} image models configured")
 
-    def get_model_by_index(self, index: int) -> Optional[Dict]:
-        """
-        Get model configuration by 1-based index.
-
-        Args:
-            index: 1-based index of the model
-
-        Returns:
-            Model configuration dict or None if not found
-        """
-        for model in self.models:
-            if model['index'] == index:
-                return model
-        return None
-
     def get_prompt_model(self) -> Optional[Dict]:
         """
         Get the model configured for prompt enhancement.
@@ -102,18 +87,6 @@ class ModelRegistry:
         """
         return self.models
 
-    def get_models_by_provider(self, provider: str) -> List[Dict]:
-        """
-        Get all models for a specific provider.
-
-        Args:
-            provider: Provider identifier (e.g., 'openai', 'google_gemini')
-
-        Returns:
-            List of model configuration dicts for the provider
-        """
-        return [model for model in self.models if model['provider'] == provider]
-
     def get_model_count(self) -> int:
         """
         Get the number of configured models.
@@ -122,7 +95,3 @@ class ModelRegistry:
             Number of models
         """
         return len(self.models)
-
-    def __repr__(self) -> str:
-        """String representation of the registry."""
-        return f"ModelRegistry({len(self.models)} models configured)"

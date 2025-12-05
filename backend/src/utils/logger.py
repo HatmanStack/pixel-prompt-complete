@@ -83,21 +83,3 @@ class StructuredLogger:
     def debug(message: str, correlation_id: Optional[str] = None, **kwargs) -> None:
         """Log debug message."""
         StructuredLogger.log("DEBUG", message, correlation_id, **kwargs)
-
-
-def log_with_correlation(
-    level: str,
-    message: str,
-    correlation_id: Optional[str] = None,
-    **kwargs
-) -> None:
-    """
-    Convenience function for logging with correlation ID.
-
-    Args:
-        level: Log level (ERROR, WARNING, INFO, DEBUG)
-        message: Log message
-        correlation_id: Correlation ID for request tracing
-        **kwargs: Additional metadata fields
-    """
-    StructuredLogger.log(level, message, correlation_id, **kwargs)

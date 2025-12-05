@@ -185,24 +185,6 @@ class TestRateLimiter:
         assert len(rate_data['global_requests']) == 1
         assert '192.168.1.1' in rate_data['ip_requests']
 
-    def test_is_rate_limited_alias(self, mock_s3):
-        """Test is_rate_limited alias method"""
-        s3_client, bucket_name = mock_s3
-
-        limiter = RateLimiter(
-            s3_client=s3_client,
-            bucket_name=bucket_name,
-            global_limit=1,
-            ip_limit=100,
-            ip_whitelist=[]
-        )
-
-        # First request
-        assert limiter.is_rate_limited('192.168.1.1') is False
-
-        # Second request should be rate limited
-        assert limiter.is_rate_limited('192.168.1.2') is True
-
     def test_mixed_old_and_new_requests(self, mock_s3):
         """Test cleanup preserves recent requests while removing old ones"""
         s3_client, bucket_name = mock_s3
