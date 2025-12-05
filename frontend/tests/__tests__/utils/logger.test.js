@@ -61,7 +61,7 @@ describe('Logger Utility', () => {
 
     it('should handle null error', () => {
       const serialized = serializeError(null);
-      expect(serialized).toEqual({});
+      expect(serialized).toEqual({ message: '', stack: '', name: 'Error' });
     });
   });
 

@@ -4,23 +4,38 @@
 
 import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, it, expect, vi } from 'vitest';
-import { ToastProvider } from '@/context/ToastContext';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import ImageGrid from '@/components/generation/ImageGrid';
+import { useUIStore } from '@/stores/useUIStore';
+import { useToastStore } from '@/stores/useToastStore';
 
 // Mock imageHelpers
 vi.mock('@/utils/imageHelpers', () => ({
   downloadImage: vi.fn()
 }));
 
-// Helper to render with ToastProvider
-const renderWithToast = (ui) => {
-  return render(<ToastProvider>{ui}</ToastProvider>);
-};
+// Mock Audio
+vi.stubGlobal('Audio', vi.fn().mockImplementation(() => ({
+  volume: 0.5,
+  currentTime: 0,
+  preload: '',
+  src: '',
+  play: vi.fn().mockResolvedValue(undefined),
+  pause: vi.fn(),
+})));
 
 describe('ImageGrid', () => {
+  beforeEach(() => {
+    useUIStore.setState({
+      isMuted: false,
+      volume: 0.5,
+      soundsLoaded: true,
+    });
+    useToastStore.setState({ toasts: [] });
+  });
+
   it('renders 9 image slots', () => {
-    renderWithToast(<ImageGrid images={[]} modelNames={[]} />);
+    render(<ImageGrid images={[]} modelNames={[]} />);
 
     // Should render 9 ImageCard components (all pending)
     const pendingTexts = screen.getAllByText('Waiting...');
@@ -28,7 +43,7 @@ describe('ImageGrid', () => {
   });
 
   it('renders with empty arrays', () => {
-    renderWithToast(<ImageGrid images={[]} modelNames={[]} />);
+    render(<ImageGrid images={[]} modelNames={[]} />);
 
     // Should still render grid without crashing
     expect(screen.getAllByText('Waiting...').length).toBe(9);
@@ -36,7 +51,7 @@ describe('ImageGrid', () => {
 
   it('displays model names from modelNames prop', () => {
     const modelNames = ['Model 1', 'Model 2', 'Model 3'];
-    renderWithToast(<ImageGrid images={[]} modelNames={modelNames} />);
+    render(<ImageGrid images={[]} modelNames={modelNames} />);
 
     expect(screen.getByText('Model 1')).toBeInTheDocument();
     expect(screen.getByText('Model 2')).toBeInTheDocument();
@@ -44,7 +59,7 @@ describe('ImageGrid', () => {
   });
 
   it('uses default model names when modelNames not provided', () => {
-    renderWithToast(<ImageGrid images={[]} />);
+    render(<ImageGrid images={[]} />);
 
     expect(screen.getByText('Model 1')).toBeInTheDocument();
     expect(screen.getByText('Model 2')).toBeInTheDocument();
@@ -57,7 +72,7 @@ describe('ImageGrid', () => {
       { status: 'completed', imageUrl: 'http://example.com/2.png', model: 'Stable Diffusion' },
     ];
 
-    renderWithToast(<ImageGrid images={images} />);
+    render(<ImageGrid images={images} />);
 
     const img1 = screen.getByAltText('Generated image from DALL-E 3');
     const img2 = screen.getByAltText('Generated image from Stable Diffusion');
@@ -73,7 +88,7 @@ describe('ImageGrid', () => {
       { status: 'pending', model: 'Model C' },
     ];
 
-    renderWithToast(<ImageGrid images={images} />);
+    render(<ImageGrid images={images} />);
 
     // One completed image
     expect(screen.getByAltText('Generated image from Model A')).toBeInTheDocument();
@@ -91,9 +106,9 @@ describe('ImageGrid', () => {
       { status: 'error', error: 'Generation failed', model: 'Model A' },
     ];
 
-    renderWithToast(<ImageGrid images={images} />);
+    render(<ImageGrid images={images} />);
 
-    expect(screen.getByText('Generation failed')).toBeInTheDocument();
+    expect(screen.getByText(/Model A.*Generation failed/)).toBeInTheDocument();
     expect(screen.getByText('⚠')).toBeInTheDocument();
   });
 
@@ -103,7 +118,7 @@ describe('ImageGrid', () => {
       { status: 'completed', imageUrl: 'http://example.com/1.png', model: 'Test Model' },
     ];
 
-    renderWithToast(<ImageGrid images={images} />);
+    render(<ImageGrid images={images} />);
 
     const imageCard = screen.getByRole('button', { name: /View Test Model/i });
     await user.click(imageCard);
@@ -123,7 +138,7 @@ describe('ImageGrid', () => {
       { status: 'completed', imageUrl: 'http://example.com/1.png', model: 'Test Model' },
     ];
 
-    renderWithToast(<ImageGrid images={images} />);
+    render(<ImageGrid images={images} />);
 
     const imageCard = screen.getByRole('button', { name: /View Test Model/i });
     await user.click(imageCard);
@@ -138,7 +153,7 @@ describe('ImageGrid', () => {
       { status: 'completed', imageUrl: 'http://example.com/1.png', model: 'Test Model' },
     ];
 
-    renderWithToast(<ImageGrid images={images} />);
+    render(<ImageGrid images={images} />);
 
     const imageCard = screen.getByRole('button', { name: /View Test Model/i });
     await user.click(imageCard);
@@ -158,7 +173,7 @@ describe('ImageGrid', () => {
       { status: 'completed', imageUrl: 'http://example.com/1.png', model: 'Test Model' },
     ];
 
-    renderWithToast(<ImageGrid images={images} />);
+    render(<ImageGrid images={images} />);
 
     const imageCard = screen.getByRole('button', { name: /View Test Model/i });
     await user.click(imageCard);
@@ -178,7 +193,7 @@ describe('ImageGrid', () => {
       { status: 'completed', imageUrl: 'http://example.com/1.png', model: 'Test Model' },
     ];
 
-    renderWithToast(<ImageGrid images={images} />);
+    render(<ImageGrid images={images} />);
 
     const imageCard = screen.getByRole('button', { name: /View Test Model/i });
     await user.click(imageCard);
@@ -196,7 +211,7 @@ describe('ImageGrid', () => {
       { status: 'completed', imageUrl: 'http://example.com/1.png', model: 'Test Model' },
     ];
 
-    renderWithToast(<ImageGrid images={images} />);
+    render(<ImageGrid images={images} />);
 
     const imageCard = screen.getByRole('button', { name: /View Test Model/i });
     await user.click(imageCard);
@@ -213,7 +228,7 @@ describe('ImageGrid', () => {
       { status: 'pending', model: 'Test Model' },
     ];
 
-    renderWithToast(<ImageGrid images={images} />);
+    render(<ImageGrid images={images} />);
 
     // Pending images are not buttons
     const imageCard = screen.queryByRole('button', { name: /View Test Model/i });
@@ -226,7 +241,7 @@ describe('ImageGrid', () => {
       { status: 'completed', imageUrl: 'http://example.com/2.png', model: 'Model 2' },
     ];
 
-    renderWithToast(<ImageGrid images={images} />);
+    render(<ImageGrid images={images} />);
 
     // Should have 2 completed + 7 pending = 9 total
     const waitingTexts = screen.getAllByText('Waiting...');
@@ -239,7 +254,7 @@ describe('ImageGrid', () => {
       { status: 'completed', image: 'http://example.com/2.png', model: 'Model 2' },
     ];
 
-    renderWithToast(<ImageGrid images={images} />);
+    render(<ImageGrid images={images} />);
 
     const img1 = screen.getByAltText('Generated image from Model 1');
     const img2 = screen.getByAltText('Generated image from Model 2');
@@ -254,7 +269,7 @@ describe('ImageGrid', () => {
       { status: 'completed', imageUrl: 'http://example.com/1.png', model: 'Test Model Name' },
     ];
 
-    renderWithToast(<ImageGrid images={images} />);
+    render(<ImageGrid images={images} />);
 
     const imageCard = screen.getByRole('button', { name: /View Test Model Name/i });
     await user.click(imageCard);

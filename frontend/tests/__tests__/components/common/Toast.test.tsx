@@ -1,0 +1,163 @@
+/**
+ * Tests for Toast and ToastContainer components
+ */
+
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, fireEvent, act } from '@testing-library/react';
+import { Toast } from '../../../../src/components/common/Toast';
+import { ToastContainer } from '../../../../src/components/common/ToastContainer';
+import { useToastStore } from '../../../../src/stores/useToastStore';
+import { useUIStore } from '../../../../src/stores/useUIStore';
+
+// Mock Audio
+vi.stubGlobal('Audio', vi.fn().mockImplementation(() => ({
+  volume: 0.5,
+  currentTime: 0,
+  preload: '',
+  src: '',
+  play: vi.fn().mockResolvedValue(undefined),
+  pause: vi.fn(),
+})));
+
+// Mock createPortal
+vi.mock('react-dom', async () => {
+  const actual = await vi.importActual('react-dom');
+  return {
+    ...actual,
+    createPortal: (node: React.ReactNode) => node,
+  };
+});
+
+describe('Toast', () => {
+  it('renders message', () => {
+    render(
+      <Toast id={1} message="Test message" type="info" onDismiss={vi.fn()} />
+    );
+
+    expect(screen.getByText('Test message')).toBeInTheDocument();
+  });
+
+  it('renders success icon', () => {
+    render(
+      <Toast id={1} message="Success" type="success" onDismiss={vi.fn()} />
+    );
+
+    expect(screen.getByText('✓')).toBeInTheDocument();
+  });
+
+  it('renders error icon', () => {
+    render(
+      <Toast id={1} message="Error" type="error" onDismiss={vi.fn()} />
+    );
+
+    expect(screen.getByText('✕')).toBeInTheDocument();
+  });
+
+  it('renders warning icon', () => {
+    render(
+      <Toast id={1} message="Warning" type="warning" onDismiss={vi.fn()} />
+    );
+
+    expect(screen.getByText('⚠')).toBeInTheDocument();
+  });
+
+  it('renders info icon', () => {
+    render(
+      <Toast id={1} message="Info" type="info" onDismiss={vi.fn()} />
+    );
+
+    expect(screen.getByText('ℹ')).toBeInTheDocument();
+  });
+
+  it('calls onDismiss when close button clicked', () => {
+    const handleDismiss = vi.fn();
+    render(
+      <Toast id={42} message="Test" type="info" onDismiss={handleDismiss} />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /dismiss/i }));
+
+    expect(handleDismiss).toHaveBeenCalledWith(42);
+  });
+
+  it('applies type-specific styles', () => {
+    const { container } = render(
+      <Toast id={1} message="Error" type="error" onDismiss={vi.fn()} />
+    );
+
+    expect(container.firstChild).toHaveClass('bg-error');
+  });
+});
+
+describe('ToastContainer', () => {
+  beforeEach(() => {
+    // Reset toast store
+    useToastStore.setState({ toasts: [] });
+
+    useUIStore.setState({
+      isMuted: false,
+      volume: 0.5,
+      soundsLoaded: true,
+    });
+  });
+
+  it('renders nothing when no toasts', () => {
+    render(<ToastContainer />);
+
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('renders toasts from store', () => {
+    // Add toast to store
+    act(() => {
+      useToastStore.getState().success('Test toast');
+    });
+
+    render(<ToastContainer />);
+
+    expect(screen.getByText('Test toast')).toBeInTheDocument();
+  });
+
+  it('removes toast when dismissed', () => {
+    // Add toast with duration 0 (no auto-dismiss)
+    act(() => {
+      useToastStore.getState().info('Dismissable toast', 0);
+    });
+
+    render(<ToastContainer />);
+    expect(screen.getByText('Dismissable toast')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /dismiss/i }));
+    expect(screen.queryByText('Dismissable toast')).not.toBeInTheDocument();
+  });
+
+  it('has proper ARIA attributes', () => {
+    act(() => {
+      useToastStore.getState().info('Accessible toast', 0);
+    });
+
+    render(<ToastContainer />);
+
+    const container = screen.getByRole('status').parentElement?.parentElement;
+    expect(container).toHaveAttribute('aria-live', 'polite');
+  });
+
+  it('auto-dismisses after duration', async () => {
+    vi.useFakeTimers();
+
+    act(() => {
+      useToastStore.getState().info('Auto dismiss', 1000);
+    });
+
+    render(<ToastContainer />);
+    expect(screen.getByText('Auto dismiss')).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+
+    expect(screen.queryByText('Auto dismiss')).not.toBeInTheDocument();
+
+    vi.useRealTimers();
+  });
+});

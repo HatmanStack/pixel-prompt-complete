@@ -35,17 +35,25 @@ class TestModelRegistry:
     @patch.dict('os.environ', {
         'MODEL_COUNT': '1',
         'MODEL_1_PROVIDER': 'openai',
-        'MODEL_1_ID': 'gpt-4o',
+        'MODEL_1_ID': 'dall-e-3',
         'MODEL_1_API_KEY': 'test-key',
-        'PROMPT_MODEL_INDEX': '1'
+        'PROMPT_MODEL_PROVIDER': 'openai',
+        'PROMPT_MODEL_ID': 'gpt-4o',
+        'PROMPT_MODEL_API_KEY': 'prompt-key'
     }, clear=True)
-    def test_get_prompt_model_index(self):
-        """Test retrieving prompt model"""
+    def test_get_prompt_model(self):
+        """Test retrieving prompt enhancement model (separate from image models)"""
         registry = ModelRegistry()
         prompt_model = registry.get_prompt_model()
 
         assert prompt_model is not None
+        assert prompt_model['provider'] == 'openai'
         assert prompt_model['id'] == 'gpt-4o'
+        assert prompt_model['api_key'] == 'prompt-key'
+
+        # Verify image model is separate
+        image_model = registry.get_model_by_index(1)
+        assert image_model['id'] == 'dall-e-3'
 
     @patch.dict('os.environ', {
         'MODEL_COUNT': '2',

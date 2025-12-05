@@ -107,9 +107,9 @@ describe('GalleryPreview', () => {
       <GalleryPreview gallery={mockGallery} onClick={mockOnClick} isSelected={true} />
     );
 
-    // Check that selected class is applied (implementation detail, but important for UX)
+    // Check that selected styling is applied via Tailwind border-accent class
     const preview = screen.getByRole('button');
-    expect(preview.className).toContain('selected');
+    expect(preview.className).toContain('border-accent');
   });
 
   it('does not apply selected styling when isSelected is false', () => {
@@ -118,7 +118,8 @@ describe('GalleryPreview', () => {
     );
 
     const preview = screen.getByRole('button');
-    expect(preview.className).not.toContain('selected');
+    // When not selected, uses border-accent/30 (with opacity modifier)
+    expect(preview.className).toContain('border-accent/30');
   });
 
   it('handles image load error with fallback', () => {

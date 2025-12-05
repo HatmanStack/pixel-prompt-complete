@@ -12,23 +12,29 @@
     "test:ui": "vitest --ui",
     "test:coverage": "vitest --coverage",
     "test:watch": "vitest --watch",
-    "analyze": "vite build && echo 'Bundle analysis saved to dist/stats.html'"
+    "analyze": "vite build && echo 'Bundle analysis saved to dist/stats.html'",
+    "typecheck": "tsc --noEmit",
+    "migrate": "npx ts-node scripts/migrate-to-tsx.ts"
   },
   "dependencies": {
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "uuid": "^13.0.0"
+    "uuid": "^13.0.0",
+    "zustand": "^5.0.9"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "@tailwindcss/postcss": "^4.1.17",
     "@testing-library/jest-dom": "^6.1.5",
     "@testing-library/react": "^15.0.0",
     "@testing-library/user-event": "^14.5.1",
+    "@types/node": "^24.10.1",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
     "@vitejs/plugin-react": "^5.1.0",
     "@vitest/coverage-v8": "^1.0.4",
     "@vitest/ui": "^1.0.4",
+    "autoprefixer": "^10.4.22",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
@@ -36,6 +42,7 @@
     "jsdom": "^23.0.1",
     "prop-types": "^15.8.1",
     "rollup-plugin-visualizer": "^6.0.5",
+    "typescript": "^5.9.3",
     "vite": "^7.2.2",
     "vitest": "^1.0.4"
   }

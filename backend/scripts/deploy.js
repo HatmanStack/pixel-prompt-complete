@@ -1,25 +1,78 @@
 import fs from 'fs';
 import path from 'path';
-import readline from 'readline';
 import { spawn, execSync, execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const DEPLOY_CONFIG_PATH = path.join(__dirname, '..', '.deploy-config.json');
-const SAM_CONFIG_PATH = path.join(__dirname, '..', 'samconfig.toml');
+const ENV_DEPLOY_PATH = path.join(__dirname, '..', '.env.deploy');
 const FRONTEND_ENV_PATH = path.join(__dirname, '..', '..', 'frontend', '.env');
 
-export function createInterface() {
-  return readline.createInterface({
-    input: process.stdin,
-    output: process.stdout
+/**
+ * Parse .env.deploy file into config object
+ */
+function parseEnvFile(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return null;
+  }
+
+  const content = fs.readFileSync(filePath, 'utf8');
+  const config = {};
+
+  content.split('\n').forEach(line => {
+    // Skip comments and empty lines
+    if (!line.trim() || line.trim().startsWith('#')) {
+      return;
+    }
+
+    const eqIndex = line.indexOf('=');
+    if (eqIndex === -1) return;
+
+    const key = line.slice(0, eqIndex).trim();
+    const value = line.slice(eqIndex + 1).trim();
+    config[key] = value;
   });
+
+  return config;
 }
 
-export function question(rl, query) {
-  return new Promise(resolve => rl.question(query, resolve));
+/**
+ * Convert env vars to structured config
+ */
+function envToConfig(env) {
+  const config = {
+    region: env.AWS_REGION || 'us-west-2',
+    stackName: env.STACK_NAME || 'pixel-prompt-dev',
+    lambdaMemory: env.LAMBDA_MEMORY || '3008',
+    lambdaTimeout: env.LAMBDA_TIMEOUT || '900',
+    globalRateLimit: env.GLOBAL_RATE_LIMIT || '1000',
+    ipRateLimit: env.IP_RATE_LIMIT || '100',
+    s3RetentionDays: env.S3_RETENTION_DAYS || '30',
+    promptModel: {
+      provider: env.PROMPT_MODEL_PROVIDER || 'openai',
+      id: env.PROMPT_MODEL_ID || 'gpt-4o',
+      apiKey: env.PROMPT_MODEL_API_KEY || ''
+    },
+    models: []
+  };
+
+  const modelCount = parseInt(env.MODEL_COUNT || '1', 10);
+
+  for (let i = 1; i <= modelCount; i++) {
+    const provider = env[`MODEL_${i}_PROVIDER`];
+    const id = env[`MODEL_${i}_ID`];
+    const apiKey = env[`MODEL_${i}_API_KEY`] || '';
+    const baseUrl = env[`MODEL_${i}_BASE_URL`] || '';
+    const userId = env[`MODEL_${i}_USER_ID`] || '';
+
+    if (provider && id) {
+      config.models.push({ provider, id, apiKey, baseUrl, userId });
+    }
+  }
+
+  config.modelCount = String(config.models.length);
+  return config;
 }
 
 async function checkPrerequisites() {
@@ -42,49 +95,34 @@ async function checkPrerequisites() {
 
 /**
  * Validate configuration values
- * @param {object} config - Configuration object to validate
- * @returns {object} - { valid: boolean, errors: string[] }
  */
 export function validateConfig(config) {
   const errors = [];
 
-  // Validate Lambda memory (128-10240 MB)
-  if (config.lambdaMemory) {
-    const memoryNum = parseInt(config.lambdaMemory, 10);
-    if (isNaN(memoryNum) || memoryNum < 128 || memoryNum > 10240) {
-      errors.push(`Invalid lambdaMemory: ${config.lambdaMemory}. Must be between 128-10240 MB.`);
-    }
+  if (!config.region) {
+    errors.push('AWS_REGION is required');
   }
 
-  // Validate Lambda timeout (1-900 seconds)
-  if (config.lambdaTimeout) {
-    const timeoutNum = parseInt(config.lambdaTimeout, 10);
-    if (isNaN(timeoutNum) || timeoutNum < 1 || timeoutNum > 900) {
-      errors.push(`Invalid lambdaTimeout: ${config.lambdaTimeout}. Must be between 1-900 seconds.`);
-    }
+  if (!config.stackName) {
+    errors.push('STACK_NAME is required');
   }
 
-  // Validate model count (1-20)
-  if (config.modelCount) {
-    const count = parseInt(config.modelCount, 10);
-    if (isNaN(count) || count < 1 || count > 20) {
-      errors.push(`Invalid modelCount: ${config.modelCount}. Must be between 1-20.`);
-    }
+  const memoryNum = parseInt(config.lambdaMemory, 10);
+  if (isNaN(memoryNum) || memoryNum < 128 || memoryNum > 10240) {
+    errors.push(`Invalid LAMBDA_MEMORY: ${config.lambdaMemory}. Must be between 128-10240 MB.`);
   }
 
-  // Validate rate limits
-  if (config.globalRateLimit) {
-    const limit = parseInt(config.globalRateLimit, 10);
-    if (isNaN(limit) || limit < 1) {
-      errors.push(`Invalid globalRateLimit: ${config.globalRateLimit}. Must be a positive integer.`);
-    }
+  const timeoutNum = parseInt(config.lambdaTimeout, 10);
+  if (isNaN(timeoutNum) || timeoutNum < 1 || timeoutNum > 900) {
+    errors.push(`Invalid LAMBDA_TIMEOUT: ${config.lambdaTimeout}. Must be between 1-900 seconds.`);
   }
 
-  if (config.ipRateLimit) {
-    const limit = parseInt(config.ipRateLimit, 10);
-    if (isNaN(limit) || limit < 1) {
-      errors.push(`Invalid ipRateLimit: ${config.ipRateLimit}. Must be a positive integer.`);
-    }
+  if (config.models.length === 0) {
+    errors.push('At least one image generation model is required (MODEL_1_PROVIDER, MODEL_1_ID)');
+  }
+
+  if (config.models.length > 20) {
+    errors.push('Maximum 20 models supported');
   }
 
   return {
@@ -93,118 +131,80 @@ export function validateConfig(config) {
   };
 }
 
-export async function loadOrPromptConfig(rl) {
-  let config = {};
-  if (fs.existsSync(DEPLOY_CONFIG_PATH)) {
-    try {
-      config = JSON.parse(fs.readFileSync(DEPLOY_CONFIG_PATH, 'utf8'));
-      console.log('Loaded configuration from .deploy-config.json');
-
-      // Validate loaded config
-      const validation = validateConfig(config);
-      if (!validation.valid) {
-        console.warn('Configuration validation errors:');
-        validation.errors.forEach(err => console.warn(`  - ${err}`));
-        console.warn('Please fix .deploy-config.json or delete it to re-prompt.');
-        process.exit(1);
-      }
-    } catch (e) {
-      console.warn('Failed to parse .deploy-config.json, prompting for new config.');
-    }
-  }
-
-  // Defaults based on template.yaml
-  const defaults = {
-    region: 'us-east-1',
-    stackName: 'pixel-prompt-dev',
-    lambdaMemory: '3008',
-    lambdaTimeout: '900',
-    modelCount: '1',
-    promptModelIndex: '1',
-    globalRateLimit: '1000',
-    ipRateLimit: '100',
-    s3RetentionDays: '30'
-  };
-
-  // 1. Basic Config
-  if (!config.region) {
-    const input = await question(rl, `Enter AWS Region [${defaults.region}]: `);
-    config.region = input.trim() || defaults.region;
-  }
-
-  if (!config.stackName) {
-    const input = await question(rl, `Enter Stack Name [${defaults.stackName}]: `);
-    config.stackName = input.trim() || defaults.stackName;
-  }
-
-  // 2. Lambda Configuration
-  if (!config.lambdaMemory) {
-    const input = await question(rl, `Enter Lambda Memory (MB) [${defaults.lambdaMemory}]: `);
-    config.lambdaMemory = input.trim() || defaults.lambdaMemory;
-  }
-
-  if (!config.lambdaTimeout) {
-    const input = await question(rl, `Enter Lambda Timeout (seconds) [${defaults.lambdaTimeout}]: `);
-    config.lambdaTimeout = input.trim() || defaults.lambdaTimeout;
-  }
-
-  // 3. Model Configuration
-  if (!config.modelCount) {
-    const input = await question(rl, `Enter Model Count (1-20) [${defaults.modelCount}]: `);
-    config.modelCount = input.trim() || defaults.modelCount;
-  }
-
-  if (!config.promptModelIndex) {
-    const input = await question(rl, `Enter Prompt Model Index (1-${config.modelCount}) [${defaults.promptModelIndex}]: `);
-    config.promptModelIndex = input.trim() || defaults.promptModelIndex;
-  }
-
-  // 4. Rate Limiting (use defaults, advanced users can edit config file)
-  if (!config.globalRateLimit) {
-    config.globalRateLimit = defaults.globalRateLimit;
-  }
-  if (!config.ipRateLimit) {
-    config.ipRateLimit = defaults.ipRateLimit;
-  }
-  if (!config.s3RetentionDays) {
-    config.s3RetentionDays = defaults.s3RetentionDays;
-  }
-
-  // Save config
-  fs.writeFileSync(DEPLOY_CONFIG_PATH, JSON.stringify(config, null, 2));
-  console.log('Configuration saved to .deploy-config.json\n');
-  return config;
+function maskKey(key) {
+  if (!key) return '(not set)';
+  return `****${key.slice(-4)}`;
 }
 
-export function generateSamConfig(config) {
-  // Build SAM parameter overrides from config
-  // Note: API keys and model configs are not stored - SAM will prompt if missing
+export function loadConfig() {
+  const env = parseEnvFile(ENV_DEPLOY_PATH);
+
+  if (!env) {
+    console.error(`Error: ${ENV_DEPLOY_PATH} not found.`);
+    console.error('Copy .env.deploy.example to .env.deploy and configure it.');
+    process.exit(1);
+  }
+
+  console.log('Loading configuration from .env.deploy...\n');
+  return envToConfig(env);
+}
+
+export function buildParameterOverrides(config) {
   const overrides = [
     `LambdaMemory=${config.lambdaMemory}`,
     `LambdaTimeout=${config.lambdaTimeout}`,
-    `ModelCount=${config.modelCount}`,
-    `PromptModelIndex=${config.promptModelIndex}`,
+    `ModelCount=${config.models.length}`,
     `GlobalRateLimit=${config.globalRateLimit}`,
     `IPRateLimit=${config.ipRateLimit}`,
-    `S3RetentionDays=${config.s3RetentionDays}`
+    `S3RetentionDays=${config.s3RetentionDays}`,
+    `PromptModelProvider=${config.promptModel.provider}`,
+    `PromptModelId=${config.promptModel.id}`
   ];
 
-  const parameterOverrides = overrides.join(' ');
+  if (config.promptModel.apiKey) {
+    overrides.push(`PromptModelApiKey=${config.promptModel.apiKey}`);
+  }
 
-  const content = `version = 0.1
-[default.deploy.parameters]
-stack_name = "${config.stackName}"
-region = "${config.region}"
-capabilities = "CAPABILITY_IAM"
-parameter_overrides = "${parameterOverrides}"
-resolve_s3 = true
-`;
-  fs.writeFileSync(SAM_CONFIG_PATH, content);
-  console.log('Generated samconfig.toml');
-  return content;
+  config.models.forEach((model, index) => {
+    const n = index + 1;
+    overrides.push(`Model${n}Provider=${model.provider}`);
+    overrides.push(`Model${n}Id=${model.id}`);
+    if (model.apiKey) {
+      overrides.push(`Model${n}ApiKey=${model.apiKey}`);
+    }
+    if (model.baseUrl) {
+      overrides.push(`Model${n}BaseUrl=${model.baseUrl}`);
+    }
+    if (model.userId) {
+      overrides.push(`Model${n}UserId=${model.userId}`);
+    }
+  });
+
+  return overrides;
 }
 
-async function buildAndDeploy() {
+function ensureDeploymentBucket(stackName, region) {
+  const bucketName = `sam-deploy-${stackName}-${region}`;
+  console.log(`Checking deployment bucket: ${bucketName}...`);
+
+  try {
+    execSync(`aws s3 ls s3://${bucketName} --region ${region}`, { stdio: 'ignore' });
+    console.log('✓ Deployment bucket exists\n');
+  } catch (e) {
+    console.log('Creating deployment bucket...');
+    try {
+      execSync(`aws s3 mb s3://${bucketName} --region ${region}`, { stdio: 'inherit' });
+      console.log('✓ Deployment bucket created\n');
+    } catch (createErr) {
+      console.error(`Failed to create deployment bucket: ${createErr.message}`);
+      process.exit(1);
+    }
+  }
+
+  return bucketName;
+}
+
+async function buildAndDeploy(config) {
   console.log('Building SAM application...');
   try {
     execSync('sam build', { stdio: 'inherit', cwd: path.join(__dirname, '..') });
@@ -213,11 +213,27 @@ async function buildAndDeploy() {
     process.exit(1);
   }
 
+  const deployBucket = ensureDeploymentBucket(config.stackName, config.region);
+
   console.log('\nDeploying SAM application...');
   console.log('This may take several minutes...\n');
 
+  const paramOverrides = buildParameterOverrides(config);
+
   return new Promise((resolve, reject) => {
-    const deploy = spawn('sam', ['deploy', '--no-confirm-changeset', '--no-fail-on-empty-changeset'], {
+    const args = [
+      'deploy',
+      '--stack-name', config.stackName,
+      '--region', config.region,
+      '--s3-bucket', deployBucket,
+      '--s3-prefix', config.stackName,
+      '--capabilities', 'CAPABILITY_IAM',
+      '--no-confirm-changeset',
+      '--no-fail-on-empty-changeset',
+      '--parameter-overrides', ...paramOverrides
+    ];
+
+    const deploy = spawn('sam', args, {
       cwd: path.join(__dirname, '..'),
       shell: true
     });
@@ -267,7 +283,6 @@ async function getStackOutputs(stackName, region) {
 }
 
 function updateFrontendEnv(apiUrl, cloudfrontDomain, s3Bucket, environment) {
-  // Build new env content
   const newEnvContent = `# Auto-generated by deploy.js on ${new Date().toISOString()}
 # Environment: ${environment}
 
@@ -292,14 +307,30 @@ async function main() {
   console.log('=== Pixel Prompt Backend Deployment ===\n');
 
   await checkPrerequisites();
-  const rl = createInterface();
-  const config = await loadOrPromptConfig(rl);
-  rl.close();
+  const config = loadConfig();
 
-  generateSamConfig(config);
+  // Validate
+  const validation = validateConfig(config);
+  if (!validation.valid) {
+    console.error('Configuration errors:');
+    validation.errors.forEach(err => console.error(`  - ${err}`));
+    process.exit(1);
+  }
+
+  // Display configuration summary
+  console.log('=== Configuration Summary ===');
+  console.log(`Region:       ${config.region}`);
+  console.log(`Stack:        ${config.stackName}`);
+  console.log(`\nPrompt Model: ${config.promptModel.provider} / ${config.promptModel.id} [${maskKey(config.promptModel.apiKey)}]`);
+  console.log(`\nImage Models: ${config.models.length}`);
+  config.models.forEach((m, i) => {
+    const keyInfo = m.provider.startsWith('bedrock') ? '(IAM)' : `[${maskKey(m.apiKey)}]`;
+    console.log(`  ${i + 1}: ${m.provider} / ${m.id} ${keyInfo}`);
+  });
+  console.log('');
 
   try {
-    await buildAndDeploy();
+    await buildAndDeploy(config);
   } catch (e) {
     console.error('Deployment error:', e.message);
     process.exit(1);
@@ -323,7 +354,6 @@ async function main() {
     console.warn('Could not find ApiEndpoint in stack outputs.');
   }
 
-  // Summary
   console.log('\n=== Deployment Complete ===\n');
   console.log(`Stack Name:        ${config.stackName}`);
   console.log(`API Endpoint:      ${apiUrlOutput?.OutputValue || 'N/A'}`);

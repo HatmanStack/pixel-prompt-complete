@@ -1,3 +1,188 @@
+@import "tailwindcss";
+
+/* Custom Design Tokens (from Phase-0 spec) */
+@theme {
+  /* Primary backgrounds */
+  --color-primary: #25292e;
+  --color-secondary: #3a3c3f;
+
+  /* Accent colors - adjusted for WCAG AA contrast compliance */
+  --color-accent: #C49AAB;
+  --color-accent-hover: #D5B0BF;
+  --color-accent-muted: #A9A1B5;
+
+  /* Text */
+  --color-text: #FFFFFF;
+  --color-text-secondary: #CCCCCC;
+  --color-text-dark: #000000;
+
+  /* Interactive */
+  --color-button: #958DA5;
+  --color-button-pressed: #7A7085;
+  --color-button-success: #9DA58D;
+  --color-button-danger: #FF6B6B;
+
+  /* Semantic */
+  --color-success: #9DA58D;
+  --color-error: #FF6B6B;
+  --color-warning: #FFB347;
+  --color-info: #87CEEB;
+
+  /* Typography */
+  --font-display: 'Sigmar', cursive;
+  --font-body: system-ui, sans-serif;
+
+  /* Custom animations */
+  --animate-breathe: breathe 4s ease-in-out infinite;
+  --animate-pulse-soft: pulse-soft 2s ease-in-out infinite;
+
+  /* Custom spacing */
+  --spacing-container: 1rem;
+  --spacing-section: 2rem;
+  --spacing-element: 0.5rem;
+}
+
+/* Custom keyframes */
+@keyframes breathe {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.02);
+    opacity: 0.9;
+  }
+}
+
+/* Letter breathing animation for header - refined for organic feel */
+@keyframes letter-breathe {
+  0%, 100% {
+    transform: scale(1) translateY(0);
+    opacity: 1;
+    filter: brightness(1);
+  }
+  30% {
+    transform: scale(1.08) translateY(-1px);
+    opacity: 0.95;
+    filter: brightness(1.05);
+  }
+  50% {
+    transform: scale(1.12) translateY(-2px);
+    opacity: 0.85;
+    filter: brightness(1.1);
+  }
+  70% {
+    transform: scale(1.08) translateY(-1px);
+    opacity: 0.95;
+    filter: brightness(1.05);
+  }
+}
+
+@keyframes pulse-soft {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+/* Modal animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Toast slide in animation */
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Shimmer animation for skeleton loaders */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+/* Playful bounce animation for spinners */
+@keyframes spinBounce {
+  0%, 100% {
+    transform: rotate(0deg) scale(1);
+  }
+  25% {
+    transform: rotate(90deg) scale(1.05);
+  }
+  50% {
+    transform: rotate(180deg) scale(1);
+  }
+  75% {
+    transform: rotate(270deg) scale(1.05);
+  }
+}
+
+/* Gentle pulse animation for loading indicators */
+@keyframes gentlePulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(0.98);
+  }
+}
+
+/* Card hover scale animation */
+@keyframes cardHover {
+  from {
+    transform: translateY(0) scale(1);
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+  }
+  to {
+    transform: translateY(-4px) scale(1.02);
+    box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.2);
+  }
+}
+
+/* Screen reader only utility - visually hidden but accessible */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
 :root {
   font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;

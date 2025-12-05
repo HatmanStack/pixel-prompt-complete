@@ -5,6 +5,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "start": "cd frontend && npm run dev",
     "test": "cd frontend && npx vitest run --passWithNoTests",
     "test:backend": "cd backend && PYTHONPATH=src pytest ../tests/backend -v --tb=short",
     "lint": "cd frontend && npm run lint",
@@ -12,7 +13,20 @@
     "check": "npm run lint && npm run lint:backend && npm test && npm run test:backend",
     "deploy": "node ./backend/scripts/deploy.js"
   },
-  "keywords": ["aws", "lambda", "sam", "react", "vite", "ai", "image-generation"],
+  "keywords": [
+    "aws",
+    "lambda",
+    "sam",
+    "react",
+    "vite",
+    "ai",
+    "image-generation"
+  ],
   "author": "",
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "autoprefixer": "^10.4.22",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.17"
+  }
 }
