@@ -14,11 +14,7 @@ import { ErrorFallback } from '@/components/features/errors/ErrorFallback';
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { Suspense, lazy } from 'react';
 
-// Lazy load the generation panel (still JSX, will be migrated in later phase)
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const GenerationPanel = lazy(
-  () => import('@/components/generation/GenerationPanel') as Promise<{ default: React.ComponentType<any> }>
-);
+const GenerationPanel = lazy(() => import('@/components/generation/GenerationPanel'));
 
 export const App: FC = () => {
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);

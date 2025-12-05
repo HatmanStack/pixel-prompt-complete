@@ -49,10 +49,10 @@ describe('useSound', () => {
 
     // Audio constructor should be called for each sound
     expect(Audio).toHaveBeenCalledTimes(4);
-    expect(Audio).toHaveBeenCalledWith('/sounds/click.wav');
-    expect(Audio).toHaveBeenCalledWith('/sounds/switch.wav');
+    expect(Audio).toHaveBeenCalledWith('/sounds/click.mp3');
+    expect(Audio).toHaveBeenCalledWith('/sounds/switch.mp3');
     expect(Audio).toHaveBeenCalledWith('/sounds/swoosh.mp3');
-    expect(Audio).toHaveBeenCalledWith('/sounds/expand.wav');
+    expect(Audio).toHaveBeenCalledWith('/sounds/expand.mp3');
   });
 
   it('sets soundsLoaded to true after initialization', () => {

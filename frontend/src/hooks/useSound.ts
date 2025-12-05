@@ -9,10 +9,10 @@ import type { SoundName } from '@/types';
 
 // Sound file paths
 const SOUND_FILES: Record<SoundName, string> = {
-  click: '/sounds/click.wav',
-  switch: '/sounds/switch.wav',
+  click: '/sounds/click.mp3',
+  switch: '/sounds/switch.mp3',
   swoosh: '/sounds/swoosh.mp3',
-  expand: '/sounds/expand.wav',
+  expand: '/sounds/expand.mp3',
 };
 
 interface UseSoundReturn {
