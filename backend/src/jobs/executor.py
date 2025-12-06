@@ -169,24 +169,29 @@ class JobExecutor:
         self,
         handler,
         model: Dict,
-        prompt: str
+        prompt: str,
+        timeout_seconds: int = 180
     ) -> Dict:
         """
-        Execute handler (wrapper for future timeout implementation).
-
-        Note: Individual handlers implement their own timeouts for API calls.
-        A full timeout wrapper would require signal handling or subprocess
-        execution, which adds complexity.
+        Execute handler with a timeout using ThreadPoolExecutor.
 
         Args:
             handler: Handler function to call
             model: Model configuration
             prompt: Text prompt
+            timeout_seconds: Maximum time to wait for handler (default 180s/3min)
 
         Returns:
             Handler result dict
+
+        Raises:
+            TimeoutError: If handler exceeds timeout
         """
-        # For now, just call the handler directly
-        # The individual handlers have their own timeouts for API calls
-        # Handlers receive model config, prompt, and empty params dict
-        return handler(model, prompt, {})
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(handler, model, prompt, {})
+            try:
+                return future.result(timeout=timeout_seconds)
+            except FuturesTimeoutError:
+                raise TimeoutError(f"Handler timed out after {timeout_seconds} seconds")

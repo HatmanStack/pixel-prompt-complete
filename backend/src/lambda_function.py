@@ -6,10 +6,10 @@ status checking, and prompt enhancement.
 
 import json
 import random
+import re
 import traceback
 from datetime import datetime, timezone
 import boto3
-import threading
 
 # Import configuration
 from config import (
@@ -187,34 +187,26 @@ def handle_generate(event, correlation_id=None):
             models=model_registry.get_all_models()
         )
 
-        # Start background execution in separate thread
-        # This allows Lambda to return immediately while processing continues
-        #
-        # WARNING: This pattern has limitations in Lambda environment:
-        # - Lambda may freeze/terminate the container after handler returns
-        # - Background threads may not complete if container is terminated
-        # - Job status is saved to S3, so partial results are preserved
-        # - For production, consider: Step Functions, SQS, or synchronous execution
-        # - This works for MVP due to Lambda container reuse and S3 persistence
-        thread = threading.Thread(
-            target=job_executor.execute_job,
-            args=(job_id, prompt, target)
-        )
-        thread.daemon = True
-        thread.start()
-
         StructuredLogger.info(
-            f"Job {job_id} created and started in background",
+            f"Job {job_id} created, starting synchronous execution",
             correlation_id=correlation_id,
             jobId=job_id,
             prompt=prompt[:100]  # Log first 100 chars of prompt
         )
 
-        # Return job ID immediately
+        # Execute job synchronously to ensure completion before Lambda terminates
+        # This blocks until all models complete, but guarantees results are saved
+        job_executor.execute_job(job_id, prompt, target)
+
+        # Get final job status
+        final_status = job_manager.get_job_status(job_id)
+
         return response(200, {
             'jobId': job_id,
-            'message': 'Job created successfully',
-            'totalModels': model_registry.get_model_count()
+            'message': 'Job completed',
+            'status': final_status.get('status', 'completed'),
+            'totalModels': model_registry.get_model_count(),
+            'completedModels': final_status.get('completedModels', 0)
         })
 
     except json.JSONDecodeError:
@@ -450,10 +442,21 @@ def handle_gallery_detail(event, correlation_id=None):
         # Extract gallery ID from path
         path = event.get('rawPath', event.get('path', ''))
         gallery_id = path.split('/')[-1]
-        StructuredLogger.info(f"Fetching gallery: {gallery_id}", correlation_id=correlation_id)
 
+        # Validate gallery_id to prevent path traversal attacks
+        # Gallery IDs should be timestamps in format: YYYY-MM-DD-HH-MM-SS
         if not gallery_id or gallery_id == 'list':
             return response(400, {'error': 'Gallery ID is required'})
+
+        # Only allow alphanumeric characters and hyphens (timestamp format)
+        if not re.match(r'^[a-zA-Z0-9\-]+$', gallery_id):
+            return response(400, {'error': 'Invalid gallery ID format'})
+
+        # Prevent path traversal
+        if '..' in gallery_id or '/' in gallery_id or '\\' in gallery_id:
+            return response(400, {'error': 'Invalid gallery ID'})
+
+        StructuredLogger.info(f"Fetching gallery: {gallery_id}", correlation_id=correlation_id)
 
         # Get all images from gallery
         image_keys = image_storage.list_gallery_images(gallery_id)
@@ -495,6 +498,8 @@ def response(status_code, body):
     Returns:
         API Gateway response object
     """
+    # CORS: Allow-Origin '*' is intentional - this is a public API with no authentication.
+    # Abuse protection is handled via rate limiting (global + per-IP limits).
     return {
         'statusCode': status_code,
         'headers': {

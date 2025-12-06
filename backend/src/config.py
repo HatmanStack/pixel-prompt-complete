@@ -2,14 +2,19 @@
 Configuration module for Pixel Prompt Complete Lambda function.
 Loads and validates environment variables for model configuration,
 AWS credentials, rate limiting, and S3/CloudFront settings.
+
+Security Note: All sensitive values (API keys, AWS credentials) are loaded from
+environment variables, which are injected via SAM parameter overrides at deploy
+time from .env.deploy (not committed). This follows AWS best practices.
 """
 
 import os
 import warnings
 
-# AWS credentials for Bedrock
-aws_id = os.environ.get('AWS_ACCESS_KEY_ID')
-aws_secret = os.environ.get('AWS_SECRET_ACCESS_KEY')
+# AWS credentials from Lambda execution environment (not hardcoded)
+# These are set by Lambda runtime or SAM deploy, never committed to repo
+aws_access_key = os.environ.get('AWS_ACCESS_KEY_ID')
+aws_secret_key = os.environ.get('AWS_SECRET_ACCESS_KEY')
 aws_region = os.environ.get('AWS_REGION', 'us-west-2')
 
 # S3 and CloudFront

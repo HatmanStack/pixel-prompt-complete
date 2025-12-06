@@ -3,10 +3,17 @@ Provider-specific handlers for AI image generation.
 
 Each handler implements image generation for a specific AI provider,
 returning a standardized response format.
+
+Security Note: API keys are injected via SAM parameter overrides at deploy time
+from .env.deploy (not committed to repo) and stored in Lambda environment variables.
+This is the standard AWS pattern for secrets management. Keys never appear in
+client-side code. The sanitize_error_message() function provides defense-in-depth
+by redacting any keys that might appear in exception messages returned to clients.
 """
 
 import base64
 import json
+import re
 import requests
 import time
 import warnings
@@ -15,6 +22,31 @@ from openai import OpenAI
 import boto3
 from google import genai
 from google.genai import types
+
+
+def sanitize_error_message(error: Exception) -> str:
+    """
+    Sanitize error messages to remove sensitive information like API keys.
+
+    Args:
+        error: Exception object
+
+    Returns:
+        Sanitized error message string
+    """
+    error_str = str(error)
+
+    # Remove potential API keys (common patterns)
+    # Bearer tokens
+    error_str = re.sub(r'Bearer\s+[A-Za-z0-9\-_\.]+', 'Bearer [REDACTED]', error_str)
+    # API keys in various formats
+    error_str = re.sub(r'(api[_-]?key|apikey|key|token|secret|password|authorization)["\']?\s*[:=]\s*["\']?[A-Za-z0-9\-_\.]+["\']?', r'\1=[REDACTED]', error_str, flags=re.IGNORECASE)
+    # sk- prefixed keys (OpenAI style)
+    error_str = re.sub(r'sk-[A-Za-z0-9\-_]{20,}', '[REDACTED_KEY]', error_str)
+    # Generic long alphanumeric strings that look like keys (32+ chars)
+    error_str = re.sub(r'[A-Za-z0-9]{32,}', '[REDACTED]', error_str)
+
+    return error_str
 
 
 def handle_openai(model_config: Dict, prompt: str, _params: Dict) -> Dict:
@@ -94,7 +126,7 @@ def handle_openai(model_config: Dict, prompt: str, _params: Dict) -> Dict:
     except Exception as e:
         return {
             'status': 'error',
-            'error': str(e),
+            'error': sanitize_error_message(e),
             'model': model_config['id'],
             'provider': 'openai'
         }
@@ -154,7 +186,7 @@ def handle_google_gemini(model_config: Dict, prompt: str, _params: Dict) -> Dict
     except Exception as e:
         return {
             'status': 'error',
-            'error': str(e),
+            'error': sanitize_error_message(e),
             'model': model_config['id'],
             'provider': 'google_gemini'
         }
@@ -207,7 +239,7 @@ def handle_google_imagen(model_config: Dict, prompt: str, _params: Dict) -> Dict
     except Exception as e:
         return {
             'status': 'error',
-            'error': str(e),
+            'error': sanitize_error_message(e),
             'model': model_config['id'],
             'provider': 'google_imagen'
         }
@@ -276,7 +308,7 @@ def handle_bedrock_nova(model_config: Dict, prompt: str, params: Dict) -> Dict:
     except Exception as e:
         return {
             'status': 'error',
-            'error': str(e),
+            'error': sanitize_error_message(e),
             'model': model_config['id'],
             'provider': 'bedrock_nova'
         }
@@ -343,7 +375,7 @@ def handle_bedrock_sd(model_config: Dict, prompt: str, params: Dict) -> Dict:
     except Exception as e:
         return {
             'status': 'error',
-            'error': str(e),
+            'error': sanitize_error_message(e),
             'model': model_config['id'],
             'provider': 'bedrock_sd'
         }
@@ -412,7 +444,7 @@ def handle_stability(model_config: Dict, prompt: str, params: Dict) -> Dict:
     except Exception as e:
         return {
             'status': 'error',
-            'error': str(e),
+            'error': sanitize_error_message(e),
             'model': model_config['id'],
             'provider': 'stability'
         }
@@ -499,7 +531,7 @@ def handle_bfl(model_config: Dict, prompt: str, params: Dict) -> Dict:
     except Exception as e:
         return {
             'status': 'error',
-            'error': str(e),
+            'error': sanitize_error_message(e),
             'model': model_config['id'],
             'provider': 'bfl'
         }
@@ -554,7 +586,7 @@ def handle_recraft(model_config: Dict, prompt: str, _params: Dict) -> Dict:
     except Exception as e:
         return {
             'status': 'error',
-            'error': str(e),
+            'error': sanitize_error_message(e),
             'model': model_config['id'],
             'provider': 'recraft'
         }
@@ -619,7 +651,7 @@ def handle_generic(model_config: Dict, prompt: str, _params: Dict) -> Dict:
         }
 
     except Exception as e:
-        error_msg = f"Generic handler failed (model may not be OpenAI-compatible): {str(e)}"
+        error_msg = f"Generic handler failed (model may not be OpenAI-compatible): {sanitize_error_message(e)}"
         return {
             'status': 'error',
             'error': error_msg,

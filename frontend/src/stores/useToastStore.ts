@@ -25,6 +25,8 @@ interface ToastStore {
 }
 
 let toastIdCounter = 0;
+// Track timeout IDs to allow cleanup on manual dismiss
+const toastTimeouts = new Map<number, ReturnType<typeof setTimeout>>();
 
 export const useToastStore = create<ToastStore>((set, get) => ({
   toasts: [],
@@ -37,15 +39,23 @@ export const useToastStore = create<ToastStore>((set, get) => ({
 
     // Auto-dismiss after duration
     if (duration > 0) {
-      setTimeout(() => {
+      const timeoutId = setTimeout(() => {
+        toastTimeouts.delete(id);
         get().removeToast(id);
       }, duration);
+      toastTimeouts.set(id, timeoutId);
     }
 
     return id;
   },
 
   removeToast: (id: number) => {
+    // Clear any pending timeout for this toast
+    const timeoutId = toastTimeouts.get(id);
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+      toastTimeouts.delete(id);
+    }
     set((state) => ({ toasts: state.toasts.filter((t) => t.id !== id) }));
   },
 

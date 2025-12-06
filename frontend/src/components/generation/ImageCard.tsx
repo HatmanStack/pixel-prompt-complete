@@ -4,7 +4,7 @@
  * Memoized to prevent unnecessary re-renders in grid
  */
 
-import { useState, memo, type FC, type KeyboardEvent, type MouseEvent } from 'react';
+import { useState, useEffect, memo, type FC, type KeyboardEvent, type MouseEvent } from 'react';
 import { useToast } from '@/stores/useToastStore';
 import { downloadImage } from '@/utils/imageHelpers';
 import { useSound } from '@/hooks/useSound';
@@ -30,13 +30,11 @@ const ImageCard: FC<ImageCardProps> = ({
   const { playSound } = useSound();
   const [imageError, setImageError] = useState(false);
   const [showActions, setShowActions] = useState(false);
-  const [prevImage, setPrevImage] = useState(image);
 
-  // Reset imageError when image prop changes (without useEffect)
-  if (image !== prevImage) {
+  // Reset imageError when image prop changes
+  useEffect(() => {
     setImageError(false);
-    setPrevImage(image);
-  }
+  }, [image]);
 
   const handleImageError = () => {
     setImageError(true);

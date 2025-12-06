@@ -5,10 +5,16 @@ Manages job lifecycle including creation, status updates, and S3 storage.
 """
 
 import json
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 from botocore.exceptions import ClientError
+
+
+# Maximum retries for optimistic locking conflicts
+MAX_RETRIES = 3
+RETRY_DELAY_MS = 50
 
 
 class JobManager:
@@ -47,6 +53,7 @@ class JobManager:
         status = {
             'jobId': job_id,
             'status': 'pending',
+            'version': 1,  # Optimistic locking version
             'createdAt': now,
             'updatedAt': now,
             'totalModels': len(models),
@@ -95,37 +102,50 @@ class JobManager:
         """
         Mark a model as completed successfully.
 
+        Uses optimistic locking with retries to handle concurrent updates.
+
         Args:
             job_id: Job ID
             model_name: Name of the model
             image_key: S3 key where image is stored
             duration: Processing duration in seconds
         """
-        status = self.get_job_status(job_id)
-        if not status:
-            raise ValueError(f"Job {job_id} not found")
+        for attempt in range(MAX_RETRIES):
+            status = self.get_job_status(job_id)
+            if not status:
+                raise ValueError(f"Job {job_id} not found")
 
-        # Find and update the model result
-        for result in status['results']:
-            if result['model'] == model_name:
-                result['status'] = 'completed'
-                result['imageKey'] = image_key
-                result['completedAt'] = datetime.now(timezone.utc).isoformat()
-                result['duration'] = duration
-                break
-        else:
-            raise ValueError(f"Model {model_name} not found in job {job_id} results")
+            original_version = status.get('version', 1)
 
-        # Update completed count
-        status['completedModels'] = sum(
-            1 for r in status['results'] if r['status'] == 'completed'
-        )
+            # Find and update the model result
+            for result in status['results']:
+                if result['model'] == model_name:
+                    result['status'] = 'completed'
+                    result['imageKey'] = image_key
+                    result['completedAt'] = datetime.now(timezone.utc).isoformat()
+                    result['duration'] = duration
+                    break
+            else:
+                raise ValueError(f"Model {model_name} not found in job {job_id} results")
 
-        # Update overall status
-        status['status'] = self._compute_overall_status(status)
-        status['updatedAt'] = datetime.now(timezone.utc).isoformat()
+            # Update completed count
+            status['completedModels'] = sum(
+                1 for r in status['results'] if r['status'] == 'completed'
+            )
 
-        # Save
+            # Update overall status and version
+            status['status'] = self._compute_overall_status(status)
+            status['updatedAt'] = datetime.now(timezone.utc).isoformat()
+            status['version'] = original_version + 1
+
+            # Try to save with version check
+            if self._save_status_with_version(job_id, status, original_version):
+                return  # Success
+
+            # Version conflict - retry after short delay
+            time.sleep(RETRY_DELAY_MS / 1000.0)
+
+        # All retries exhausted - force save (last writer wins)
         self._save_status(job_id, status)
 
 
@@ -133,30 +153,43 @@ class JobManager:
         """
         Mark a model as failed with error.
 
+        Uses optimistic locking with retries to handle concurrent updates.
+
         Args:
             job_id: Job ID
             model_name: Name of the model
             error: Error message
         """
-        status = self.get_job_status(job_id)
-        if not status:
-            raise ValueError(f"Job {job_id} not found")
+        for attempt in range(MAX_RETRIES):
+            status = self.get_job_status(job_id)
+            if not status:
+                raise ValueError(f"Job {job_id} not found")
 
-        # Find and update the model result
-        for result in status['results']:
-            if result['model'] == model_name:
-                result['status'] = 'error'
-                result['error'] = error
-                result['completedAt'] = datetime.now(timezone.utc).isoformat()
-                break
-        else:
-            raise ValueError(f"Model {model_name} not found in job {job_id} results")
+            original_version = status.get('version', 1)
 
-        # Update overall status
-        status['status'] = self._compute_overall_status(status)
-        status['updatedAt'] = datetime.now(timezone.utc).isoformat()
+            # Find and update the model result
+            for result in status['results']:
+                if result['model'] == model_name:
+                    result['status'] = 'error'
+                    result['error'] = error
+                    result['completedAt'] = datetime.now(timezone.utc).isoformat()
+                    break
+            else:
+                raise ValueError(f"Model {model_name} not found in job {job_id} results")
 
-        # Save
+            # Update overall status and version
+            status['status'] = self._compute_overall_status(status)
+            status['updatedAt'] = datetime.now(timezone.utc).isoformat()
+            status['version'] = original_version + 1
+
+            # Try to save with version check
+            if self._save_status_with_version(job_id, status, original_version):
+                return  # Success
+
+            # Version conflict - retry after short delay
+            time.sleep(RETRY_DELAY_MS / 1000.0)
+
+        # All retries exhausted - force save
         self._save_status(job_id, status)
 
 
@@ -228,6 +261,32 @@ class JobManager:
             Body=json.dumps(status, indent=2),
             ContentType='application/json'
         )
+
+    def _save_status_with_version(self, job_id: str, status: Dict, expected_version: int) -> bool:
+        """
+        Save job status to S3 with optimistic locking version check.
+
+        This provides a basic form of optimistic locking by checking if the
+        version has changed since we read the status. Since S3 doesn't support
+        conditional writes based on content, we re-read and verify.
+
+        Args:
+            job_id: Job ID
+            status: Status dict to save
+            expected_version: The version we expect the current status to have
+
+        Returns:
+            True if save was successful, False if version conflict detected
+        """
+        # Re-read current status to check version
+        current = self.get_job_status(job_id)
+        if current and current.get('version', 1) != expected_version:
+            # Version conflict - another writer updated the status
+            return False
+
+        # Version matches - safe to write
+        self._save_status(job_id, status)
+        return True
 
     def _compute_overall_status(self, status: Dict) -> str:
         """
