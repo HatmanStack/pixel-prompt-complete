@@ -143,11 +143,11 @@ Reduce template from ~1300 to ~250 lines
 4. **Remove all dynamic model loading logic** (the `for i in range(1, MODEL_COUNT+1)` pattern).
 
 **Verification Checklist:**
-- [ ] `get_enabled_models()` returns only enabled models
-- [ ] `get_model('flux')` returns correct config when enabled
-- [ ] `get_model('flux')` raises error when disabled
-- [ ] No references to MODEL_COUNT or MODEL_{N}_* patterns
-- [ ] Default values work when env vars missing
+- [x] `get_enabled_models()` returns only enabled models
+- [x] `get_model('flux')` returns correct config when enabled
+- [x] `get_model('flux')` raises error when disabled
+- [x] No references to MODEL_COUNT or MODEL_{N}_* patterns
+- [x] Default values work when env vars missing
 
 **Testing Instructions:**
 - Unit tests for each helper function
