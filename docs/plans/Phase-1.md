@@ -407,11 +407,11 @@ Compute session status from model statuses
    ```
 
 **Verification Checklist:**
-- [ ] Each handler returns standardized response format
-- [ ] Handlers gracefully handle API errors
-- [ ] Context is utilized appropriately per provider
-- [ ] API keys sanitized from error messages
-- [ ] Timeout handling for each provider
+- [x] Each handler returns standardized response format
+- [x] Handlers gracefully handle API errors
+- [x] Context is utilized appropriately per provider
+- [x] API keys sanitized from error messages
+- [x] Timeout handling for each provider
 
 **Testing Instructions:**
 - Unit tests with mocked API responses for each provider
