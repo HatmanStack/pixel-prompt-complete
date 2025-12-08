@@ -1012,3 +1012,352 @@ def get_iterate_handler(provider: str) -> Callable:
         raise ValueError(f"No iteration handler for provider: {provider}")
 
     return handler
+
+
+# ============================================================================
+# OUTPAINTING HANDLERS
+# ============================================================================
+
+def outpaint_flux(model_config: Dict, source_image: bytes, preset: str, prompt: str) -> Dict:
+    """
+    Expand an image using FLUX Fill with edge mask.
+
+    Args:
+        model_config: Model configuration with API key
+        source_image: Base64-encoded source image
+        preset: Aspect preset ('16:9', '9:16', '1:1', '4:3', 'expand_all')
+        prompt: Description for expanded regions
+
+    Returns:
+        Standardized response dict
+    """
+    try:
+        from utils.outpaint import (
+            calculate_expansion, pad_image_with_transparency,
+            create_expansion_mask, get_image_dimensions
+        )
+
+        # Decode source image
+        if isinstance(source_image, str):
+            image_bytes = base64.b64decode(source_image)
+        else:
+            image_bytes = source_image
+
+        # Get dimensions and calculate expansion
+        width, height = get_image_dimensions(image_bytes)
+        expansion = calculate_expansion(width, height, preset)
+
+        # If no expansion needed, return original
+        if expansion['left'] == 0 and expansion['right'] == 0 and \
+           expansion['top'] == 0 and expansion['bottom'] == 0:
+            return {
+                'status': 'success',
+                'image': source_image if isinstance(source_image, str) else base64.b64encode(source_image).decode('utf-8'),
+                'model': model_config.get('id', 'flux-pro-1.1'),
+                'provider': 'bfl'
+            }
+
+        # Create padded image and mask
+        padded_image = pad_image_with_transparency(image_bytes, expansion)
+        mask = create_expansion_mask(width, height, expansion, mask_format='base64')
+        padded_base64 = base64.b64encode(padded_image).decode('utf-8')
+
+        # BFL Fill endpoint
+        url = "https://api.bfl.ai/v1/flux-pro-1.1-fill"
+        headers = {
+            "x-key": model_config.get('api_key', ''),
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "image": padded_base64,
+            "mask": mask,
+            "prompt": f"Expand the image: {prompt}",
+            "width": expansion['new_width'],
+            "height": expansion['new_height']
+        }
+
+        # Start job
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        response.raise_for_status()
+        job_data = response.json()
+        job_id = job_data.get('id')
+
+        if not job_id:
+            raise ValueError("No job ID returned from BFL Fill API")
+
+        # Poll for result
+        result_url = f"https://api.bfl.ai/v1/get_result?id={job_id}"
+        for attempt in range(40):
+            time.sleep(3)
+            result_response = requests.get(result_url, headers=headers, timeout=10)
+            result_response.raise_for_status()
+            result_data = result_response.json()
+
+            if result_data.get('status') == 'Ready':
+                image_url = result_data['result']['sample']
+                img_response = requests.get(image_url, timeout=30)
+                img_response.raise_for_status()
+                image_base64 = base64.b64encode(img_response.content).decode('utf-8')
+
+                return {
+                    'status': 'success',
+                    'image': image_base64,
+                    'model': model_config.get('id', 'flux-pro-1.1'),
+                    'provider': 'bfl'
+                }
+
+            elif result_data.get('status') == 'Error':
+                raise ValueError(f"BFL outpaint job failed: {result_data.get('error', 'Unknown')}")
+
+        raise TimeoutError("BFL outpaint job timeout after 120 seconds")
+
+    except Exception as e:
+        return {
+            'status': 'error',
+            'error': sanitize_error_message(e),
+            'model': model_config.get('id', 'flux'),
+            'provider': 'bfl'
+        }
+
+
+def outpaint_recraft(model_config: Dict, source_image: bytes, preset: str, prompt: str) -> Dict:
+    """
+    Expand an image using Recraft outpaint endpoint.
+
+    Args:
+        model_config: Model configuration with API key
+        source_image: Base64-encoded source image
+        preset: Aspect preset
+        prompt: Description for expanded regions
+
+    Returns:
+        Standardized response dict
+    """
+    try:
+        from utils.outpaint import calculate_expansion, get_image_dimensions
+
+        # Decode source image
+        if isinstance(source_image, str):
+            image_bytes = base64.b64decode(source_image)
+        else:
+            image_bytes = source_image
+
+        # Get dimensions and calculate expansion
+        width, height = get_image_dimensions(image_bytes)
+        expansion = calculate_expansion(width, height, preset)
+
+        # Recraft outpaint endpoint
+        url = "https://external.api.recraft.ai/v1/images/outpaint"
+        headers = {
+            "Authorization": f"Bearer {model_config.get('api_key', '')}",
+        }
+
+        # Calculate direction parameters for Recraft
+        files = {
+            'image': ('image.png', image_bytes, 'image/png'),
+        }
+        data = {
+            'prompt': prompt,
+            'model': 'recraftv3',
+            'left': expansion['left'],
+            'right': expansion['right'],
+            'top': expansion['top'],
+            'bottom': expansion['bottom'],
+            'response_format': 'url',
+        }
+
+        response = requests.post(url, headers=headers, files=files, data=data, timeout=60)
+        response.raise_for_status()
+        result = response.json()
+
+        # Get image URL from response
+        image_url = result.get('data', [{}])[0].get('url')
+        if not image_url:
+            raise ValueError("No image URL in Recraft outpaint response")
+
+        # Download image
+        img_response = requests.get(image_url, timeout=30)
+        img_response.raise_for_status()
+        image_base64 = base64.b64encode(img_response.content).decode('utf-8')
+
+        return {
+            'status': 'success',
+            'image': image_base64,
+            'model': model_config.get('id', 'recraftv3'),
+            'provider': 'recraft'
+        }
+
+    except Exception as e:
+        return {
+            'status': 'error',
+            'error': sanitize_error_message(e),
+            'model': model_config.get('id', 'recraft'),
+            'provider': 'recraft'
+        }
+
+
+def outpaint_gemini(model_config: Dict, source_image: bytes, preset: str, prompt: str) -> Dict:
+    """
+    Expand an image using Gemini prompt-based outpainting.
+
+    Gemini doesn't have native outpainting, so we use prompt engineering.
+
+    Args:
+        model_config: Model configuration with API key
+        source_image: Base64-encoded source image
+        preset: Aspect preset
+        prompt: Description for expanded regions
+
+    Returns:
+        Standardized response dict
+    """
+    try:
+        from utils.outpaint import get_direction_description
+
+        # Decode source image
+        if isinstance(source_image, str):
+            image_bytes = base64.b64decode(source_image)
+        else:
+            image_bytes = source_image
+
+        direction = get_direction_description(preset)
+        full_prompt = f"Extend this image {direction}. Fill the extended areas with: {prompt}"
+
+        client = genai.Client(api_key=model_config.get('api_key', ''))
+
+        content_parts = [
+            types.Part.from_bytes(data=image_bytes, mime_type='image/png'),
+            types.Part.from_text(full_prompt)
+        ]
+
+        response = client.models.generate_content(
+            model=model_config.get('id', 'gemini-2.0-flash-exp'),
+            contents=content_parts,
+            config=types.GenerateContentConfig(
+                response_modalities=['Image']
+            )
+        )
+
+        if not response.candidates or len(response.candidates) == 0:
+            raise ValueError("Gemini returned empty candidates array")
+
+        image_data = None
+        for part in response.candidates[0].content.parts:
+            if hasattr(part, 'inline_data') and part.inline_data:
+                image_data = part.inline_data.data
+                break
+
+        if not image_data:
+            raise ValueError("No image data found in Gemini outpaint response")
+
+        image_base64 = base64.b64encode(image_data).decode('utf-8')
+
+        return {
+            'status': 'success',
+            'image': image_base64,
+            'model': model_config.get('id', 'gemini-2.0-flash-exp'),
+            'provider': 'google_gemini'
+        }
+
+    except Exception as e:
+        return {
+            'status': 'error',
+            'error': sanitize_error_message(e),
+            'model': model_config.get('id', 'gemini'),
+            'provider': 'google_gemini'
+        }
+
+
+def outpaint_openai(model_config: Dict, source_image: bytes, preset: str, prompt: str) -> Dict:
+    """
+    Expand an image using OpenAI images.edit with padded canvas.
+
+    Args:
+        model_config: Model configuration with API key
+        source_image: Base64-encoded source image
+        preset: Aspect preset
+        prompt: Description for expanded regions
+
+    Returns:
+        Standardized response dict
+    """
+    try:
+        from utils.outpaint import (
+            calculate_expansion, pad_image_with_transparency,
+            get_image_dimensions
+        )
+
+        # Decode source image
+        if isinstance(source_image, str):
+            image_bytes = base64.b64decode(source_image)
+        else:
+            image_bytes = source_image
+
+        # Get dimensions and calculate expansion
+        width, height = get_image_dimensions(image_bytes)
+        expansion = calculate_expansion(width, height, preset)
+
+        # Create padded image with transparency
+        padded_image = pad_image_with_transparency(image_bytes, expansion)
+
+        client = OpenAI(api_key=model_config.get('api_key', ''), timeout=120.0)
+
+        # Use images.edit with padded image
+        # OpenAI will fill transparent areas
+        response = client.images.edit(
+            model=model_config.get('id', 'gpt-image-1'),
+            image=padded_image,
+            prompt=f"Expand the scene. Fill the transparent areas with: {prompt}",
+            size="1024x1024"  # OpenAI may resize
+        )
+
+        if not response.data or len(response.data) == 0:
+            raise ValueError("OpenAI returned empty data array")
+
+        if hasattr(response.data[0], 'b64_json') and response.data[0].b64_json:
+            image_base64 = response.data[0].b64_json
+        else:
+            image_url = response.data[0].url
+            img_response = requests.get(image_url, timeout=30)
+            img_response.raise_for_status()
+            image_base64 = base64.b64encode(img_response.content).decode('utf-8')
+
+        return {
+            'status': 'success',
+            'image': image_base64,
+            'model': model_config.get('id', 'gpt-image-1'),
+            'provider': 'openai'
+        }
+
+    except Exception as e:
+        return {
+            'status': 'error',
+            'error': sanitize_error_message(e),
+            'model': model_config.get('id', 'openai'),
+            'provider': 'openai'
+        }
+
+
+def get_outpaint_handler(provider: str) -> Callable:
+    """
+    Get the appropriate outpainting handler for a provider.
+
+    Args:
+        provider: Provider identifier
+
+    Returns:
+        Outpainting handler function
+    """
+    handlers = {
+        'bfl': outpaint_flux,
+        'recraft': outpaint_recraft,
+        'google_gemini': outpaint_gemini,
+        'openai': outpaint_openai,
+    }
+
+    handler = handlers.get(provider)
+    if not handler:
+        raise ValueError(f"No outpaint handler for provider: {provider}")
+
+    return handler

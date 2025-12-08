@@ -521,11 +521,11 @@ Add get_iterate_handler() dispatcher
 7. **Add `get_outpaint_handler()` dispatcher.**
 
 **Verification Checklist:**
-- [ ] `calculate_expansion()` correct for all presets
-- [ ] Mask generation creates valid binary masks
-- [ ] Each handler returns expanded image
-- [ ] Presets produce expected aspect ratios
-- [ ] Error handling for unsupported dimensions
+- [x] `calculate_expansion()` correct for all presets
+- [x] Mask generation creates valid binary masks
+- [x] Each handler returns expanded image
+- [x] Presets produce expected aspect ratios
+- [x] Error handling for unsupported dimensions
 
 **Testing Instructions:**
 - Unit tests for expansion calculations (math verification)
