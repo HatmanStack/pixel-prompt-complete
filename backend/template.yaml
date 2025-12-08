@@ -1,8 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Pixel Prompt Complete - Serverless text-to-image generation platform
+Description: Pixel Prompt v2 - Focused 4-model image generation with iterative refinement
 
-# Metadata for organizing parameters in deployment UI
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -11,181 +10,42 @@ Metadata:
         Parameters:
           - Environment
       - Label:
-          default: "Model Configuration"
+          default: "Flux Configuration (BFL)"
         Parameters:
-          - ModelCount
+          - FluxEnabled
+          - FluxApiKey
+          - FluxModelId
       - Label:
-          default: "Prompt Enhancement Model (Text/Chat)"
+          default: "Recraft Configuration"
+        Parameters:
+          - RecraftEnabled
+          - RecraftApiKey
+          - RecraftModelId
+      - Label:
+          default: "Gemini Configuration (Google)"
+        Parameters:
+          - GeminiEnabled
+          - GeminiApiKey
+          - GeminiModelId
+      - Label:
+          default: "OpenAI Configuration"
+        Parameters:
+          - OpenaiEnabled
+          - OpenaiApiKey
+          - OpenaiModelId
+      - Label:
+          default: "Prompt Enhancement"
         Parameters:
           - PromptModelProvider
           - PromptModelId
           - PromptModelApiKey
-      - Label:
-          default: "Image Model 1"
-        Parameters:
-          - Model1Provider
-          - Model1Id
-          - Model1ApiKey
-          - Model1BaseUrl
-          - Model1UserId
-      - Label:
-          default: "Model 2"
-        Parameters:
-          - Model2Provider
-          - Model2Id
-          - Model2ApiKey
-          - Model2BaseUrl
-          - Model2UserId
-      - Label:
-          default: "Model 3"
-        Parameters:
-          - Model3Provider
-          - Model3Id
-          - Model3ApiKey
-          - Model3BaseUrl
-          - Model3UserId
-      - Label:
-          default: "Model 4"
-        Parameters:
-          - Model4Provider
-          - Model4Id
-          - Model4ApiKey
-          - Model4BaseUrl
-          - Model4UserId
-      - Label:
-          default: "Model 5"
-        Parameters:
-          - Model5Provider
-          - Model5Id
-          - Model5ApiKey
-          - Model5BaseUrl
-          - Model5UserId
-      - Label:
-          default: "Model 6"
-        Parameters:
-          - Model6Provider
-          - Model6Id
-          - Model6ApiKey
-          - Model6BaseUrl
-          - Model6UserId
-      - Label:
-          default: "Model 7"
-        Parameters:
-          - Model7Provider
-          - Model7Id
-          - Model7ApiKey
-          - Model7BaseUrl
-          - Model7UserId
-      - Label:
-          default: "Model 8"
-        Parameters:
-          - Model8Provider
-          - Model8Id
-          - Model8ApiKey
-          - Model8BaseUrl
-          - Model8UserId
-      - Label:
-          default: "Model 9"
-        Parameters:
-          - Model9Provider
-          - Model9Id
-          - Model9ApiKey
-          - Model9BaseUrl
-          - Model9UserId
-      - Label:
-          default: "Model 10"
-        Parameters:
-          - Model10Provider
-          - Model10Id
-          - Model10ApiKey
-          - Model10BaseUrl
-          - Model10UserId
-      - Label:
-          default: "Model 11"
-        Parameters:
-          - Model11Provider
-          - Model11Id
-          - Model11ApiKey
-          - Model11BaseUrl
-          - Model11UserId
-      - Label:
-          default: "Model 12"
-        Parameters:
-          - Model12Provider
-          - Model12Id
-          - Model12ApiKey
-          - Model12BaseUrl
-          - Model12UserId
-      - Label:
-          default: "Model 13"
-        Parameters:
-          - Model13Provider
-          - Model13Id
-          - Model13ApiKey
-          - Model13BaseUrl
-          - Model13UserId
-      - Label:
-          default: "Model 14"
-        Parameters:
-          - Model14Provider
-          - Model14Id
-          - Model14ApiKey
-          - Model14BaseUrl
-          - Model14UserId
-      - Label:
-          default: "Model 15"
-        Parameters:
-          - Model15Provider
-          - Model15Id
-          - Model15ApiKey
-          - Model15BaseUrl
-          - Model15UserId
-      - Label:
-          default: "Model 16"
-        Parameters:
-          - Model16Provider
-          - Model16Id
-          - Model16ApiKey
-          - Model16BaseUrl
-          - Model16UserId
-      - Label:
-          default: "Model 17"
-        Parameters:
-          - Model17Provider
-          - Model17Id
-          - Model17ApiKey
-          - Model17BaseUrl
-          - Model17UserId
-      - Label:
-          default: "Model 18"
-        Parameters:
-          - Model18Provider
-          - Model18Id
-          - Model18ApiKey
-          - Model18BaseUrl
-          - Model18UserId
-      - Label:
-          default: "Model 19"
-        Parameters:
-          - Model19Provider
-          - Model19Id
-          - Model19ApiKey
-          - Model19BaseUrl
-          - Model19UserId
-      - Label:
-          default: "Model 20"
-        Parameters:
-          - Model20Provider
-          - Model20Id
-          - Model20ApiKey
-          - Model20BaseUrl
-          - Model20UserId
       - Label:
           default: "Rate Limiting"
         Parameters:
           - GlobalRateLimit
           - IPRateLimit
           - IPWhitelist
+
 Parameters:
   Environment:
     Type: String
@@ -196,14 +56,87 @@ Parameters:
       - prod
     Description: Environment name for resource tagging
 
-  ModelCount:
-    Type: Number
-    Default: 9
-    MinValue: 1
-    MaxValue: 20
-    Description: Number of image generation models to configure (1-20)
+  # Flux (BFL) Configuration
+  FluxEnabled:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Enable Flux model (Black Forest Labs)
 
-  # Prompt Enhancement Model (separate from image models)
+  FluxApiKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: BFL API key for Flux models
+
+  FluxModelId:
+    Type: String
+    Default: "flux-pro-1.1"
+    Description: Flux model ID (e.g., flux-pro-1.1, flux-dev)
+
+  # Recraft Configuration
+  RecraftEnabled:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Enable Recraft v3 model
+
+  RecraftApiKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: Recraft API key
+
+  RecraftModelId:
+    Type: String
+    Default: "recraftv3"
+    Description: Recraft model ID
+
+  # Gemini Configuration
+  GeminiEnabled:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Enable Google Gemini model
+
+  GeminiApiKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: Google Gemini API key
+
+  GeminiModelId:
+    Type: String
+    Default: "gemini-2.0-flash-exp"
+    Description: Gemini model ID for image generation
+
+  # OpenAI Configuration
+  OpenaiEnabled:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Enable OpenAI gpt-image-1 model
+
+  OpenaiApiKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: OpenAI API key
+
+  OpenaiModelId:
+    Type: String
+    Default: "gpt-image-1"
+    Description: OpenAI image model ID
+
+  # Prompt Enhancement Model
   PromptModelProvider:
     Type: String
     Default: "openai"
@@ -215,7 +148,7 @@ Parameters:
   PromptModelId:
     Type: String
     Default: "gpt-4o"
-    Description: Model ID for prompt enhancement (e.g., gpt-4o, gemini-2.0-flash)
+    Description: Model ID for prompt enhancement
 
   PromptModelApiKey:
     Type: String
@@ -223,747 +156,7 @@ Parameters:
     Default: ""
     Description: API key for prompt enhancement model
 
-  # Image Generation Model 1 Parameters
-  Model1Provider:
-    Type: String
-    Default: "openai"
-    AllowedValues:
-      - openai
-      - google_gemini
-      - google_imagen
-      - bedrock_nova
-      - bedrock_sd
-      - stability
-      - bfl
-      - recraft
-      - generic
-    Description: Provider type for model 1
-
-  Model1Id:
-    Type: String
-    Default: "dall-e-3"
-    Description: Model ID for model 1 (e.g., dall-e-3, gemini-2.0-flash-exp)
-
-  Model1ApiKey:
-    Type: String
-    NoEcho: true
-    Default: ""
-    Description: API key for model 1 (leave blank if not needed)
-
-  Model1BaseUrl:
-    Type: String
-    Default: ""
-    Description: Base URL for model 1 (optional, for OpenAI-compatible APIs)
-
-  Model1UserId:
-    Type: String
-    Default: ""
-    Description: User ID for model 1 (optional, if provider requires it)
-
-  # Model 2 Parameters
-  Model2Provider:
-    Type: String
-    Default: "google_gemini"
-    AllowedValues:
-      - openai
-      - google_gemini
-      - google_imagen
-      - bedrock_nova
-      - bedrock_sd
-      - stability
-      - bfl
-      - recraft
-      - generic
-    Description: Provider type for model 2
-
-  Model2Id:
-    Type: String
-    Default: "gemini-2.0-flash-exp"
-    Description: Model ID for model 2 (e.g., dall-e-3, gemini-2.0-flash-exp)
-
-  Model2ApiKey:
-    Type: String
-    NoEcho: true
-    Default: ""
-    Description: API key for model 2 (leave blank if not needed)
-
-  Model2BaseUrl:
-    Type: String
-    Default: ""
-    Description: Base URL for model 2 (optional, for OpenAI-compatible APIs)
-
-  Model2UserId:
-    Type: String
-    Default: ""
-    Description: User ID for model 2 (optional, if provider requires it)
-
-  # Model 3 Parameters
-  Model3Provider:
-    Type: String
-    Default: "bedrock_nova"
-    AllowedValues:
-      - openai
-      - google_gemini
-      - google_imagen
-      - bedrock_nova
-      - bedrock_sd
-      - stability
-      - bfl
-      - recraft
-      - generic
-    Description: Provider type for model 3
-
-  Model3Id:
-    Type: String
-    Default: "amazon.nova-canvas-v1:0"
-    Description: Model ID for model 3 (e.g., dall-e-3, gemini-2.0-flash-exp)
-
-  Model3ApiKey:
-    Type: String
-    NoEcho: true
-    Default: ""
-    Description: API key for model 3 (leave blank if not needed)
-
-  Model3BaseUrl:
-    Type: String
-    Default: ""
-    Description: Base URL for model 3 (optional, for OpenAI-compatible APIs)
-
-  Model3UserId:
-    Type: String
-    Default: ""
-    Description: User ID for model 3 (optional, if provider requires it)
-
-  # Model 4 Parameters
-  Model4Provider:
-    Type: String
-    Default: "bedrock_sd"
-    AllowedValues:
-      - openai
-      - google_gemini
-      - google_imagen
-      - bedrock_nova
-      - bedrock_sd
-      - stability
-      - bfl
-      - recraft
-      - generic
-    Description: Provider type for model 4
-
-  Model4Id:
-    Type: String
-    Default: "stability.sd3-5-large-v1:0"
-    Description: Model ID for model 4 (e.g., dall-e-3, gemini-2.0-flash-exp)
-
-  Model4ApiKey:
-    Type: String
-    NoEcho: true
-    Default: ""
-    Description: API key for model 4 (leave blank if not needed)
-
-  Model4BaseUrl:
-    Type: String
-    Default: ""
-    Description: Base URL for model 4 (optional, for OpenAI-compatible APIs)
-
-  Model4UserId:
-    Type: String
-    Default: ""
-    Description: User ID for model 4 (optional, if provider requires it)
-
-  # Model 5 Parameters
-  Model5Provider:
-    Type: String
-    Default: "bfl"
-    AllowedValues:
-      - openai
-      - google_gemini
-      - google_imagen
-      - bedrock_nova
-      - bedrock_sd
-      - stability
-      - bfl
-      - recraft
-      - generic
-    Description: Provider type for model 5
-
-  Model5Id:
-    Type: String
-    Default: "flux-pro"
-    Description: Model ID for model 5 (e.g., dall-e-3, gemini-2.0-flash-exp)
-
-  Model5ApiKey:
-    Type: String
-    NoEcho: true
-    Default: ""
-    Description: API key for model 5 (leave blank if not needed)
-
-  Model5BaseUrl:
-    Type: String
-    Default: ""
-    Description: Base URL for model 5 (optional, for OpenAI-compatible APIs)
-
-  Model5UserId:
-    Type: String
-    Default: ""
-    Description: User ID for model 5 (optional, if provider requires it)
-
-  # Model 6 Parameters
-  Model6Provider:
-    Type: String
-    Default: "google_imagen"
-    AllowedValues:
-      - openai
-      - google_gemini
-      - google_imagen
-      - bedrock_nova
-      - bedrock_sd
-      - stability
-      - bfl
-      - recraft
-      - generic
-    Description: Provider type for model 6
-
-  Model6Id:
-    Type: String
-    Default: "imagen-3.0-generate-001"
-    Description: Model ID for model 6 (e.g., dall-e-3, gemini-2.0-flash-exp)
-
-  Model6ApiKey:
-    Type: String
-    NoEcho: true
-    Default: ""
-    Description: API key for model 6 (leave blank if not needed)
-
-  Model6BaseUrl:
-    Type: String
-    Default: ""
-    Description: Base URL for model 6 (optional, for OpenAI-compatible APIs)
-
-  Model6UserId:
-    Type: String
-    Default: ""
-    Description: User ID for model 6 (optional, if provider requires it)
-
-  # Model 7 Parameters
-  Model7Provider:
-    Type: String
-    Default: "recraft"
-    AllowedValues:
-      - openai
-      - google_gemini
-      - google_imagen
-      - bedrock_nova
-      - bedrock_sd
-      - stability
-      - bfl
-      - recraft
-      - generic
-    Description: Provider type for model 7
-
-  Model7Id:
-    Type: String
-    Default: "recraft-v3"
-    Description: Model ID for model 7 (e.g., dall-e-3, gemini-2.0-flash-exp)
-
-  Model7ApiKey:
-    Type: String
-    NoEcho: true
-    Default: ""
-    Description: API key for model 7 (leave blank if not needed)
-
-  Model7BaseUrl:
-    Type: String
-    Default: ""
-    Description: Base URL for model 7 (optional, for OpenAI-compatible APIs)
-
-  Model7UserId:
-    Type: String
-    Default: ""
-    Description: User ID for model 7 (optional, if provider requires it)
-
-  # Model 8 Parameters
-  Model8Provider:
-    Type: String
-    Default: "stability"
-    AllowedValues:
-      - openai
-      - google_gemini
-      - google_imagen
-      - bedrock_nova
-      - bedrock_sd
-      - stability
-      - bfl
-      - recraft
-      - generic
-    Description: Provider type for model 8
-
-  Model8Id:
-    Type: String
-    Default: "stable-diffusion-xl-1024-v1-0"
-    Description: Model ID for model 8 (e.g., dall-e-3, gemini-2.0-flash-exp)
-
-  Model8ApiKey:
-    Type: String
-    NoEcho: true
-    Default: ""
-    Description: API key for model 8 (leave blank if not needed)
-
-  Model8BaseUrl:
-    Type: String
-    Default: ""
-    Description: Base URL for model 8 (optional, for OpenAI-compatible APIs)
-
-  Model8UserId:
-    Type: String
-    Default: ""
-    Description: User ID for model 8 (optional, if provider requires it)
-
-  # Model 9 Parameters
-  Model9Provider:
-    Type: String
-    Default: "bfl"
-    AllowedValues:
-      - openai
-      - google_gemini
-      - google_imagen
-      - bedrock_nova
-      - bedrock_sd
-      - stability
-      - bfl
-      - recraft
-      - generic
-    Description: Provider type for model 9
-
-  Model9Id:
-    Type: String
-    Default: "flux-dev"
-    Description: Model ID for model 9 (e.g., dall-e-3, gemini-2.0-flash-exp)
-
-  Model9ApiKey:
-    Type: String
-    NoEcho: true
-    Default: ""
-    Description: API key for model 9 (leave blank if not needed)
-
-  Model9BaseUrl:
-    Type: String
-    Default: ""
-    Description: Base URL for model 9 (optional, for OpenAI-compatible APIs)
-
-  Model9UserId:
-    Type: String
-    Default: ""
-    Description: User ID for model 9 (optional, if provider requires it)
-
-  # Model 10 Parameters
-  Model10Provider:
-    Type: String
-    Default: "generic"
-    AllowedValues:
-      - openai
-      - google_gemini
-      - google_imagen
-      - bedrock_nova
-      - bedrock_sd
-      - stability
-      - bfl
-      - recraft
-      - generic
-    Description: Provider type for model 10
-
-  Model10Id:
-    Type: String
-    Default: ""
-    Description: Model ID for model 10 (e.g., dall-e-3, gemini-2.0-flash-exp)
-
-  Model10ApiKey:
-    Type: String
-    NoEcho: true
-    Default: ""
-    Description: API key for model 10 (leave blank if not needed)
-
-  Model10BaseUrl:
-    Type: String
-    Default: ""
-    Description: Base URL for model 10 (optional, for OpenAI-compatible APIs)
-
-  Model10UserId:
-    Type: String
-    Default: ""
-    Description: User ID for model 10 (optional, if provider requires it)
-
-  # Model 11 Parameters
-  Model11Provider:
-    Type: String
-    Default: "generic"
-    AllowedValues:
-      - openai
-      - google_gemini
-      - google_imagen
-      - bedrock_nova
-      - bedrock_sd
-      - stability
-      - bfl
-      - recraft
-      - generic
-    Description: Provider type for model 11
-
-  Model11Id:
-    Type: String
-    Default: ""
-    Description: Model ID for model 11 (e.g., dall-e-3, gemini-2.0-flash-exp)
-
-  Model11ApiKey:
-    Type: String
-    NoEcho: true
-    Default: ""
-    Description: API key for model 11 (leave blank if not needed)
-
-  Model11BaseUrl:
-    Type: String
-    Default: ""
-    Description: Base URL for model 11 (optional, for OpenAI-compatible APIs)
-
-  Model11UserId:
-    Type: String
-    Default: ""
-    Description: User ID for model 11 (optional, if provider requires it)
-
-  # Model 12 Parameters
-  Model12Provider:
-    Type: String
-    Default: "generic"
-    AllowedValues:
-      - openai
-      - google_gemini
-      - google_imagen
-      - bedrock_nova
-      - bedrock_sd
-      - stability
-      - bfl
-      - recraft
-      - generic
-    Description: Provider type for model 12
-
-  Model12Id:
-    Type: String
-    Default: ""
-    Description: Model ID for model 12 (e.g., dall-e-3, gemini-2.0-flash-exp)
-
-  Model12ApiKey:
-    Type: String
-    NoEcho: true
-    Default: ""
-    Description: API key for model 12 (leave blank if not needed)
-
-  Model12BaseUrl:
-    Type: String
-    Default: ""
-    Description: Base URL for model 12 (optional, for OpenAI-compatible APIs)
-
-  Model12UserId:
-    Type: String
-    Default: ""
-    Description: User ID for model 12 (optional, if provider requires it)
-
-  # Model 13 Parameters
-  Model13Provider:
-    Type: String
-    Default: "generic"
-    AllowedValues:
-      - openai
-      - google_gemini
-      - google_imagen
-      - bedrock_nova
-      - bedrock_sd
-      - stability
-      - bfl
-      - recraft
-      - generic
-    Description: Provider type for model 13
-
-  Model13Id:
-    Type: String
-    Default: ""
-    Description: Model ID for model 13 (e.g., dall-e-3, gemini-2.0-flash-exp)
-
-  Model13ApiKey:
-    Type: String
-    NoEcho: true
-    Default: ""
-    Description: API key for model 13 (leave blank if not needed)
-
-  Model13BaseUrl:
-    Type: String
-    Default: ""
-    Description: Base URL for model 13 (optional, for OpenAI-compatible APIs)
-
-  Model13UserId:
-    Type: String
-    Default: ""
-    Description: User ID for model 13 (optional, if provider requires it)
-
-  # Model 14 Parameters
-  Model14Provider:
-    Type: String
-    Default: "generic"
-    AllowedValues:
-      - openai
-      - google_gemini
-      - google_imagen
-      - bedrock_nova
-      - bedrock_sd
-      - stability
-      - bfl
-      - recraft
-      - generic
-    Description: Provider type for model 14
-
-  Model14Id:
-    Type: String
-    Default: ""
-    Description: Model ID for model 14 (e.g., dall-e-3, gemini-2.0-flash-exp)
-
-  Model14ApiKey:
-    Type: String
-    NoEcho: true
-    Default: ""
-    Description: API key for model 14 (leave blank if not needed)
-
-  Model14BaseUrl:
-    Type: String
-    Default: ""
-    Description: Base URL for model 14 (optional, for OpenAI-compatible APIs)
-
-  Model14UserId:
-    Type: String
-    Default: ""
-    Description: User ID for model 14 (optional, if provider requires it)
-
-  # Model 15 Parameters
-  Model15Provider:
-    Type: String
-    Default: "generic"
-    AllowedValues:
-      - openai
-      - google_gemini
-      - google_imagen
-      - bedrock_nova
-      - bedrock_sd
-      - stability
-      - bfl
-      - recraft
-      - generic
-    Description: Provider type for model 15
-
-  Model15Id:
-    Type: String
-    Default: ""
-    Description: Model ID for model 15 (e.g., dall-e-3, gemini-2.0-flash-exp)
-
-  Model15ApiKey:
-    Type: String
-    NoEcho: true
-    Default: ""
-    Description: API key for model 15 (leave blank if not needed)
-
-  Model15BaseUrl:
-    Type: String
-    Default: ""
-    Description: Base URL for model 15 (optional, for OpenAI-compatible APIs)
-
-  Model15UserId:
-    Type: String
-    Default: ""
-    Description: User ID for model 15 (optional, if provider requires it)
-
-  # Model 16 Parameters
-  Model16Provider:
-    Type: String
-    Default: "generic"
-    AllowedValues:
-      - openai
-      - google_gemini
-      - google_imagen
-      - bedrock_nova
-      - bedrock_sd
-      - stability
-      - bfl
-      - recraft
-      - generic
-    Description: Provider type for model 16
-
-  Model16Id:
-    Type: String
-    Default: ""
-    Description: Model ID for model 16 (e.g., dall-e-3, gemini-2.0-flash-exp)
-
-  Model16ApiKey:
-    Type: String
-    NoEcho: true
-    Default: ""
-    Description: API key for model 16 (leave blank if not needed)
-
-  Model16BaseUrl:
-    Type: String
-    Default: ""
-    Description: Base URL for model 16 (optional, for OpenAI-compatible APIs)
-
-  Model16UserId:
-    Type: String
-    Default: ""
-    Description: User ID for model 16 (optional, if provider requires it)
-
-  # Model 17 Parameters
-  Model17Provider:
-    Type: String
-    Default: "generic"
-    AllowedValues:
-      - openai
-      - google_gemini
-      - google_imagen
-      - bedrock_nova
-      - bedrock_sd
-      - stability
-      - bfl
-      - recraft
-      - generic
-    Description: Provider type for model 17
-
-  Model17Id:
-    Type: String
-    Default: ""
-    Description: Model ID for model 17 (e.g., dall-e-3, gemini-2.0-flash-exp)
-
-  Model17ApiKey:
-    Type: String
-    NoEcho: true
-    Default: ""
-    Description: API key for model 17 (leave blank if not needed)
-
-  Model17BaseUrl:
-    Type: String
-    Default: ""
-    Description: Base URL for model 17 (optional, for OpenAI-compatible APIs)
-
-  Model17UserId:
-    Type: String
-    Default: ""
-    Description: User ID for model 17 (optional, if provider requires it)
-
-  # Model 18 Parameters
-  Model18Provider:
-    Type: String
-    Default: "generic"
-    AllowedValues:
-      - openai
-      - google_gemini
-      - google_imagen
-      - bedrock_nova
-      - bedrock_sd
-      - stability
-      - bfl
-      - recraft
-      - generic
-    Description: Provider type for model 18
-
-  Model18Id:
-    Type: String
-    Default: ""
-    Description: Model ID for model 18 (e.g., dall-e-3, gemini-2.0-flash-exp)
-
-  Model18ApiKey:
-    Type: String
-    NoEcho: true
-    Default: ""
-    Description: API key for model 18 (leave blank if not needed)
-
-  Model18BaseUrl:
-    Type: String
-    Default: ""
-    Description: Base URL for model 18 (optional, for OpenAI-compatible APIs)
-
-  Model18UserId:
-    Type: String
-    Default: ""
-    Description: User ID for model 18 (optional, if provider requires it)
-
-  # Model 19 Parameters
-  Model19Provider:
-    Type: String
-    Default: "generic"
-    AllowedValues:
-      - openai
-      - google_gemini
-      - google_imagen
-      - bedrock_nova
-      - bedrock_sd
-      - stability
-      - bfl
-      - recraft
-      - generic
-    Description: Provider type for model 19
-
-  Model19Id:
-    Type: String
-    Default: ""
-    Description: Model ID for model 19 (e.g., dall-e-3, gemini-2.0-flash-exp)
-
-  Model19ApiKey:
-    Type: String
-    NoEcho: true
-    Default: ""
-    Description: API key for model 19 (leave blank if not needed)
-
-  Model19BaseUrl:
-    Type: String
-    Default: ""
-    Description: Base URL for model 19 (optional, for OpenAI-compatible APIs)
-
-  Model19UserId:
-    Type: String
-    Default: ""
-    Description: User ID for model 19 (optional, if provider requires it)
-
-  # Model 20 Parameters
-  Model20Provider:
-    Type: String
-    Default: "generic"
-    AllowedValues:
-      - openai
-      - google_gemini
-      - google_imagen
-      - bedrock_nova
-      - bedrock_sd
-      - stability
-      - bfl
-      - recraft
-      - generic
-    Description: Provider type for model 20
-
-  Model20Id:
-    Type: String
-    Default: ""
-    Description: Model ID for model 20 (e.g., dall-e-3, gemini-2.0-flash-exp)
-
-  Model20ApiKey:
-    Type: String
-    NoEcho: true
-    Default: ""
-    Description: API key for model 20 (leave blank if not needed)
-
-  Model20BaseUrl:
-    Type: String
-    Default: ""
-    Description: Base URL for model 20 (optional, for OpenAI-compatible APIs)
-
-  Model20UserId:
-    Type: String
-    Default: ""
-    Description: User ID for model 20 (optional, if provider requires it)
-
-  # Rate Limiting Parameters
+  # Rate Limiting
   GlobalRateLimit:
     Type: Number
     Default: 1000
@@ -979,16 +172,14 @@ Parameters:
     Default: ""
     Description: Comma-separated IP addresses to bypass rate limits
 
-# Global settings for all functions
 Globals:
   Function:
     Tags:
-      Project: PixelPromptComplete
+      Project: PixelPromptV2
       Environment: !Ref Environment
       ManagedBy: SAM
 
 Resources:
-  # Lambda Function
   PixelPromptFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -1001,130 +192,33 @@ Resources:
       ReservedConcurrentExecutions: 10
       Environment:
         Variables:
-          # Model Configuration
-          MODEL_COUNT: !Ref ModelCount
-          MODEL_1_PROVIDER: !Ref Model1Provider
-          MODEL_1_ID: !Ref Model1Id
-          MODEL_1_API_KEY: !Ref Model1ApiKey
-          MODEL_1_BASE_URL: !Ref Model1BaseUrl
-          MODEL_1_USER_ID: !Ref Model1UserId
-          MODEL_2_PROVIDER: !Ref Model2Provider
-          MODEL_2_ID: !Ref Model2Id
-          MODEL_2_API_KEY: !Ref Model2ApiKey
-          MODEL_2_BASE_URL: !Ref Model2BaseUrl
-          MODEL_2_USER_ID: !Ref Model2UserId
-          MODEL_3_PROVIDER: !Ref Model3Provider
-          MODEL_3_ID: !Ref Model3Id
-          MODEL_3_API_KEY: !Ref Model3ApiKey
-          MODEL_3_BASE_URL: !Ref Model3BaseUrl
-          MODEL_3_USER_ID: !Ref Model3UserId
-          MODEL_4_PROVIDER: !Ref Model4Provider
-          MODEL_4_ID: !Ref Model4Id
-          MODEL_4_API_KEY: !Ref Model4ApiKey
-          MODEL_4_BASE_URL: !Ref Model4BaseUrl
-          MODEL_4_USER_ID: !Ref Model4UserId
-          MODEL_5_PROVIDER: !Ref Model5Provider
-          MODEL_5_ID: !Ref Model5Id
-          MODEL_5_API_KEY: !Ref Model5ApiKey
-          MODEL_5_BASE_URL: !Ref Model5BaseUrl
-          MODEL_5_USER_ID: !Ref Model5UserId
-          MODEL_6_PROVIDER: !Ref Model6Provider
-          MODEL_6_ID: !Ref Model6Id
-          MODEL_6_API_KEY: !Ref Model6ApiKey
-          MODEL_6_BASE_URL: !Ref Model6BaseUrl
-          MODEL_6_USER_ID: !Ref Model6UserId
-          MODEL_7_PROVIDER: !Ref Model7Provider
-          MODEL_7_ID: !Ref Model7Id
-          MODEL_7_API_KEY: !Ref Model7ApiKey
-          MODEL_7_BASE_URL: !Ref Model7BaseUrl
-          MODEL_7_USER_ID: !Ref Model7UserId
-          MODEL_8_PROVIDER: !Ref Model8Provider
-          MODEL_8_ID: !Ref Model8Id
-          MODEL_8_API_KEY: !Ref Model8ApiKey
-          MODEL_8_BASE_URL: !Ref Model8BaseUrl
-          MODEL_8_USER_ID: !Ref Model8UserId
-          MODEL_9_PROVIDER: !Ref Model9Provider
-          MODEL_9_ID: !Ref Model9Id
-          MODEL_9_API_KEY: !Ref Model9ApiKey
-          MODEL_9_BASE_URL: !Ref Model9BaseUrl
-          MODEL_9_USER_ID: !Ref Model9UserId
-          MODEL_10_PROVIDER: !Ref Model10Provider
-          MODEL_10_ID: !Ref Model10Id
-          MODEL_10_API_KEY: !Ref Model10ApiKey
-          MODEL_10_BASE_URL: !Ref Model10BaseUrl
-          MODEL_10_USER_ID: !Ref Model10UserId
-          MODEL_11_PROVIDER: !Ref Model11Provider
-          MODEL_11_ID: !Ref Model11Id
-          MODEL_11_API_KEY: !Ref Model11ApiKey
-          MODEL_11_BASE_URL: !Ref Model11BaseUrl
-          MODEL_11_USER_ID: !Ref Model11UserId
-          MODEL_12_PROVIDER: !Ref Model12Provider
-          MODEL_12_ID: !Ref Model12Id
-          MODEL_12_API_KEY: !Ref Model12ApiKey
-          MODEL_12_BASE_URL: !Ref Model12BaseUrl
-          MODEL_12_USER_ID: !Ref Model12UserId
-          MODEL_13_PROVIDER: !Ref Model13Provider
-          MODEL_13_ID: !Ref Model13Id
-          MODEL_13_API_KEY: !Ref Model13ApiKey
-          MODEL_13_BASE_URL: !Ref Model13BaseUrl
-          MODEL_13_USER_ID: !Ref Model13UserId
-          MODEL_14_PROVIDER: !Ref Model14Provider
-          MODEL_14_ID: !Ref Model14Id
-          MODEL_14_API_KEY: !Ref Model14ApiKey
-          MODEL_14_BASE_URL: !Ref Model14BaseUrl
-          MODEL_14_USER_ID: !Ref Model14UserId
-          MODEL_15_PROVIDER: !Ref Model15Provider
-          MODEL_15_ID: !Ref Model15Id
-          MODEL_15_API_KEY: !Ref Model15ApiKey
-          MODEL_15_BASE_URL: !Ref Model15BaseUrl
-          MODEL_15_USER_ID: !Ref Model15UserId
-          MODEL_16_PROVIDER: !Ref Model16Provider
-          MODEL_16_ID: !Ref Model16Id
-          MODEL_16_API_KEY: !Ref Model16ApiKey
-          MODEL_16_BASE_URL: !Ref Model16BaseUrl
-          MODEL_16_USER_ID: !Ref Model16UserId
-          MODEL_17_PROVIDER: !Ref Model17Provider
-          MODEL_17_ID: !Ref Model17Id
-          MODEL_17_API_KEY: !Ref Model17ApiKey
-          MODEL_17_BASE_URL: !Ref Model17BaseUrl
-          MODEL_17_USER_ID: !Ref Model17UserId
-          MODEL_18_PROVIDER: !Ref Model18Provider
-          MODEL_18_ID: !Ref Model18Id
-          MODEL_18_API_KEY: !Ref Model18ApiKey
-          MODEL_18_BASE_URL: !Ref Model18BaseUrl
-          MODEL_18_USER_ID: !Ref Model18UserId
-          MODEL_19_PROVIDER: !Ref Model19Provider
-          MODEL_19_ID: !Ref Model19Id
-          MODEL_19_API_KEY: !Ref Model19ApiKey
-          MODEL_19_BASE_URL: !Ref Model19BaseUrl
-          MODEL_19_USER_ID: !Ref Model19UserId
-          MODEL_20_PROVIDER: !Ref Model20Provider
-          MODEL_20_ID: !Ref Model20Id
-          MODEL_20_API_KEY: !Ref Model20ApiKey
-          MODEL_20_BASE_URL: !Ref Model20BaseUrl
-          MODEL_20_USER_ID: !Ref Model20UserId
-          # Prompt Enhancement Model (separate text/chat model)
+          # 4 Fixed Models Configuration
+          FLUX_ENABLED: !Ref FluxEnabled
+          FLUX_API_KEY: !Ref FluxApiKey
+          FLUX_MODEL_ID: !Ref FluxModelId
+          RECRAFT_ENABLED: !Ref RecraftEnabled
+          RECRAFT_API_KEY: !Ref RecraftApiKey
+          RECRAFT_MODEL_ID: !Ref RecraftModelId
+          GEMINI_ENABLED: !Ref GeminiEnabled
+          GEMINI_API_KEY: !Ref GeminiApiKey
+          GEMINI_MODEL_ID: !Ref GeminiModelId
+          OPENAI_ENABLED: !Ref OpenaiEnabled
+          OPENAI_API_KEY: !Ref OpenaiApiKey
+          OPENAI_MODEL_ID: !Ref OpenaiModelId
+          # Prompt Enhancement
           PROMPT_MODEL_PROVIDER: !Ref PromptModelProvider
           PROMPT_MODEL_ID: !Ref PromptModelId
           PROMPT_MODEL_API_KEY: !Ref PromptModelApiKey
-          # Additional Configuration
+          # Rate Limiting
           GLOBAL_LIMIT: !Ref GlobalRateLimit
           IP_LIMIT: !Ref IPRateLimit
           IP_INCLUDE: !Ref IPWhitelist
-          # S3 and CloudFront (will be set after resources are created)
+          # S3 and CloudFront
           S3_BUCKET: !Ref PixelPromptBucket
           CLOUDFRONT_DOMAIN: !GetAtt CloudFrontDistribution.DomainName
       Policies:
         - S3CrudPolicy:
             BucketName: !Ref PixelPromptBucket
-        - Version: '2012-10-17'
-          Statement:
-            - Effect: Allow
-              Action:
-                - bedrock-runtime:InvokeModel
-              Resource:
-                - arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-canvas-v1:0
-                - arn:aws:bedrock:us-west-2::foundation-model/stability.sd3-5-large-v1:0
       Events:
         GenerateApi:
           Type: HttpApi
@@ -1132,10 +226,22 @@ Resources:
             Path: /generate
             Method: POST
             ApiId: !Ref HttpApi
+        IterateApi:
+          Type: HttpApi
+          Properties:
+            Path: /iterate
+            Method: POST
+            ApiId: !Ref HttpApi
+        OutpaintApi:
+          Type: HttpApi
+          Properties:
+            Path: /outpaint
+            Method: POST
+            ApiId: !Ref HttpApi
         StatusApi:
           Type: HttpApi
           Properties:
-            Path: /status/{jobId}
+            Path: /status/{sessionId}
             Method: GET
             ApiId: !Ref HttpApi
         EnhanceApi:
@@ -1153,11 +259,10 @@ Resources:
         GalleryDetailApi:
           Type: HttpApi
           Properties:
-            Path: /gallery/{galleryId}
+            Path: /gallery/{sessionId}
             Method: GET
             ApiId: !Ref HttpApi
 
-  # HTTP API Gateway
   HttpApi:
     Type: AWS::Serverless::HttpApi
     Properties:
@@ -1180,11 +285,10 @@ Resources:
         ThrottlingBurstLimit: 100
         ThrottlingRateLimit: 50
 
-  # S3 Bucket for image storage and job status
   PixelPromptBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub 'pixel-prompt-complete-${Environment}-${AWS::AccountId}'
+      BucketName: !Sub 'pixel-prompt-v2-${Environment}-${AWS::AccountId}'
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -1206,20 +310,18 @@ Resources:
             MaxAge: 3600
       LifecycleConfiguration:
         Rules:
-          - Id: DeleteOldImages
+          - Id: DeleteOldSessions
             Status: Enabled
             ExpirationInDays: 30
-            Prefix: group-images/
+            Prefix: sessions/
     DeletionPolicy: Retain
 
-  # CloudFront Origin Access Identity
   CloudFrontOAI:
     Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
     Properties:
       CloudFrontOriginAccessIdentityConfig:
         Comment: !Sub 'OAI for ${AWS::StackName}'
 
-  # S3 Bucket Policy to allow CloudFront access
   BucketPolicy:
     Type: AWS::S3::BucketPolicy
     Properties:
@@ -1233,13 +335,12 @@ Resources:
             Action: s3:GetObject
             Resource: !Sub '${PixelPromptBucket.Arn}/*'
 
-  # CloudFront Distribution for fast image delivery
   CloudFrontDistribution:
     Type: AWS::CloudFront::Distribution
     Properties:
       DistributionConfig:
         Enabled: true
-        Comment: !Sub 'CloudFront distribution for ${AWS::StackName}'
+        Comment: !Sub 'CloudFront for ${AWS::StackName}'
         Origins:
           - Id: S3Origin
             DomainName: !GetAtt PixelPromptBucket.RegionalDomainName
@@ -1264,14 +365,12 @@ Resources:
           MaxTTL: 31536000
         PriceClass: PriceClass_100
 
-  # CloudWatch Log Group with retention
   FunctionLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub '/aws/lambda/${PixelPromptFunction}'
       RetentionInDays: 7
 
-  # CloudWatch Alarm for Lambda Errors
   LambdaErrorAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
@@ -1283,24 +382,6 @@ Resources:
       Period: 300
       EvaluationPeriods: 1
       Threshold: 5
-      ComparisonOperator: GreaterThanThreshold
-      Dimensions:
-        - Name: FunctionName
-          Value: !Ref PixelPromptFunction
-      TreatMissingData: notBreaching
-
-  # CloudWatch Alarm for Lambda Duration
-  LambdaDurationAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: !Sub '${AWS::StackName}-lambda-duration'
-      AlarmDescription: Alert on high Lambda execution duration
-      MetricName: Duration
-      Namespace: AWS/Lambda
-      Statistic: Average
-      Period: 300
-      EvaluationPeriods: 1
-      Threshold: 120000
       ComparisonOperator: GreaterThanThreshold
       Dimensions:
         - Name: FunctionName
