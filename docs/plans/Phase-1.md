@@ -1101,6 +1101,35 @@ sam local invoke -e events/generate.json
 
 ---
 
+## Review Feedback (Iteration 1)
+
+### Task 12: Backend Unit Tests
+
+> **Consider:** Running `PYTHONPATH=backend/src pytest tests/backend -v` shows 15 failing tests in `tests/backend/unit/test_job_manager.py`. These tests reference the old `JobManager.create_job()` API but the code was refactored to `SessionManager.create_session()`.
+>
+> **Think about:** The backward compatibility alias `JobManager = SessionManager` at line 423 of `manager.py` doesn't provide API compatibility since the method signatures changed. Should these old tests be:
+> - Updated to test the new `SessionManager` API?
+> - Removed since `test_session_manager.py` already covers the new functionality?
+>
+> **Reflect:** The verification checklist on Task 12 was marked complete, but 15 tests are failing. How should we handle legacy tests when the underlying API changes significantly?
+
+### Verification Evidence
+
+- **Build:** ✓ `sam validate` and `sam build` succeeded
+- **Tests:** ⚠ 118 passed, 15 failed (legacy JobManager tests), 19 skipped
+- **Commits:** ✓ 10 commits following conventional format
+- **Files:** ✓ All Task files verified to exist with correct content
+
+### Remaining Action
+
+Remove or update `tests/backend/unit/test_job_manager.py` to either:
+1. Delete the file (since `test_session_manager.py` covers the new API)
+2. Update tests to use `SessionManager.create_session()` instead of `JobManager.create_job()`
+
+Once resolved, run tests again to verify all pass.
+
+---
+
 ## Next Phase
 
 Proceed to [Phase 2: Frontend Redesign](./Phase-2.md) to implement the column-based UI, iteration controls, and gallery reorganization.
