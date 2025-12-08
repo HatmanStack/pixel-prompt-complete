@@ -220,11 +220,11 @@ Add default model IDs for each provider
    - S3 errors (raise with meaningful message)
 
 **Verification Checklist:**
-- [ ] `get_context()` returns empty list for new session
-- [ ] `add_entry()` maintains 3-entry window
-- [ ] Oldest entry removed when window exceeds 3
-- [ ] Context persists across Lambda invocations
-- [ ] Handles missing/corrupted files gracefully
+- [x] `get_context()` returns empty list for new session
+- [x] `add_entry()` maintains 3-entry window
+- [x] Oldest entry removed when window exceeds 3
+- [x] Context persists across Lambda invocations
+- [x] Handles missing/corrupted files gracefully
 
 **Testing Instructions:**
 - Unit tests with mocked S3 (moto)
