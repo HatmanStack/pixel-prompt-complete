@@ -314,12 +314,12 @@ Handle missing files and corrupted JSON gracefully
    - Return error if limit (7) exceeded
 
 **Verification Checklist:**
-- [ ] `create_session()` initializes all enabled models
-- [ ] `add_iteration()` increments count correctly
-- [ ] `add_iteration()` rejects when count >= 7
-- [ ] `complete_iteration()` stores image key
-- [ ] Concurrent updates handled via versioning
-- [ ] Session status computed from model statuses
+- [x] `create_session()` initializes all enabled models
+- [x] `add_iteration()` increments count correctly
+- [x] `add_iteration()` rejects when count >= 7
+- [x] `complete_iteration()` stores image key
+- [x] Concurrent updates handled via versioning
+- [x] Session status computed from model statuses
 
 **Testing Instructions:**
 - Unit tests with mocked S3
