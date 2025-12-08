@@ -950,11 +950,11 @@ Limit list to 50 most recent sessions
    - Enabled models must have API keys (except local testing)
 
 **Verification Checklist:**
-- [ ] Interactive prompts work for fresh setup
-- [ ] Saved config loads correctly on subsequent runs
-- [ ] Parameter overrides generated correctly
-- [ ] Frontend .env includes enabled flags
-- [ ] Validation catches missing API keys
+- [x] Interactive prompts work for fresh setup
+- [x] Saved config loads correctly on subsequent runs
+- [x] Parameter overrides generated correctly
+- [x] Frontend .env includes enabled flags
+- [x] Validation catches missing API keys
 
 **Testing Instructions:**
 - Manual test: Run deploy script fresh
