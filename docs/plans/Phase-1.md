@@ -645,12 +645,12 @@ Implement outpaint_openai() with canvas padding
    - Return 400 with `ITERATION_LIMIT` code if >= 7
 
 **Verification Checklist:**
-- [ ] `/iterate` creates new iteration and returns job ID
-- [ ] `/outpaint` creates new iteration with expanded image
-- [ ] 400 returned when iteration limit exceeded
-- [ ] 404 returned for invalid session/model
-- [ ] Input validation rejects invalid data
-- [ ] CORS headers present on responses
+- [x] `/iterate` creates new iteration and returns job ID
+- [x] `/outpaint` creates new iteration with expanded image
+- [x] 400 returned when iteration limit exceeded
+- [x] 404 returned for invalid session/model
+- [x] Input validation rejects invalid data
+- [x] CORS headers present on responses
 
 **Testing Instructions:**
 - Unit tests for input validation
@@ -738,11 +738,11 @@ Return appropriate error codes for edge cases
    - Failed models show error in response
 
 **Verification Checklist:**
-- [ ] Session created with all enabled models
-- [ ] All enabled models execute in parallel
-- [ ] Failed models retry once automatically
-- [ ] Partial results returned if some fail
-- [ ] Session status accurate (completed/partial/failed)
+- [x] Session created with all enabled models
+- [x] All enabled models execute in parallel
+- [x] Failed models retry once automatically
+- [x] Partial results returned if some fail
+- [x] Session status accurate (completed/partial/failed)
 
 **Testing Instructions:**
 - Unit tests for retry logic
@@ -820,11 +820,11 @@ Return session ID for status polling
    - Empty iterations array
 
 **Verification Checklist:**
-- [ ] Response includes all 4 models
-- [ ] Disabled models marked appropriately
-- [ ] All iterations included with URLs
-- [ ] Status computed correctly
-- [ ] Timestamps present
+- [x] Response includes all 4 models
+- [x] Disabled models marked appropriately
+- [x] All iterations included with URLs
+- [x] Status computed correctly
+- [x] Timestamps present
 
 **Testing Instructions:**
 - Unit tests for response format
@@ -882,10 +882,10 @@ Compute overall status from model statuses
 4. **Limit list to recent sessions** (e.g., last 50)
 
 **Verification Checklist:**
-- [ ] List returns sessions sorted by date
-- [ ] Each session includes prompt and stats
-- [ ] Thumbnail URL points to valid image
-- [ ] Detail endpoint returns full session
+- [x] List returns sessions sorted by date
+- [x] Each session includes prompt and stats
+- [x] Thumbnail URL points to valid image
+- [x] Detail endpoint returns full session
 
 **Testing Instructions:**
 - Unit tests for list format
