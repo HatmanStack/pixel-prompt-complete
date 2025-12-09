@@ -2,50 +2,81 @@
  * Store State Types
  */
 
-import type { Job, ImageResult, GalleryPreview } from './api';
+import type {
+  Job,
+  ImageResult,
+  GalleryPreview,
+  Session,
+  SessionPreview,
+  ModelName,
+  Iteration,
+} from './api';
 
 export type ViewType = 'generation' | 'gallery';
 
 export type SoundName = 'click' | 'swoosh' | 'switch' | 'expand';
 
-export interface AppState {
-  // Job state
-  currentJob: Job | null;
-  isGenerating: boolean;
+// ====================
+// New Session-based App State
+// ====================
 
-  // Prompt
+export interface AppState {
+  // Session state (new)
+  currentSession: Session | null;
+  isGenerating: boolean;
   prompt: string;
 
-  // Generated images (array of image results)
-  generatedImages: (ImageResult | null)[];
+  // Selection state (new)
+  selectedModels: Set<ModelName>;
+  isMultiSelectMode: boolean;
 
-  // Gallery
+  // Gallery state (new)
+  sessions: SessionPreview[];
+  selectedGallerySession: Session | null;
+
+  // UI state (new)
+  iterationWarnings: Record<ModelName, boolean>;
+
+  // Legacy state (for backwards compatibility during transition)
+  currentJob: Job | null;
+  generatedImages: (ImageResult | null)[];
   selectedGallery: GalleryPreview | null;
   galleries: GalleryPreview[];
-
-  // View
   currentView: ViewType;
 }
 
 export interface AppActions {
-  // Job actions
-  setCurrentJob: (job: Job | null) => void;
-  updateJobStatus: (job: Job) => void;
-  setIsGenerating: (isGenerating: boolean) => void;
-
-  // Prompt actions
+  // Prompt
   setPrompt: (prompt: string) => void;
 
-  // Image actions
+  // Session actions (new)
+  setCurrentSession: (session: Session | null) => void;
+  updateModelIteration: (model: ModelName, iteration: Iteration) => void;
+  setIsGenerating: (isGenerating: boolean) => void;
+  resetSession: () => void;
+
+  // Selection actions (new)
+  toggleModelSelection: (model: ModelName) => void;
+  selectAllModels: () => void;
+  clearSelection: () => void;
+  setMultiSelectMode: (enabled: boolean) => void;
+
+  // Gallery actions (new)
+  setSessions: (sessions: SessionPreview[]) => void;
+  setSelectedGallerySession: (session: Session | null) => void;
+
+  // Warnings (new)
+  checkIterationWarning: (model: ModelName) => void;
+  clearIterationWarning: (model: ModelName) => void;
+
+  // Legacy actions (for backwards compatibility)
+  setCurrentJob: (job: Job | null) => void;
+  updateJobStatus: (job: Job) => void;
   setGeneratedImages: (images: (ImageResult | null)[]) => void;
   updateGeneratedImage: (index: number, image: ImageResult) => void;
   resetGeneration: () => void;
-
-  // Gallery actions
   setSelectedGallery: (gallery: GalleryPreview | null) => void;
   setGalleries: (galleries: GalleryPreview[]) => void;
-
-  // View actions
   setCurrentView: (view: ViewType) => void;
 }
 
