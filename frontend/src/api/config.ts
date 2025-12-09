@@ -25,9 +25,16 @@ export const API_BASE_URL: string = apiEndpoint || '';
 
 // API Routes
 export const API_ROUTES = {
+  // Session-based endpoints (new)
   GENERATE: '/generate',
+  ITERATE: '/iterate',
+  OUTPAINT: '/outpaint',
   STATUS: '/status',
+
+  // Prompt enhancement
   ENHANCE: '/enhance',
+
+  // Gallery endpoints
   GALLERY_LIST: '/gallery/list',
   GALLERY_DETAIL: '/gallery',
 } as const;
