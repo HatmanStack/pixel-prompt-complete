@@ -5,9 +5,9 @@ Maintains a rolling 3-iteration context window per model column.
 
 import json
 import logging
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from datetime import datetime
-from typing import List, Optional, Dict, Any
+from typing import List, Dict, Any
 
 logger = logging.getLogger(__name__)
 

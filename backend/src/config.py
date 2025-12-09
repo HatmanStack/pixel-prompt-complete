@@ -5,7 +5,7 @@ Loads 4 fixed model configurations with enable/disable support.
 
 import os
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 
 @dataclass

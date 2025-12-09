@@ -17,8 +17,7 @@ from config import (
     s3_bucket, cloudfront_domain,
     global_limit, ip_limit, ip_include,
     get_enabled_models, get_model, get_model_config_dict,
-    MODELS, MODEL_ORDER, MAX_ITERATIONS, ITERATION_WARNING_THRESHOLD,
-    prompt_model_provider, prompt_model_id, prompt_model_api_key
+    MODELS, MAX_ITERATIONS, ITERATION_WARNING_THRESHOLD,
 )
 
 # Import modules

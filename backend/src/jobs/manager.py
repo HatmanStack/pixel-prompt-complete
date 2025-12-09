@@ -409,7 +409,6 @@ class SessionManager:
 
         # All done
         error_count = sum(1 for s in statuses if s in ['error', 'failed'])
-        completed_count = sum(1 for s in statuses if s in ['completed', 'partial'])
 
         if error_count == len(enabled_models):
             return 'failed'
