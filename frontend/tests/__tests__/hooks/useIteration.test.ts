@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { renderHook, act } from '@testing-library/react';
+import { renderHook } from '@testing-library/react';
 import { useIteration, useMultiIterate, MAX_ITERATIONS, WARNING_THRESHOLD } from '../../../src/hooks/useIteration';
 import { useAppStore } from '../../../src/stores/useAppStore';
 import type { Session, ModelColumn, Iteration, ModelName } from '../../../src/types';
