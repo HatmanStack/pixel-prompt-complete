@@ -12,6 +12,15 @@ import type {
   GalleryListResponse,
   GalleryDetailResponse,
   ApiError,
+  // New session-based types
+  Session,
+  SessionGenerateResponse,
+  IterateResponse,
+  OutpaintResponse,
+  OutpaintPreset,
+  ModelName,
+  SessionGalleryListResponse,
+  SessionGalleryDetailResponse,
 } from '@/types';
 
 interface FetchOptions extends RequestInit {
@@ -107,8 +116,114 @@ async function apiFetch<T>(
   }
 }
 
+// ====================
+// Session-based API Methods (New)
+// ====================
+
 /**
- * Generate images from prompt
+ * Generate images from prompt (session-based)
+ */
+export async function generateSession(prompt: string): Promise<SessionGenerateResponse> {
+  return apiFetch<SessionGenerateResponse>(API_ROUTES.GENERATE, {
+    method: 'POST',
+    body: JSON.stringify({ prompt }),
+  });
+}
+
+/**
+ * Get session status by session ID
+ */
+export async function getSessionStatus(sessionId: string): Promise<Session> {
+  return apiFetch<Session>(`${API_ROUTES.STATUS}/${sessionId}`, {
+    method: 'GET',
+  });
+}
+
+/**
+ * Iterate on a single model's image
+ */
+export async function iterateImage(
+  sessionId: string,
+  model: ModelName,
+  prompt: string
+): Promise<IterateResponse> {
+  return apiFetch<IterateResponse>(API_ROUTES.ITERATE, {
+    method: 'POST',
+    body: JSON.stringify({ sessionId, model, prompt }),
+  });
+}
+
+/**
+ * Outpaint an image with a preset aspect ratio
+ */
+export async function outpaintImage(
+  sessionId: string,
+  model: ModelName,
+  iterationIndex: number,
+  preset: OutpaintPreset,
+  prompt: string
+): Promise<OutpaintResponse> {
+  return apiFetch<OutpaintResponse>(API_ROUTES.OUTPAINT, {
+    method: 'POST',
+    body: JSON.stringify({
+      sessionId,
+      model,
+      iterationIndex,
+      preset,
+      prompt,
+    }),
+  });
+}
+
+/**
+ * Iterate on multiple models at once (batch operation)
+ */
+export async function iterateMultiple(
+  sessionId: string,
+  models: ModelName[],
+  prompt: string
+): Promise<IterateResponse[]> {
+  const results = await Promise.allSettled(
+    models.map((model) => iterateImage(sessionId, model, prompt))
+  );
+
+  // Return successful results, log failures
+  return results
+    .map((result, index) => {
+      if (result.status === 'fulfilled') {
+        return result.value;
+      } else {
+        console.error(`Failed to iterate on ${models[index]}:`, result.reason);
+        return null;
+      }
+    })
+    .filter((r): r is IterateResponse => r !== null);
+}
+
+/**
+ * List all sessions in gallery
+ */
+export async function listSessions(): Promise<SessionGalleryListResponse> {
+  return apiFetch<SessionGalleryListResponse>(API_ROUTES.GALLERY_LIST, {
+    method: 'GET',
+  });
+}
+
+/**
+ * Get full session details from gallery
+ */
+export async function getSessionDetail(sessionId: string): Promise<SessionGalleryDetailResponse> {
+  return apiFetch<SessionGalleryDetailResponse>(`${API_ROUTES.GALLERY_DETAIL}/${sessionId}`, {
+    method: 'GET',
+  });
+}
+
+// ====================
+// Legacy API Methods (for backwards compatibility)
+// ====================
+
+/**
+ * Generate images from prompt (legacy)
  */
 export async function generateImages(prompt: string): Promise<GenerateResponse> {
   return apiFetch<GenerateResponse>(API_ROUTES.GENERATE, {
@@ -120,7 +235,7 @@ export async function generateImages(prompt: string): Promise<GenerateResponse> 
 }
 
 /**
- * Get job status by job ID
+ * Get job status by job ID (legacy)
  */
 export async function getJobStatus(jobId: string): Promise<StatusResponse> {
   return apiFetch<StatusResponse>(`${API_ROUTES.STATUS}/${jobId}`, {
@@ -139,7 +254,7 @@ export async function enhancePrompt(prompt: string): Promise<EnhanceResponse> {
 }
 
 /**
- * List all galleries
+ * List all galleries (legacy)
  */
 export async function listGalleries(): Promise<GalleryListResponse> {
   return apiFetch<GalleryListResponse>(API_ROUTES.GALLERY_LIST, {
@@ -148,7 +263,7 @@ export async function listGalleries(): Promise<GalleryListResponse> {
 }
 
 /**
- * Get gallery details and all images
+ * Get gallery details and all images (legacy)
  */
 export async function getGallery(galleryId: string): Promise<GalleryDetailResponse> {
   return apiFetch<GalleryDetailResponse>(`${API_ROUTES.GALLERY_DETAIL}/${galleryId}`, {

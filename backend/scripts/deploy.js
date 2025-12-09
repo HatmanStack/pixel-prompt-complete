@@ -21,7 +21,6 @@ function parseEnvFile(filePath) {
   const config = {};
 
   content.split('\n').forEach(line => {
-    // Skip comments and empty lines
     if (!line.trim() || line.trim().startsWith('#')) {
       return;
     }
@@ -38,41 +37,46 @@ function parseEnvFile(filePath) {
 }
 
 /**
- * Convert env vars to structured config
+ * Convert env vars to structured config for v2 (4 fixed models)
  */
 function envToConfig(env) {
-  const config = {
+  return {
     region: env.AWS_REGION || 'us-west-2',
-    stackName: env.STACK_NAME || 'pixel-prompt-dev',
-    lambdaMemory: env.LAMBDA_MEMORY || '3008',
-    lambdaTimeout: env.LAMBDA_TIMEOUT || '900',
+    stackName: env.STACK_NAME || 'pixel-prompt-v2',
     globalRateLimit: env.GLOBAL_RATE_LIMIT || '1000',
     ipRateLimit: env.IP_RATE_LIMIT || '100',
-    s3RetentionDays: env.S3_RETENTION_DAYS || '30',
+
+    // Prompt enhancement model
     promptModel: {
       provider: env.PROMPT_MODEL_PROVIDER || 'openai',
       id: env.PROMPT_MODEL_ID || 'gpt-4o',
       apiKey: env.PROMPT_MODEL_API_KEY || ''
     },
-    models: []
-  };
 
-  const modelCount = parseInt(env.MODEL_COUNT || '1', 10);
-
-  for (let i = 1; i <= modelCount; i++) {
-    const provider = env[`MODEL_${i}_PROVIDER`];
-    const id = env[`MODEL_${i}_ID`];
-    const apiKey = env[`MODEL_${i}_API_KEY`] || '';
-    const baseUrl = env[`MODEL_${i}_BASE_URL`] || '';
-    const userId = env[`MODEL_${i}_USER_ID`] || '';
-
-    if (provider && id) {
-      config.models.push({ provider, id, apiKey, baseUrl, userId });
+    // 4 Fixed models
+    models: {
+      flux: {
+        enabled: (env.FLUX_ENABLED || 'true').toLowerCase() === 'true',
+        apiKey: env.FLUX_API_KEY || '',
+        modelId: env.FLUX_MODEL_ID || 'flux-pro-1.1'
+      },
+      recraft: {
+        enabled: (env.RECRAFT_ENABLED || 'true').toLowerCase() === 'true',
+        apiKey: env.RECRAFT_API_KEY || '',
+        modelId: env.RECRAFT_MODEL_ID || 'recraftv3'
+      },
+      gemini: {
+        enabled: (env.GEMINI_ENABLED || 'true').toLowerCase() === 'true',
+        apiKey: env.GEMINI_API_KEY || '',
+        modelId: env.GEMINI_MODEL_ID || 'gemini-2.0-flash-exp'
+      },
+      openai: {
+        enabled: (env.OPENAI_ENABLED || 'true').toLowerCase() === 'true',
+        apiKey: env.OPENAI_API_KEY || '',
+        modelId: env.OPENAI_MODEL_ID || 'gpt-image-1'
+      }
     }
-  }
-
-  config.modelCount = String(config.models.length);
-  return config;
+  };
 }
 
 async function checkPrerequisites() {
@@ -107,23 +111,20 @@ export function validateConfig(config) {
     errors.push('STACK_NAME is required');
   }
 
-  const memoryNum = parseInt(config.lambdaMemory, 10);
-  if (isNaN(memoryNum) || memoryNum < 128 || memoryNum > 10240) {
-    errors.push(`Invalid LAMBDA_MEMORY: ${config.lambdaMemory}. Must be between 128-10240 MB.`);
+  // Check at least one model is enabled
+  const enabledModels = Object.entries(config.models)
+    .filter(([_, m]) => m.enabled);
+
+  if (enabledModels.length === 0) {
+    errors.push('At least one image generation model must be enabled');
   }
 
-  const timeoutNum = parseInt(config.lambdaTimeout, 10);
-  if (isNaN(timeoutNum) || timeoutNum < 1 || timeoutNum > 900) {
-    errors.push(`Invalid LAMBDA_TIMEOUT: ${config.lambdaTimeout}. Must be between 1-900 seconds.`);
-  }
-
-  if (config.models.length === 0) {
-    errors.push('At least one image generation model is required (MODEL_1_PROVIDER, MODEL_1_ID)');
-  }
-
-  if (config.models.length > 20) {
-    errors.push('Maximum 20 models supported');
-  }
+  // Check API keys for enabled models
+  enabledModels.forEach(([name, model]) => {
+    if (!model.apiKey) {
+      errors.push(`${name.toUpperCase()}_API_KEY is required when ${name.toUpperCase()}_ENABLED=true`);
+    }
+  });
 
   return {
     valid: errors.length === 0,
@@ -151,34 +152,50 @@ export function loadConfig() {
 
 export function buildParameterOverrides(config) {
   const overrides = [
-    `LambdaMemory=${config.lambdaMemory}`,
-    `LambdaTimeout=${config.lambdaTimeout}`,
-    `ModelCount=${config.models.length}`,
     `GlobalRateLimit=${config.globalRateLimit}`,
     `IPRateLimit=${config.ipRateLimit}`,
-    `S3RetentionDays=${config.s3RetentionDays}`,
+
+    // Prompt model
     `PromptModelProvider=${config.promptModel.provider}`,
-    `PromptModelId=${config.promptModel.id}`
+    `PromptModelId=${config.promptModel.id}`,
+
+    // Flux
+    `FluxEnabled=${config.models.flux.enabled}`,
+    `FluxModelId=${config.models.flux.modelId}`,
+
+    // Recraft
+    `RecraftEnabled=${config.models.recraft.enabled}`,
+    `RecraftModelId=${config.models.recraft.modelId}`,
+
+    // Gemini
+    `GeminiEnabled=${config.models.gemini.enabled}`,
+    `GeminiModelId=${config.models.gemini.modelId}`,
+
+    // OpenAI
+    `OpenaiEnabled=${config.models.openai.enabled}`,
+    `OpenaiModelId=${config.models.openai.modelId}`,
   ];
 
+  // Add API keys only if set
   if (config.promptModel.apiKey) {
     overrides.push(`PromptModelApiKey=${config.promptModel.apiKey}`);
   }
 
-  config.models.forEach((model, index) => {
-    const n = index + 1;
-    overrides.push(`Model${n}Provider=${model.provider}`);
-    overrides.push(`Model${n}Id=${model.id}`);
-    if (model.apiKey) {
-      overrides.push(`Model${n}ApiKey=${model.apiKey}`);
-    }
-    if (model.baseUrl) {
-      overrides.push(`Model${n}BaseUrl=${model.baseUrl}`);
-    }
-    if (model.userId) {
-      overrides.push(`Model${n}UserId=${model.userId}`);
-    }
-  });
+  if (config.models.flux.apiKey) {
+    overrides.push(`FluxApiKey=${config.models.flux.apiKey}`);
+  }
+
+  if (config.models.recraft.apiKey) {
+    overrides.push(`RecraftApiKey=${config.models.recraft.apiKey}`);
+  }
+
+  if (config.models.gemini.apiKey) {
+    overrides.push(`GeminiApiKey=${config.models.gemini.apiKey}`);
+  }
+
+  if (config.models.openai.apiKey) {
+    overrides.push(`OpenaiApiKey=${config.models.openai.apiKey}`);
+  }
 
   return overrides;
 }
@@ -304,7 +321,7 @@ VITE_ENVIRONMENT=${environment}
 }
 
 async function main() {
-  console.log('=== Pixel Prompt Backend Deployment ===\n');
+  console.log('=== Pixel Prompt v2 Deployment ===\n');
 
   await checkPrerequisites();
   const config = loadConfig();
@@ -317,15 +334,22 @@ async function main() {
     process.exit(1);
   }
 
+  // Count enabled models
+  const enabledModels = Object.entries(config.models)
+    .filter(([_, m]) => m.enabled)
+    .map(([name, _]) => name);
+
   // Display configuration summary
   console.log('=== Configuration Summary ===');
   console.log(`Region:       ${config.region}`);
   console.log(`Stack:        ${config.stackName}`);
   console.log(`\nPrompt Model: ${config.promptModel.provider} / ${config.promptModel.id} [${maskKey(config.promptModel.apiKey)}]`);
-  console.log(`\nImage Models: ${config.models.length}`);
-  config.models.forEach((m, i) => {
-    const keyInfo = m.provider.startsWith('bedrock') ? '(IAM)' : `[${maskKey(m.apiKey)}]`;
-    console.log(`  ${i + 1}: ${m.provider} / ${m.id} ${keyInfo}`);
+  console.log(`\nImage Models: ${enabledModels.length} enabled`);
+
+  Object.entries(config.models).forEach(([name, model]) => {
+    const status = model.enabled ? '✓' : '✗';
+    const keyInfo = model.enabled ? `[${maskKey(model.apiKey)}]` : '';
+    console.log(`  ${status} ${name.padEnd(8)} ${model.modelId} ${keyInfo}`);
   });
   console.log('');
 

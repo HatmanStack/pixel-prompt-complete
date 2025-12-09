@@ -24,6 +24,7 @@ build/
 .env
 .env.local
 .env.deploy
+.deploy-config.json
 *.pem
 *.key
 samconfig.toml
