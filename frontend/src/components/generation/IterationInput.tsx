@@ -4,7 +4,7 @@
  */
 
 import { useState, type FC, type KeyboardEvent } from 'react';
-import { useIteration } from '@/hooks/useIteration';
+import { useIteration, MAX_ITERATIONS } from '@/hooks/useIteration';
 import type { ModelName } from '@/types';
 
 interface IterationInputProps {
@@ -55,7 +55,7 @@ export const IterationInput: FC<IterationInputProps> = ({ model }) => {
   if (isAtLimit) {
     return (
       <div className="text-sm text-gray-500 dark:text-gray-400 text-center p-2 bg-gray-100 dark:bg-gray-800 rounded">
-        Maximum iterations reached (7)
+        Maximum iterations reached ({MAX_ITERATIONS})
       </div>
     );
   }

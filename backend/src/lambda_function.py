@@ -66,11 +66,14 @@ def lambda_handler(event, context):
     correlation_id = extract_correlation_id(event)
 
     path = event.get('rawPath', event.get('path', ''))
-    # Remove stage prefix
+    # Remove stage prefix (len('/Prod/') = 6, len('/Staging/') = 9)
     if path.startswith('/Prod/'):
-        path = path[5:]
+        path = path[6:]
     elif path.startswith('/Staging/'):
-        path = path[8:]
+        path = path[9:]
+    # Ensure path starts with /
+    if path and not path.startswith('/'):
+        path = '/' + path
 
     method = event.get('requestContext', {}).get('http', {}).get('method',
              event.get('httpMethod', ''))
@@ -261,6 +264,13 @@ def handle_iterate(event, correlation_id=None):
         model_name = body.get('model')
         prompt = body.get('prompt', '')
 
+        # Extract IP for rate limiting
+        ip = body.get('ip') or event.get('requestContext', {}).get('http', {}).get('sourceIp', 'unknown')
+
+        # Rate limit check
+        if rate_limiter.check_rate_limit(ip):
+            return response(429, error_responses.rate_limit_exceeded(retry_after=3600))
+
         # Validate
         if not session_id:
             return response(400, {'error': 'sessionId is required'})
@@ -397,6 +407,13 @@ def handle_outpaint(event, correlation_id=None):
         model_name = body.get('model')
         preset = body.get('preset')
         prompt = body.get('prompt', 'continue the scene naturally')
+
+        # Extract IP for rate limiting
+        ip = body.get('ip') or event.get('requestContext', {}).get('http', {}).get('sourceIp', 'unknown')
+
+        # Rate limit check
+        if rate_limiter.check_rate_limit(ip):
+            return response(429, error_responses.rate_limit_exceeded(retry_after=3600))
 
         # Validate
         if not session_id:

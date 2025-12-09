@@ -73,8 +73,8 @@ Parameters:
 
   FluxModelId:
     Type: String
-    Default: "flux-pro-1.1"
-    Description: Flux model ID (e.g., flux-pro-1.1, flux-dev)
+    Default: "flux-2-pro"
+    Description: Flux model ID (e.g., flux-2-pro, flux-pro-1.1, flux-dev)
 
   # Recraft Configuration
   RecraftEnabled:
@@ -113,8 +113,8 @@ Parameters:
 
   GeminiModelId:
     Type: String
-    Default: "gemini-2.0-flash-exp"
-    Description: Gemini model ID for image generation
+    Default: "gemini-2.5-flash-image"
+    Description: Gemini model ID for image generation (e.g., gemini-2.5-flash-image, gemini-3-pro-preview)
 
   # OpenAI Configuration
   OpenaiEnabled:

@@ -55,107 +55,123 @@ function formatDateTime(dateStr?: string): string {
   }
 }
 
-export const ImageModal: FC<ImageModalProps> = (props) => {
+/**
+ * Session-based image modal for new iteration workflow
+ */
+const SessionImageModal: FC<SessionImageModalProps> = ({
+  isOpen,
+  onClose,
+  imageUrl,
+  model,
+  iteration,
+  onDownload,
+}) => {
   const { playSound } = useSound();
   const [imageError, setImageError] = useState(false);
 
-  // Handle session-based props
-  if (isSessionProps(props)) {
-    const { isOpen, onClose, imageUrl, model, iteration, onDownload } = props;
+  // Reset error on close/reopen
+  useEffect(() => {
+    if (isOpen) {
+      setImageError(false);
+    }
+  }, [isOpen]);
 
-    // Reset error on close/reopen
-    useEffect(() => {
-      if (isOpen) {
-        setImageError(false);
-      }
-    }, [isOpen]);
+  const handleDownload = () => {
+    if (imageUrl) {
+      const timestamp = new Date().toISOString().slice(0, 19).replace(/[:-]/g, '');
+      const safeModelName = model.replace(/\s+/g, '-');
+      downloadImage(imageUrl, `pixel-prompt-${safeModelName}-iter${iteration.index}-${timestamp}.png`);
+      playSound('click');
+      onDownload?.();
+    }
+  };
 
-    const handleDownload = () => {
-      if (imageUrl) {
-        const timestamp = new Date().toISOString().slice(0, 19).replace(/[:-]/g, '');
-        const safeModelName = model.replace(/\s+/g, '-');
-        downloadImage(imageUrl, `pixel-prompt-${safeModelName}-iter${iteration.index}-${timestamp}.png`);
-        playSound('click');
-        onDownload?.();
-      }
-    };
+  const handleImageError = () => {
+    setImageError(true);
+  };
 
-    const handleImageError = () => {
-      setImageError(true);
-    };
-
-    return (
-      <Modal
-        isOpen={isOpen}
-        onClose={onClose}
-        ariaLabel={`${MODEL_DISPLAY_NAMES[model]} iteration ${iteration.index}`}
-      >
-        <div className="flex flex-col gap-4 max-w-4xl">
-          {/* Image */}
-          <div className="flex items-center justify-center bg-gray-100 dark:bg-gray-900 rounded-md min-h-[300px] max-h-[70vh] overflow-hidden">
-            {imageError ? (
-              <div className="flex flex-col items-center justify-center gap-2 p-8 text-gray-500">
-                <span className="text-3xl">⚠</span>
-                <p>Failed to load image</p>
-              </div>
-            ) : (
-              <img
-                src={imageUrl}
-                alt={`${MODEL_DISPLAY_NAMES[model]} iteration ${iteration.index}`}
-                className="max-w-full max-h-[70vh] w-auto h-auto object-contain"
-                onError={handleImageError}
-              />
-            )}
-          </div>
-
-          {/* Metadata */}
-          <div className="flex flex-col gap-2 p-4 bg-gray-50 dark:bg-gray-800 rounded-md">
-            <h3 className="font-semibold text-lg text-gray-900 dark:text-gray-100">
-              {MODEL_DISPLAY_NAMES[model]} - Iteration {iteration.index}
-            </h3>
-            <p className="text-sm text-gray-700 dark:text-gray-300">
-              {iteration.prompt}
-            </p>
-            {iteration.completedAt && (
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                Generated: {formatDateTime(iteration.completedAt)}
-              </p>
-            )}
-          </div>
-
-          {/* Actions */}
-          <div className="flex gap-2 justify-end">
-            <button
-              onClick={handleDownload}
-              className="
-                px-4 py-2 rounded
-                bg-gray-200 dark:bg-gray-700
-                text-gray-800 dark:text-gray-200
-                hover:bg-gray-300 dark:hover:bg-gray-600
-                transition-colors
-              "
-            >
-              Download
-            </button>
-            <button
-              onClick={onClose}
-              className="
-                px-4 py-2 rounded
-                bg-accent text-white
-                hover:bg-accent/90
-                transition-colors
-              "
-            >
-              Close
-            </button>
-          </div>
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      ariaLabel={`${MODEL_DISPLAY_NAMES[model]} iteration ${iteration.index}`}
+    >
+      <div className="flex flex-col gap-4 max-w-4xl">
+        {/* Image */}
+        <div className="flex items-center justify-center bg-gray-100 dark:bg-gray-900 rounded-md min-h-[300px] max-h-[70vh] overflow-hidden">
+          {imageError ? (
+            <div className="flex flex-col items-center justify-center gap-2 p-8 text-gray-500">
+              <span className="text-3xl">⚠</span>
+              <p>Failed to load image</p>
+            </div>
+          ) : (
+            <img
+              src={imageUrl}
+              alt={`${MODEL_DISPLAY_NAMES[model]} iteration ${iteration.index}`}
+              className="max-w-full max-h-[70vh] w-auto h-auto object-contain"
+              onError={handleImageError}
+            />
+          )}
         </div>
-      </Modal>
-    );
-  }
 
-  // Handle legacy props
-  const { isOpen, onClose, images, currentIndex, onNavigate } = props;
+        {/* Metadata */}
+        <div className="flex flex-col gap-2 p-4 bg-gray-50 dark:bg-gray-800 rounded-md">
+          <h3 className="font-semibold text-lg text-gray-900 dark:text-gray-100">
+            {MODEL_DISPLAY_NAMES[model]} - Iteration {iteration.index}
+          </h3>
+          <p className="text-sm text-gray-700 dark:text-gray-300">
+            {iteration.prompt}
+          </p>
+          {iteration.completedAt && (
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Generated: {formatDateTime(iteration.completedAt)}
+            </p>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div className="flex gap-2 justify-end">
+          <button
+            onClick={handleDownload}
+            className="
+              px-4 py-2 rounded
+              bg-gray-200 dark:bg-gray-700
+              text-gray-800 dark:text-gray-200
+              hover:bg-gray-300 dark:hover:bg-gray-600
+              transition-colors
+            "
+          >
+            Download
+          </button>
+          <button
+            onClick={onClose}
+            className="
+              px-4 py-2 rounded
+              bg-accent text-white
+              hover:bg-accent/90
+              transition-colors
+            "
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
+/**
+ * Legacy image modal for backwards compatibility with array-based navigation
+ */
+const LegacyImageModal: FC<LegacyImageModalProps> = ({
+  isOpen,
+  onClose,
+  images,
+  currentIndex,
+  onNavigate,
+}) => {
+  const { playSound } = useSound();
+  const [imageError, setImageError] = useState(false);
   const [prevIndex, setPrevIndex] = useState(currentIndex);
 
   const currentImage = images[currentIndex];
@@ -163,10 +179,12 @@ export const ImageModal: FC<ImageModalProps> = (props) => {
   const hasNext = currentIndex < images.length - 1;
 
   // Reset error when image changes
-  if (currentIndex !== prevIndex) {
-    setImageError(false);
-    setPrevIndex(currentIndex);
-  }
+  useEffect(() => {
+    if (currentIndex !== prevIndex) {
+      setImageError(false);
+      setPrevIndex(currentIndex);
+    }
+  }, [currentIndex, prevIndex]);
 
   // Handle keyboard navigation
   useEffect(() => {
@@ -317,6 +335,16 @@ export const ImageModal: FC<ImageModalProps> = (props) => {
       </div>
     </Modal>
   );
+};
+
+/**
+ * Wrapper component that delegates to appropriate modal based on props
+ */
+export const ImageModal: FC<ImageModalProps> = (props) => {
+  if (isSessionProps(props)) {
+    return <SessionImageModal {...props} />;
+  }
+  return <LegacyImageModal {...props} />;
 };
 
 export default ImageModal;

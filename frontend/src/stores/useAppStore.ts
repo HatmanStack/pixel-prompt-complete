@@ -68,26 +68,32 @@ export const useAppStore = create<AppStore>((set) => ({
     set((state) => {
       if (!state.currentSession) return state;
 
-      const updatedModels = { ...state.currentSession.models };
-      const column = updatedModels[model];
-
+      const column = state.currentSession.models[model];
       if (!column) return state;
 
-      // Find existing iteration or add new one
+      // Find existing iteration index
       const existingIndex = column.iterations.findIndex(
         (it) => it.index === iteration.index
       );
 
-      if (existingIndex >= 0) {
-        column.iterations[existingIndex] = iteration;
-      } else {
-        column.iterations = [...column.iterations, iteration];
-      }
+      // Create new iterations array immutably
+      const newIterations =
+        existingIndex >= 0
+          ? column.iterations.map((it, i) =>
+              i === existingIndex ? iteration : it
+            )
+          : [...column.iterations, iteration];
 
       return {
         currentSession: {
           ...state.currentSession,
-          models: updatedModels,
+          models: {
+            ...state.currentSession.models,
+            [model]: {
+              ...column,
+              iterations: newIterations,
+            },
+          },
         },
       };
     }),

@@ -5,12 +5,12 @@ Provides functions to calculate expansion pixels for different aspect ratios
 and create masks for outpainting operations.
 """
 
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Union
 from io import BytesIO
 
 # Pillow import with fallback
 try:
-    from PIL import Image
+    from PIL import Image, ImageDraw
     HAS_PIL = True
 except ImportError:
     HAS_PIL = False
@@ -45,8 +45,12 @@ def calculate_expansion(width: int, height: int, preset: str) -> Dict:
             - new_height: final height
 
     Raises:
-        ValueError: If preset is invalid
+        ValueError: If preset is invalid or dimensions are non-positive
     """
+    # Validate dimensions
+    if width <= 0 or height <= 0:
+        raise ValueError(f"Invalid dimensions: width={width}, height={height}. Both must be positive.")
+
     if preset not in ASPECT_PRESETS:
         raise ValueError(f"Invalid preset: {preset}. Valid: {list(ASPECT_PRESETS.keys())}")
 
@@ -107,7 +111,7 @@ def create_expansion_mask(
     height: int,
     expansion: Dict,
     mask_format: str = 'bytes'
-) -> bytes:
+) -> Union[bytes, str]:
     """
     Create a binary mask with transparent (white) edges for expansion.
 
@@ -122,7 +126,7 @@ def create_expansion_mask(
         mask_format: 'bytes' for PNG bytes, 'base64' for base64 string
 
     Returns:
-        Mask image as bytes or base64 string
+        Mask image as bytes (when mask_format='bytes') or str (when mask_format='base64')
     """
     if not HAS_PIL:
         raise RuntimeError("PIL/Pillow required for mask creation")
@@ -135,16 +139,14 @@ def create_expansion_mask(
     # Create white image (areas to fill)
     mask = Image.new('L', (new_width, new_height), 255)
 
-    # Draw black rectangle where original image is
+    # Draw black rectangle where original image is (using ImageDraw for performance)
     left = expansion['left']
     top = expansion['top']
-    right = left + width
-    bottom = top + height
+    right = left + width - 1  # -1 because rectangle is inclusive
+    bottom = top + height - 1
 
-    # Create black region for original image area
-    for y in range(top, bottom):
-        for x in range(left, right):
-            mask.putpixel((x, y), 0)
+    draw = ImageDraw.Draw(mask)
+    draw.rectangle([(left, top), (right, bottom)], fill=0)
 
     # Convert to bytes
     buffer = BytesIO()

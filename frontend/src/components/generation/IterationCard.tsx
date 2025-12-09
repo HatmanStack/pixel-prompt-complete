@@ -21,15 +21,21 @@ const StatusBadge: FC<{ status: Iteration['status'] }> = ({ status }) => {
   const statusStyles: Record<Iteration['status'], string> = {
     pending: 'bg-gray-500 text-white',
     loading: 'bg-blue-500 text-white animate-pulse',
+    in_progress: 'bg-blue-500 text-white animate-pulse',
     completed: 'bg-green-500 text-white',
     error: 'bg-red-500 text-white',
+    disabled: 'bg-gray-400 text-white',
+    partial: 'bg-yellow-500 text-white',
   };
 
   const statusLabels: Record<Iteration['status'], string> = {
     pending: 'Pending',
     loading: 'Generating...',
+    in_progress: 'Generating...',
     completed: 'Done',
     error: 'Error',
+    disabled: 'Disabled',
+    partial: 'Partial',
   };
 
   return (

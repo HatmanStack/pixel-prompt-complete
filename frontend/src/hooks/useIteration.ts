@@ -8,8 +8,8 @@ import { iterateImage, iterateMultiple } from '@/api/client';
 import { useAppStore } from '@/stores/useAppStore';
 import type { ModelName } from '@/types';
 
-const MAX_ITERATIONS = 7;
-const WARNING_THRESHOLD = 5;
+export const MAX_ITERATIONS = 7;
+export const WARNING_THRESHOLD = 5;
 
 interface UseIterationResult {
   iterate: (prompt: string) => Promise<void>;
@@ -145,5 +145,3 @@ export function getIterationStatus(
     showWarning: count >= WARNING_THRESHOLD,
   };
 }
-
-export { MAX_ITERATIONS, WARNING_THRESHOLD };

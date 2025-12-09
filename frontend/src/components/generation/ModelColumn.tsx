@@ -9,7 +9,7 @@ import { IterationInput } from './IterationInput';
 import { OutpaintControls } from './OutpaintControls';
 import type { ModelName, ModelColumn as ModelColumnType, Iteration } from '@/types';
 import { MODEL_DISPLAY_NAMES } from '@/types';
-import { useIteration } from '@/hooks/useIteration';
+import { useIteration, MAX_ITERATIONS } from '@/hooks/useIteration';
 
 interface ModelColumnProps {
   model: ModelName;
@@ -121,7 +121,7 @@ export const ModelColumn: FC<ModelColumnProps> = ({
         </h3>
         <div className="flex items-center gap-2">
           <span className="text-xs text-gray-500 dark:text-gray-400">
-            {column.iterations.length}/7
+            {column.iterations.length}/{MAX_ITERATIONS}
           </span>
           <Checkbox
             checked={isSelected}
