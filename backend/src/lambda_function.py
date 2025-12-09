@@ -124,7 +124,8 @@ def handle_generate(event, correlation_id=None):
         body = json.loads(event.get('body', '{}'))
         prompt = body.get('prompt', '')
 
-        ip = body.get('ip') or event.get('requestContext', {}).get('http', {}).get('sourceIp', 'unknown')
+        # Prefer real client IP from API Gateway, fall back to body.ip for local dev
+        ip = event.get('requestContext', {}).get('http', {}).get('sourceIp') or body.get('ip', 'unknown')
 
         # Validate
         if not prompt:
@@ -265,7 +266,8 @@ def handle_iterate(event, correlation_id=None):
         prompt = body.get('prompt', '')
 
         # Extract IP for rate limiting
-        ip = body.get('ip') or event.get('requestContext', {}).get('http', {}).get('sourceIp', 'unknown')
+        # Prefer real client IP from API Gateway, fall back to body.ip for local dev
+        ip = event.get('requestContext', {}).get('http', {}).get('sourceIp') or body.get('ip', 'unknown')
 
         # Rate limit check
         if rate_limiter.check_rate_limit(ip):
@@ -409,7 +411,8 @@ def handle_outpaint(event, correlation_id=None):
         prompt = body.get('prompt', 'continue the scene naturally')
 
         # Extract IP for rate limiting
-        ip = body.get('ip') or event.get('requestContext', {}).get('http', {}).get('sourceIp', 'unknown')
+        # Prefer real client IP from API Gateway, fall back to body.ip for local dev
+        ip = event.get('requestContext', {}).get('http', {}).get('sourceIp') or body.get('ip', 'unknown')
 
         # Rate limit check
         if rate_limiter.check_rate_limit(ip):
@@ -429,6 +432,10 @@ def handle_outpaint(event, correlation_id=None):
 
         if model_name not in MODELS:
             return response(400, {'error': f'Invalid model: {model_name}'})
+
+        # Content filter
+        if content_filter.check_prompt(prompt):
+            return response(400, error_responses.inappropriate_content())
 
         # Get model config
         try:

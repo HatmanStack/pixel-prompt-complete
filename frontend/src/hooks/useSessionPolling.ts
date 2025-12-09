@@ -31,8 +31,9 @@ export function useSessionPolling(
   const [error, setError] = useState<string | null>(null);
   const [isPolling, setIsPolling] = useState(false);
 
-  // Use refs to avoid stale closures
+  // Use refs to avoid stale closures and race conditions
   const mountedRef = useRef(true);
+  const activeSessionIdRef = useRef<string | null>(null);
   const consecutiveErrorsRef = useRef(0);
   const startTimeRef = useRef<number | null>(null);
   const timeoutIdRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -49,6 +50,9 @@ export function useSessionPolling(
   const poll = useCallback(async () => {
     if (!mountedRef.current || !sessionId) return;
 
+    // Capture sessionId at start of poll to detect stale responses
+    const pollingSessionId = sessionId;
+
     // Check for timeout
     if (startTimeRef.current && Date.now() - startTimeRef.current > TIMEOUT_MS) {
       setError('Session timed out after 5 minutes');
@@ -57,8 +61,13 @@ export function useSessionPolling(
     }
 
     try {
-      const session = await getSessionStatus(sessionId);
-      if (!mountedRef.current) return;
+      const session = await getSessionStatus(pollingSessionId);
+
+      // Guard against stale responses - if sessionId changed during the API call,
+      // discard this response to avoid updating state for wrong session
+      if (!mountedRef.current || activeSessionIdRef.current !== pollingSessionId) {
+        return;
+      }
 
       setCurrentSession(session);
       consecutiveErrorsRef.current = 0;
@@ -70,10 +79,15 @@ export function useSessionPolling(
         return;
       }
 
-      // Continue polling
-      timeoutIdRef.current = setTimeout(poll, intervalMs);
+      // Continue polling only if still the active session
+      if (activeSessionIdRef.current === pollingSessionId) {
+        timeoutIdRef.current = setTimeout(poll, intervalMs);
+      }
     } catch (err) {
-      if (!mountedRef.current) return;
+      // Guard against stale errors too
+      if (!mountedRef.current || activeSessionIdRef.current !== pollingSessionId) {
+        return;
+      }
 
       consecutiveErrorsRef.current++;
 
@@ -83,14 +97,17 @@ export function useSessionPolling(
         return;
       }
 
-      // Exponential backoff
-      const backoffDelay = intervalMs * Math.pow(2, consecutiveErrorsRef.current);
-      timeoutIdRef.current = setTimeout(poll, backoffDelay);
+      // Exponential backoff - only if still the active session
+      if (activeSessionIdRef.current === pollingSessionId) {
+        const backoffDelay = intervalMs * Math.pow(2, consecutiveErrorsRef.current);
+        timeoutIdRef.current = setTimeout(poll, backoffDelay);
+      }
     }
   }, [sessionId, intervalMs, setCurrentSession, stopPolling]);
 
   useEffect(() => {
     mountedRef.current = true;
+    activeSessionIdRef.current = sessionId;
 
     if (!sessionId || !enabled) {
       setIsPolling(false);
@@ -106,6 +123,7 @@ export function useSessionPolling(
 
     return () => {
       mountedRef.current = false;
+      activeSessionIdRef.current = null;
       if (timeoutIdRef.current) {
         clearTimeout(timeoutIdRef.current);
         timeoutIdRef.current = null;

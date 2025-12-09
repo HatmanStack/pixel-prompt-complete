@@ -868,20 +868,16 @@ def iterate_gemini(model_config: Dict, source_image: bytes, prompt: str, context
         else:
             image_bytes = source_image
 
-        # Build conversation with context
-        contents = []
+        # Build prompt with context history
+        context_prompt = prompt
+        if context:
+            history = " | ".join([f"Previous: {ctx['prompt']}" for ctx in context[-2:]])
+            context_prompt = f"{history}. Now: {prompt}"
 
-        # Add context entries (previous prompts)
-        for ctx in context[-2:]:
-            contents.append(f"Previous edit: {ctx['prompt']}")
-
-        # Add current instruction with image
-        contents.append(prompt)
-
-        # Create content with image
+        # Create content with image and context-enriched prompt
         content_parts = [
             types.Part.from_bytes(data=image_bytes, mime_type='image/png'),
-            types.Part.from_text(f"Edit this image: {prompt}")
+            types.Part.from_text(f"Edit this image: {context_prompt}")
         ]
 
         response = client.models.generate_content(
@@ -1285,7 +1281,7 @@ def outpaint_openai(model_config: Dict, source_image: bytes, preset: str, prompt
     try:
         from utils.outpaint import (
             calculate_expansion, pad_image_with_transparency,
-            get_image_dimensions
+            get_image_dimensions, get_openai_compatible_size
         )
 
         # Decode source image
@@ -1303,13 +1299,18 @@ def outpaint_openai(model_config: Dict, source_image: bytes, preset: str, prompt
 
         client = OpenAI(api_key=model_config.get('api_key', ''), timeout=120.0)
 
+        # Calculate appropriate size based on target aspect ratio
+        target_size = get_openai_compatible_size(
+            expansion['new_width'], expansion['new_height']
+        )
+
         # Use images.edit with padded image
         # OpenAI will fill transparent areas
         response = client.images.edit(
             model=model_config.get('id', 'gpt-image-1'),
             image=padded_image,
             prompt=f"Expand the scene. Fill the transparent areas with: {prompt}",
-            size="1024x1024"  # OpenAI may resize
+            size=target_size
         )
 
         if not response.data or len(response.data) == 0:

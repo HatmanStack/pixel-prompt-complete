@@ -240,3 +240,39 @@ def get_image_dimensions(image_bytes: bytes) -> Tuple[int, int]:
 
     image = Image.open(BytesIO(image_bytes))
     return image.size
+
+
+def get_openai_compatible_size(target_width: int, target_height: int) -> str:
+    """
+    Get the closest OpenAI-compatible size for gpt-image-1.
+
+    OpenAI only supports: 1024x1024, 1024x1536 (portrait), 1536x1024 (landscape)
+
+    Args:
+        target_width: Desired width in pixels
+        target_height: Desired height in pixels
+
+    Returns:
+        Size string in format "WIDTHxHEIGHT"
+    """
+    # OpenAI supported sizes for gpt-image-1
+    OPENAI_SIZES = [
+        (1024, 1024),   # Square
+        (1536, 1024),   # Landscape
+        (1024, 1536),   # Portrait
+    ]
+
+    target_ratio = target_width / target_height
+
+    # Find closest aspect ratio match
+    best_size = (1024, 1024)
+    best_diff = float('inf')
+
+    for w, h in OPENAI_SIZES:
+        size_ratio = w / h
+        diff = abs(size_ratio - target_ratio)
+        if diff < best_diff:
+            best_diff = diff
+            best_size = (w, h)
+
+    return f"{best_size[0]}x{best_size[1]}"
