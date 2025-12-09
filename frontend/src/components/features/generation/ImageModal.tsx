@@ -1,43 +1,168 @@
 /**
  * ImageModal Component
- * Displays full-size image with keyboard navigation
- * Supports arrow keys to navigate between images
+ * Displays full-size image with metadata
+ * Supports both session-based (new) and legacy array-based props
  */
 
 import { useEffect, useState, type FC } from 'react';
 import Modal from '@/components/common/Modal';
 import { downloadImage } from '@/utils/imageHelpers';
 import { useSound } from '@/hooks/useSound';
+import type { ModelName, Iteration } from '@/types';
+import { MODEL_DISPLAY_NAMES } from '@/types';
 
-interface ImageData {
+// Legacy interface for backwards compatibility
+interface LegacyImageData {
   image: string | null;
   model: string;
 }
 
-interface ImageModalProps {
+interface LegacyImageModalProps {
   isOpen: boolean;
   onClose: () => void;
-  images: ImageData[];
+  images: LegacyImageData[];
   currentIndex: number;
   onNavigate: (index: number) => void;
 }
 
-export const ImageModal: FC<ImageModalProps> = ({
-  isOpen,
-  onClose,
-  images,
-  currentIndex,
-  onNavigate,
-}) => {
+// New session-based interface
+interface SessionImageModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  imageUrl: string;
+  model: ModelName;
+  iteration: Iteration;
+  onDownload?: () => void;
+}
+
+// Combined type to support both
+type ImageModalProps = LegacyImageModalProps | SessionImageModalProps;
+
+// Type guard to check if props are session-based
+function isSessionProps(props: ImageModalProps): props is SessionImageModalProps {
+  return 'iteration' in props;
+}
+
+/**
+ * Format datetime for display
+ */
+function formatDateTime(dateStr?: string): string {
+  if (!dateStr) return '';
+  try {
+    return new Date(dateStr).toLocaleString();
+  } catch {
+    return dateStr;
+  }
+}
+
+export const ImageModal: FC<ImageModalProps> = (props) => {
   const { playSound } = useSound();
   const [imageError, setImageError] = useState(false);
+
+  // Handle session-based props
+  if (isSessionProps(props)) {
+    const { isOpen, onClose, imageUrl, model, iteration, onDownload } = props;
+
+    // Reset error on close/reopen
+    useEffect(() => {
+      if (isOpen) {
+        setImageError(false);
+      }
+    }, [isOpen]);
+
+    const handleDownload = () => {
+      if (imageUrl) {
+        const timestamp = new Date().toISOString().slice(0, 19).replace(/[:-]/g, '');
+        const safeModelName = model.replace(/\s+/g, '-');
+        downloadImage(imageUrl, `pixel-prompt-${safeModelName}-iter${iteration.index}-${timestamp}.png`);
+        playSound('click');
+        onDownload?.();
+      }
+    };
+
+    const handleImageError = () => {
+      setImageError(true);
+    };
+
+    return (
+      <Modal
+        isOpen={isOpen}
+        onClose={onClose}
+        ariaLabel={`${MODEL_DISPLAY_NAMES[model]} iteration ${iteration.index}`}
+      >
+        <div className="flex flex-col gap-4 max-w-4xl">
+          {/* Image */}
+          <div className="flex items-center justify-center bg-gray-100 dark:bg-gray-900 rounded-md min-h-[300px] max-h-[70vh] overflow-hidden">
+            {imageError ? (
+              <div className="flex flex-col items-center justify-center gap-2 p-8 text-gray-500">
+                <span className="text-3xl">⚠</span>
+                <p>Failed to load image</p>
+              </div>
+            ) : (
+              <img
+                src={imageUrl}
+                alt={`${MODEL_DISPLAY_NAMES[model]} iteration ${iteration.index}`}
+                className="max-w-full max-h-[70vh] w-auto h-auto object-contain"
+                onError={handleImageError}
+              />
+            )}
+          </div>
+
+          {/* Metadata */}
+          <div className="flex flex-col gap-2 p-4 bg-gray-50 dark:bg-gray-800 rounded-md">
+            <h3 className="font-semibold text-lg text-gray-900 dark:text-gray-100">
+              {MODEL_DISPLAY_NAMES[model]} - Iteration {iteration.index}
+            </h3>
+            <p className="text-sm text-gray-700 dark:text-gray-300">
+              {iteration.prompt}
+            </p>
+            {iteration.completedAt && (
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Generated: {formatDateTime(iteration.completedAt)}
+              </p>
+            )}
+          </div>
+
+          {/* Actions */}
+          <div className="flex gap-2 justify-end">
+            <button
+              onClick={handleDownload}
+              className="
+                px-4 py-2 rounded
+                bg-gray-200 dark:bg-gray-700
+                text-gray-800 dark:text-gray-200
+                hover:bg-gray-300 dark:hover:bg-gray-600
+                transition-colors
+              "
+            >
+              Download
+            </button>
+            <button
+              onClick={onClose}
+              className="
+                px-4 py-2 rounded
+                bg-accent text-white
+                hover:bg-accent/90
+                transition-colors
+              "
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </Modal>
+    );
+  }
+
+  // Handle legacy props
+  const { isOpen, onClose, images, currentIndex, onNavigate } = props;
   const [prevIndex, setPrevIndex] = useState(currentIndex);
 
   const currentImage = images[currentIndex];
   const hasPrevious = currentIndex > 0;
   const hasNext = currentIndex < images.length - 1;
 
-  // Reset error when image changes (without useEffect)
+  // Reset error when image changes
   if (currentIndex !== prevIndex) {
     setImageError(false);
     setPrevIndex(currentIndex);
@@ -106,7 +231,6 @@ export const ImageModal: FC<ImageModalProps> = ({
               transition-all duration-200
               hover:bg-black/70 hover:scale-110
               focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2
-              md:left-4
             "
             onClick={() => handleNavigate(currentIndex - 1)}
             aria-label="Previous image"
@@ -127,7 +251,6 @@ export const ImageModal: FC<ImageModalProps> = ({
               transition-all duration-200
               hover:bg-black/70 hover:scale-110
               focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2
-              md:right-4
             "
             onClick={() => handleNavigate(currentIndex + 1)}
             aria-label="Next image"
@@ -138,9 +261,9 @@ export const ImageModal: FC<ImageModalProps> = ({
         )}
 
         {/* Image Container */}
-        <div className="flex items-center justify-center bg-primary rounded-md min-h-[300px] max-h-[75vh] overflow-hidden">
+        <div className="flex items-center justify-center bg-gray-100 dark:bg-gray-900 rounded-md min-h-[300px] max-h-[75vh] overflow-hidden">
           {imageError ? (
-            <div className="flex flex-col items-center justify-center gap-2 p-8 text-text-secondary">
+            <div className="flex flex-col items-center justify-center gap-2 p-8 text-gray-500">
               <span className="text-3xl">⚠</span>
               <p>Failed to load image</p>
             </div>
@@ -158,13 +281,15 @@ export const ImageModal: FC<ImageModalProps> = ({
         <div
           className="
             flex justify-between items-center gap-4 p-4
-            bg-secondary rounded-b-md mt-2
+            bg-gray-100 dark:bg-gray-800 rounded-b-md mt-2
             flex-col md:flex-row
           "
         >
           <div className="flex flex-col gap-1 flex-1">
-            <h3 className="text-lg font-semibold text-text m-0">{currentImage.model}</h3>
-            <span className="text-sm text-text-secondary">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 m-0">
+              {currentImage.model}
+            </h3>
+            <span className="text-sm text-gray-500 dark:text-gray-400">
               {currentIndex + 1} / {images.length}
             </span>
           </div>
@@ -178,7 +303,7 @@ export const ImageModal: FC<ImageModalProps> = ({
                 text-white text-sm font-medium
                 cursor-pointer
                 transition-all duration-200
-                hover:bg-accent-hover hover:-translate-y-0.5
+                hover:bg-accent/90
                 focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2
               "
               onClick={handleDownload}

@@ -1,111 +1,163 @@
 /**
  * GenerationPanel Component
- * Main panel that integrates all generation components
+ * Main panel with 4-column layout for session-based image generation
  */
 
 import { useEffect, useState, type FC } from 'react';
 import { useAppStore } from '@/stores/useAppStore';
-import useJobPolling from '@/hooks/useJobPolling';
-import useImageLoader from '@/hooks/useImageLoader';
-import { generateImages } from '@/api/client';
+import { useSessionPolling } from '@/hooks/useSessionPolling';
+import { generateSession } from '@/api/client';
 import { useToast } from '@/stores/useToastStore';
 import { useSound } from '@/hooks/useSound';
 import PromptInput from './PromptInput';
 import RandomPromptButton from '@/components/features/generation/RandomPromptButton';
 import PromptEnhancer from './PromptEnhancer';
 import GenerateButton from './GenerateButton';
-import ImageGrid from './ImageGrid';
+import { ModelColumn } from './ModelColumn';
+import { MultiIterateInput } from './MultiIterateInput';
 import GalleryBrowser from '@/components/gallery/GalleryBrowser';
-import type { Job, ImageResult } from '@/types';
-
-interface GalleryImage {
-  model: string;
-  url?: string;
-  blobUrl?: string;
-  timestamp?: string;
-}
-
-interface SelectedGalleryData {
-  id: string;
-  images: GalleryImage[];
-  total: number;
-}
-
-interface GeneratedImage {
-  model: string;
-  status: 'pending' | 'loading' | 'completed' | 'error' | 'success';
-  imageUrl?: string;
-  image: string | null;
-  error: string | null;
-  completedAt?: string;
-}
+import { ImageModal } from '@/components/features/generation/ImageModal';
+import type {
+  ModelName,
+  ModelColumn as ModelColumnType,
+  Iteration,
+} from '@/types';
+import { MODELS } from '@/types';
 
 interface ApiError extends Error {
   status?: number;
 }
 
+/**
+ * Create an empty model column for display when no session exists
+ */
+function createEmptyColumn(model: ModelName): ModelColumnType {
+  return {
+    name: model,
+    enabled: true,
+    status: 'pending',
+    iterations: [],
+  };
+}
+
+/**
+ * Progress bar component
+ */
+const ProgressBar: FC<{ session: ReturnType<typeof useAppStore.getState>['currentSession'] }> = ({
+  session,
+}) => {
+  if (!session) return null;
+
+  // Count completed iterations across all models
+  let completed = 0;
+  let total = 0;
+
+  for (const model of MODELS) {
+    const column = session.models[model];
+    if (column && column.enabled) {
+      total += column.iterations.length;
+      completed += column.iterations.filter((i) => i.status === 'completed').length;
+    }
+  }
+
+  const percent = total > 0 ? (completed / total) * 100 : 0;
+  const text =
+    session.status === 'pending'
+      ? 'Starting...'
+      : session.status === 'in_progress'
+        ? `Generating: ${completed} / ${total} complete`
+        : session.status === 'completed'
+          ? 'All images generated!'
+          : session.status === 'partial'
+            ? 'Generation completed with some errors'
+            : 'Generation failed';
+
+  return (
+    <div
+      className="flex flex-col gap-2"
+      role="progressbar"
+      aria-valuenow={Math.round(percent)}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-label="Generation progress"
+    >
+      <div className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+        <div
+          className="h-full bg-gradient-to-r from-accent to-accent/70 rounded-full transition-all duration-200"
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+      <p
+        className="text-sm text-gray-600 dark:text-gray-400 text-center m-0"
+        aria-live="polite"
+      >
+        {text}
+      </p>
+    </div>
+  );
+};
+
+/**
+ * Error banner component
+ */
+const ErrorBanner: FC<{ error: string; onDismiss: () => void }> = ({
+  error,
+  onDismiss,
+}) => (
+  <div
+    className="
+      flex items-center gap-4 p-4
+      bg-red-50 dark:bg-red-900/20 border border-red-300 dark:border-red-700 rounded-md
+      text-red-700 dark:text-red-300 text-sm
+      animate-in slide-in-from-top-2 duration-200
+    "
+    role="alert"
+  >
+    <span className="text-xl">⚠</span>
+    <span>{error}</span>
+    <button
+      className="
+        ml-auto w-6 h-6
+        flex items-center justify-center
+        bg-transparent border-none
+        text-red-600 dark:text-red-400 text-lg cursor-pointer
+        transition-transform duration-150
+        hover:scale-125
+      "
+      onClick={onDismiss}
+      aria-label="Dismiss error"
+    >
+      ✕
+    </button>
+  </div>
+);
+
 export const GenerationPanel: FC = () => {
   const {
     prompt,
-    currentJob,
-    setCurrentJob,
-    generatedImages,
-    setGeneratedImages,
+    currentSession,
+    setCurrentSession,
     isGenerating,
     setIsGenerating,
-    resetGeneration,
+    resetSession,
+    selectedModels,
+    toggleModelSelection,
   } = useAppStore();
 
   const { error: showError } = useToast();
   const { playSound } = useSound();
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [modelNames, setModelNames] = useState<string[]>([]);
+  const [expandedImage, setExpandedImage] = useState<{
+    model: ModelName;
+    iteration: Iteration;
+  } | null>(null);
 
-  // Poll job status when we have a job ID
-  const { jobStatus, error: pollingError } = useJobPolling(currentJob?.jobId, 2000);
-
-  // Load images from S3
-  const { images: loadedImages } = useImageLoader(jobStatus);
-
-  // Update generated images when job status changes
-  useEffect(() => {
-    if (jobStatus) {
-      setCurrentJob(jobStatus as Job);
-
-      // Extract model names
-      if (jobStatus.results) {
-        const names = jobStatus.results.map((r) => r.model || 'Unknown');
-        setModelNames(names);
-      }
-
-      // Update image states based on results and loaded images
-      if (jobStatus.results) {
-        const updatedImages = jobStatus.results.map((result, index) => ({
-          model: result.model,
-          status: result.status,
-          imageUrl: result.url,
-          image: loadedImages[index],
-          error: result.error || null,
-        })) as unknown as (ImageResult | null)[];
-
-        setGeneratedImages(updatedImages);
-      }
-
-      // Check if job is complete
-      if (
-        jobStatus.status === 'completed' ||
-        // @ts-expect-error - 'partial' may be returned by API
-        jobStatus.status === 'partial'
-      ) {
-        setIsGenerating(false);
-        playSound('swoosh');
-      } else if (jobStatus.status === 'failed') {
-        setIsGenerating(false);
-        setErrorMessage('Generation failed. Please try again.');
-      }
-    }
-  }, [jobStatus, loadedImages, setCurrentJob, setGeneratedImages, setIsGenerating, playSound]);
+  // Poll session status when we have a session ID
+  const { error: pollingError } = useSessionPolling(
+    currentSession?.sessionId ?? null,
+    { enabled: isGenerating }
+  );
 
   // Handle polling errors
   useEffect(() => {
@@ -115,6 +167,17 @@ export const GenerationPanel: FC = () => {
     }
   }, [pollingError, setIsGenerating]);
 
+  // Play sound on completion
+  useEffect(() => {
+    if (
+      currentSession &&
+      !isGenerating &&
+      ['completed', 'partial'].includes(currentSession.status)
+    ) {
+      playSound('swoosh');
+    }
+  }, [currentSession, isGenerating, playSound]);
+
   const handleGenerate = async () => {
     if (!prompt.trim()) {
       setErrorMessage('Please enter a prompt');
@@ -123,21 +186,33 @@ export const GenerationPanel: FC = () => {
 
     try {
       // Reset previous generation
-      resetGeneration();
+      resetSession();
       setErrorMessage(null);
       setIsGenerating(true);
       playSound('click');
 
       // Call API to start generation
-      const response = await generateImages(prompt);
+      const response = await generateSession(prompt);
 
-      if (response.jobId) {
-        setCurrentJob({
-          jobId: response.jobId,
-          status: 'in_progress',
-        } as Job);
+      if (response.sessionId) {
+        // Initialize session structure for polling
+        const initialSession = {
+          sessionId: response.sessionId,
+          status: 'pending' as const,
+          prompt,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          models: MODELS.reduce(
+            (acc, model) => {
+              acc[model] = createEmptyColumn(model);
+              return acc;
+            },
+            {} as Record<ModelName, ModelColumnType>
+          ),
+        };
+        setCurrentSession(initialSession);
       } else {
-        throw new Error('No job ID received');
+        throw new Error('No session ID received');
       }
     } catch (err) {
       console.error('Generation error:', err);
@@ -151,21 +226,29 @@ export const GenerationPanel: FC = () => {
         setErrorMessage(msg);
         showError(msg);
       } else if (error.status === 400 && error.message?.includes('filter')) {
-        const msg = 'Prompt contains inappropriate content. Please try a different prompt.';
+        const msg =
+          'Prompt contains inappropriate content. Please try a different prompt.';
         setErrorMessage(msg);
         showError(msg);
       } else {
-        const msg = error.message || 'Failed to start generation. Please try again.';
+        const msg =
+          error.message || 'Failed to start generation. Please try again.';
         setErrorMessage(msg);
         showError(msg);
       }
     }
   };
 
-  // Listen for keyboard shortcuts
+  // Handle image expansion
+  const handleImageExpand = (model: ModelName, iteration: Iteration) => {
+    if (iteration.status === 'completed' && iteration.imageUrl) {
+      setExpandedImage({ model, iteration });
+    }
+  };
+
+  // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't trigger shortcuts when typing in inputs
       const activeTag = (document.activeElement as HTMLElement)?.tagName;
       const isTyping = ['INPUT', 'TEXTAREA'].includes(activeTag);
 
@@ -194,11 +277,9 @@ export const GenerationPanel: FC = () => {
         }
       }
 
-      // Ctrl+Shift+D for download all images
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'D' && !isTyping) {
-        e.preventDefault();
-        const event = new CustomEvent('download-all-trigger');
-        document.dispatchEvent(event);
+      // Escape to close modal
+      if (e.key === 'Escape' && expandedImage) {
+        setExpandedImage(null);
       }
     };
 
@@ -207,51 +288,29 @@ export const GenerationPanel: FC = () => {
       document.removeEventListener('keydown', handleKeyDown);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prompt, isGenerating]);
+  }, [prompt, isGenerating, expandedImage]);
 
-  const getProgressText = (): string => {
-    if (!jobStatus || !jobStatus.results) return '';
-
-    const completed = jobStatus.results.filter((r) => r.status === 'success').length;
-    const total = jobStatus.results.length;
-
-    if (completed === total) {
-      return 'All images generated!';
-    }
-
-    return `Generating: ${completed} / ${total} models complete`;
+  // Legacy gallery handler - for backwards compatibility
+  const handleGallerySelect = (
+    gallery: { id: string; images: { model: string; url?: string }[] } | null
+  ) => {
+    // Legacy handler - can be extended to load sessions in future
+    console.log('Gallery selected:', gallery?.id);
   };
-
-  // Handle gallery selection
-  const handleGallerySelect = (gallery: SelectedGalleryData | null) => {
-    if (!gallery) {
-      return;
-    }
-
-    // Convert gallery images to generatedImages format
-    const galleryImages: GeneratedImage[] = gallery.images.map((img, index) => ({
-      model: img.model || `Model ${index + 1}`,
-      status: 'completed' as const,
-      imageUrl: img.url,
-      image: img.blobUrl || img.url || null,
-      error: null,
-      completedAt: img.timestamp,
-    }));
-
-    setGeneratedImages(galleryImages as unknown as (ImageResult | null)[]);
-    setModelNames(galleryImages.map((img) => img.model));
-  };
-
-  const progressPercent = jobStatus?.results
-    ? (jobStatus.results.filter((r) => r.status === 'success').length / jobStatus.results.length) *
-      100
-    : 0;
 
   return (
-    <article className="w-full flex flex-col gap-8 md:gap-6" aria-label="Image Generation">
+    <article
+      className="w-full flex flex-col gap-8 md:gap-6"
+      aria-label="Image Generation"
+    >
       {/* Input Section */}
-      <section className="flex flex-col gap-6 md:gap-4" aria-labelledby="prompt-section-heading">
-        <h2 id="prompt-section-heading" className="sr-only">Create Your Image</h2>
+      <section
+        className="flex flex-col gap-6 md:gap-4"
+        aria-labelledby="prompt-section-heading"
+      >
+        <h2 id="prompt-section-heading" className="sr-only">
+          Create Your Image
+        </h2>
         <PromptInput disabled={isGenerating} />
 
         <div className="flex gap-4 flex-col md:flex-row">
@@ -263,67 +322,75 @@ export const GenerationPanel: FC = () => {
           </div>
         </div>
 
-        <GenerateButton
-          onClick={handleGenerate}
-          isGenerating={isGenerating}
-          disabled={!prompt.trim() || isGenerating}
-        />
+        <div className="flex gap-4 items-start">
+          <GenerateButton
+            onClick={handleGenerate}
+            isGenerating={isGenerating}
+            disabled={!prompt.trim() || isGenerating}
+          />
+
+          {/* Multi-select input */}
+          {selectedModels.size > 0 && (
+            <div className="flex-1">
+              <MultiIterateInput selectedCount={selectedModels.size} />
+            </div>
+          )}
+        </div>
 
         {/* Error Message */}
         {errorMessage && (
-          <div
-            className="
-              flex items-center gap-4 p-4
-              bg-error/10 border border-error rounded-md
-              text-error text-sm
-              animate-in slide-in-from-top-2 duration-200
-            "
-            role="alert"
-          >
-            <span className="text-xl">⚠</span>
-            <span>{errorMessage}</span>
-            <button
-              className="
-                ml-auto w-6 h-6
-                flex items-center justify-center
-                bg-transparent border-none
-                text-error text-lg cursor-pointer
-                transition-transform duration-150
-                hover:scale-125
-              "
-              onClick={() => setErrorMessage(null)}
-              aria-label="Dismiss error"
-            >
-              ✕
-            </button>
-          </div>
+          <ErrorBanner
+            error={errorMessage}
+            onDismiss={() => setErrorMessage(null)}
+          />
         )}
 
         {/* Progress */}
-        {isGenerating && (
-          <div className="flex flex-col gap-2" role="progressbar" aria-valuenow={Math.round(progressPercent)} aria-valuemin={0} aria-valuemax={100} aria-label="Generation progress">
-            <div className="w-full h-2 bg-secondary rounded-full overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-accent to-accent-muted rounded-full transition-all duration-200"
-                style={{ width: `${progressPercent}%` }}
+        {isGenerating && <ProgressBar session={currentSession} />}
+      </section>
+
+      {/* 4-Column Layout */}
+      <section
+        className="flex gap-4 overflow-x-auto pb-4 snap-x snap-mandatory md:snap-none"
+        aria-labelledby="models-section-heading"
+      >
+        <h2 id="models-section-heading" className="sr-only">
+          Model Columns
+        </h2>
+        {MODELS.map((model) => {
+          const column = currentSession?.models[model] ?? createEmptyColumn(model);
+          return (
+            <div key={model} className="snap-center">
+              <ModelColumn
+                model={model}
+                column={column}
+                isSelected={selectedModels.has(model)}
+                onToggleSelect={() => toggleModelSelection(model)}
+                onImageExpand={handleImageExpand}
               />
             </div>
-            <p className="text-sm text-text-secondary text-center m-0" aria-live="polite">{getProgressText()}</p>
-          </div>
-        )}
+          );
+        })}
       </section>
 
       {/* Gallery Section */}
       <section aria-labelledby="gallery-section-heading">
-        <h2 id="gallery-section-heading" className="sr-only">Previous Generations</h2>
+        <h2 id="gallery-section-heading" className="sr-only">
+          Previous Generations
+        </h2>
         <GalleryBrowser onGallerySelect={handleGallerySelect} />
       </section>
 
-      {/* Results Section */}
-      <section className="w-full" aria-labelledby="results-section-heading">
-        <h2 id="results-section-heading" className="sr-only">Generated Images</h2>
-        <ImageGrid images={generatedImages} modelNames={modelNames} />
-      </section>
+      {/* Image Modal */}
+      {expandedImage && (
+        <ImageModal
+          isOpen={!!expandedImage}
+          onClose={() => setExpandedImage(null)}
+          imageUrl={expandedImage.iteration.imageUrl || ''}
+          model={expandedImage.model}
+          iteration={expandedImage.iteration}
+        />
+      )}
     </article>
   );
 };
