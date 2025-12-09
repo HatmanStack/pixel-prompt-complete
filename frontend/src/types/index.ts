@@ -3,19 +3,37 @@
  * Re-exports all types for convenient importing
  */
 
-// API types
+// API types - New session-based types
 export type {
+  ModelName,
+  IterationStatus,
+  Iteration,
+  ModelColumn,
+  SessionStatus,
+  Session,
+  SessionPreview,
+  SessionGenerateResponse,
+  IterateResponse,
+  OutpaintResponse,
+  OutpaintPreset,
+  EnhanceResponse,
+  SessionGalleryListResponse,
+  SessionGalleryDetailResponse,
+  SelectionState,
+  ApiError,
+  // Legacy types (for backwards compatibility)
   JobStatus,
   ImageResult,
   Job,
-  GenerateResponse,
   StatusResponse,
-  EnhanceResponse,
   GalleryPreview,
+  GenerateResponse,
   GalleryListResponse,
   GalleryDetailResponse,
-  ApiError,
 } from './api';
+
+// API constants
+export { MODEL_DISPLAY_NAMES, MODELS } from './api';
 
 // Store types
 export type {
