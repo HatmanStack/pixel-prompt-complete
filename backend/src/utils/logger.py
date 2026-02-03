@@ -9,7 +9,6 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-
 # Configure Python logging for CloudWatch
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)

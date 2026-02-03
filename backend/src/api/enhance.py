@@ -6,8 +6,9 @@ Uses configured LLM to expand short prompts into detailed image generation promp
 
 import warnings
 from typing import Optional
-from openai import OpenAI
+
 from google import genai
+from openai import OpenAI
 
 
 class PromptEnhancer:

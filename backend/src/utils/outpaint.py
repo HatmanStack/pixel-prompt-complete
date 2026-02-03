@@ -5,8 +5,8 @@ Provides functions to calculate expansion pixels for different aspect ratios
 and create masks for outpainting operations.
 """
 
-from typing import Dict, Tuple, Union
 from io import BytesIO
+from typing import Dict, Tuple, Union
 
 # Pillow import with fallback
 try:

@@ -14,19 +14,23 @@ by redacting any keys that might appear in exception messages returned to client
 import base64
 import json
 import re
-import requests
 import time
 import warnings
 from typing import Any, Callable, Dict, List, Union
-from openai import OpenAI
+
 import boto3
+import requests
 from google import genai
 from google.genai import types
+from openai import OpenAI
 
 from config import (
-    bedrock_nova_region, bedrock_sd_region,
-    api_client_timeout, image_download_timeout,
-    bfl_max_poll_attempts, bfl_poll_interval
+    api_client_timeout,
+    bedrock_nova_region,
+    bedrock_sd_region,
+    bfl_max_poll_attempts,
+    bfl_poll_interval,
+    image_download_timeout,
 )
 
 # Type aliases for handler contracts
@@ -1043,8 +1047,10 @@ def outpaint_flux(model_config: ModelConfig, source_image: Union[str, bytes], pr
     """
     try:
         from utils.outpaint import (
-            calculate_expansion, pad_image_with_transparency,
-            create_expansion_mask, get_image_dimensions
+            calculate_expansion,
+            create_expansion_mask,
+            get_image_dimensions,
+            pad_image_with_transparency,
         )
 
         # Decode source image
@@ -1294,8 +1300,10 @@ def outpaint_openai(model_config: ModelConfig, source_image: Union[str, bytes], 
     """
     try:
         from utils.outpaint import (
-            calculate_expansion, pad_image_with_transparency,
-            get_image_dimensions, get_openai_compatible_size
+            calculate_expansion,
+            get_image_dimensions,
+            get_openai_compatible_size,
+            pad_image_with_transparency,
         )
 
         # Decode source image

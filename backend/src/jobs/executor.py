@@ -197,7 +197,8 @@ class JobExecutor:
         Raises:
             TimeoutError: If handler exceeds timeout
         """
-        from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+        from concurrent.futures import ThreadPoolExecutor
+        from concurrent.futures import TimeoutError as FuturesTimeoutError
 
         with ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(handler, model, prompt, {})

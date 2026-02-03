@@ -16,6 +16,8 @@ browse results in a gallery. Deploy to your own AWS account with full control
 over models, rate limits, and costs.</p>
 </div>
 
+** THIS REPO IS IN ACTIVE DEVELOPMENT AND WILL CHANGE OFTEN **
+
 ## Structure
 
 ```text
