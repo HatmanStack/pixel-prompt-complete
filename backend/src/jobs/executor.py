@@ -7,8 +7,9 @@ Executes image generation across multiple AI models concurrently using threading
 import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Dict
+from typing import Any, Callable, Dict
 from models.handlers import get_handler
+from config import max_thread_workers, handler_timeout
 
 
 class JobExecutor:
@@ -16,7 +17,12 @@ class JobExecutor:
     Executes image generation jobs with parallel model processing.
     """
 
-    def __init__(self, job_manager, image_storage, model_registry):
+    def __init__(
+        self,
+        job_manager: Any,
+        image_storage: Any,
+        model_registry: Any
+    ) -> None:
         """
         Initialize Job Executor.
 
@@ -44,8 +50,8 @@ class JobExecutor:
         models = self.model_registry.get_all_models()
 
 
-        # Create thread pool with one worker per model, capped at 10 to prevent resource exhaustion
-        with ThreadPoolExecutor(max_workers=min(len(models), 10)) as executor:
+        # Create thread pool with one worker per model, capped at configurable max
+        with ThreadPoolExecutor(max_workers=min(len(models), max_thread_workers)) as executor:
             # Submit all tasks
             futures = {
                 executor.submit(
@@ -78,10 +84,10 @@ class JobExecutor:
     def _execute_model(
         self,
         job_id: str,
-        model: Dict,
+        model: Dict[str, Any],
         prompt: str,
         target: str
-    ) -> Dict:
+    ) -> Dict[str, Any]:
         """
         Execute image generation for a single model.
 
@@ -167,11 +173,11 @@ class JobExecutor:
 
     def _execute_with_timeout(
         self,
-        handler,
-        model: Dict,
+        handler: Callable[[Dict[str, Any], str, Dict[str, Any]], Dict[str, Any]],
+        model: Dict[str, Any],
         prompt: str,
-        timeout_seconds: int = 180
-    ) -> Dict:
+        timeout_seconds: int = handler_timeout
+    ) -> Dict[str, Any]:
         """
         Execute handler with a timeout using ThreadPoolExecutor.
 

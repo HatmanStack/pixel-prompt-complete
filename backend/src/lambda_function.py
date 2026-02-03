@@ -9,8 +9,14 @@ import random
 import re
 import traceback
 from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 from uuid import uuid4
 import boto3
+
+# Type aliases for Lambda events and responses
+LambdaEvent = Dict[str, Any]
+LambdaContext = Any  # AWS Lambda context object
+ApiResponse = Dict[str, Any]
 
 # Import configuration
 from config import (
@@ -54,14 +60,14 @@ content_filter = ContentFilter()
 prompt_enhancer = PromptEnhancer()
 
 
-def extract_correlation_id(event):
+def extract_correlation_id(event: LambdaEvent) -> str:
     """Extract correlation ID from event headers or generate new one."""
-    headers = event.get('headers', {})
+    headers = event.get('headers', {}) or {}
     correlation_id = headers.get('x-correlation-id') or headers.get('X-Correlation-ID')
     return correlation_id or str(uuid4())
 
 
-def lambda_handler(event, context):
+def lambda_handler(event: LambdaEvent, context: LambdaContext) -> ApiResponse:
     """Main Lambda handler function."""
     correlation_id = extract_correlation_id(event)
 
@@ -110,7 +116,7 @@ def lambda_handler(event, context):
         return response(500, {'error': 'Internal server error'})
 
 
-def handle_generate(event, correlation_id=None):
+def handle_generate(event: LambdaEvent, correlation_id: Optional[str] = None) -> ApiResponse:
     """
     POST /generate - Create new session and generate initial images.
 
@@ -245,7 +251,7 @@ def handle_generate(event, correlation_id=None):
         return response(500, error_responses.internal_server_error())
 
 
-def handle_iterate(event, correlation_id=None):
+def handle_iterate(event: LambdaEvent, correlation_id: Optional[str] = None) -> ApiResponse:
     """
     POST /iterate - Iterate on existing image with new prompt.
 
@@ -388,7 +394,7 @@ def handle_iterate(event, correlation_id=None):
         return response(500, error_responses.internal_server_error())
 
 
-def handle_outpaint(event, correlation_id=None):
+def handle_outpaint(event: LambdaEvent, correlation_id: Optional[str] = None) -> ApiResponse:
     """
     POST /outpaint - Expand image to new aspect ratio.
 
@@ -526,7 +532,7 @@ def handle_outpaint(event, correlation_id=None):
         return response(500, error_responses.internal_server_error())
 
 
-def handle_status(event, correlation_id=None):
+def handle_status(event: LambdaEvent, correlation_id: Optional[str] = None) -> ApiResponse:
     """
     GET /status/{sessionId} - Get session status and results.
 
@@ -554,7 +560,7 @@ def handle_status(event, correlation_id=None):
         return response(500, error_responses.internal_server_error())
 
 
-def handle_enhance(event, correlation_id=None):
+def handle_enhance(event: LambdaEvent, correlation_id: Optional[str] = None) -> ApiResponse:
     """POST /enhance - Enhance prompt using configured LLM."""
     try:
         body = json.loads(event.get('body', '{}'))
@@ -584,7 +590,7 @@ def handle_enhance(event, correlation_id=None):
         return response(500, error_responses.internal_server_error())
 
 
-def handle_gallery_list(event, correlation_id=None):
+def handle_gallery_list(event: LambdaEvent, correlation_id: Optional[str] = None) -> ApiResponse:
     """GET /gallery/list - List all galleries with preview images."""
     try:
         gallery_folders = image_storage.list_galleries()
@@ -621,7 +627,7 @@ def handle_gallery_list(event, correlation_id=None):
         return response(500, {'error': 'Internal server error'})
 
 
-def handle_log_endpoint(event):
+def handle_log_endpoint(event: LambdaEvent) -> ApiResponse:
     """POST /log - Accept frontend error logs."""
     try:
         body = json.loads(event.get('body', '{}'))
@@ -643,7 +649,7 @@ def handle_log_endpoint(event):
         return response(500, {'error': 'Internal server error'})
 
 
-def handle_gallery_detail(event, correlation_id=None):
+def handle_gallery_detail(event: LambdaEvent, correlation_id: Optional[str] = None) -> ApiResponse:
     """GET /gallery/{galleryId} - Get all images from a specific gallery."""
     try:
         path = event.get('rawPath', event.get('path', ''))
@@ -684,7 +690,7 @@ def handle_gallery_detail(event, correlation_id=None):
         return response(500, {'error': 'Internal server error'})
 
 
-def response(status_code, body):
+def response(status_code: int, body: Dict[str, Any]) -> ApiResponse:
     """Helper function to create API Gateway response."""
     return {
         'statusCode': status_code,

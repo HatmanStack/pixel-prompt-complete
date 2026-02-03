@@ -17,14 +17,28 @@ import re
 import requests
 import time
 import warnings
-from typing import Dict, Callable
+from typing import Any, Callable, Dict, List, Union
 from openai import OpenAI
 import boto3
 from google import genai
 from google.genai import types
 
+from config import (
+    bedrock_nova_region, bedrock_sd_region,
+    api_client_timeout, image_download_timeout,
+    bfl_max_poll_attempts, bfl_poll_interval
+)
 
-def sanitize_error_message(error: Exception) -> str:
+# Type aliases for handler contracts
+ModelConfig = Dict[str, Any]
+GenerationParams = Dict[str, Any]
+HandlerResult = Dict[str, Any]
+HandlerFunc = Callable[[ModelConfig, str, GenerationParams], HandlerResult]
+IterateHandlerFunc = Callable[[ModelConfig, bytes, str, List[Dict[str, Any]]], HandlerResult]
+OutpaintHandlerFunc = Callable[[ModelConfig, bytes, str, str], HandlerResult]
+
+
+def sanitize_error_message(error: Union[Exception, str]) -> str:
     """
     Sanitize error messages to remove sensitive information like API keys.
 
@@ -49,7 +63,7 @@ def sanitize_error_message(error: Exception) -> str:
     return error_str
 
 
-def handle_openai(model_config: Dict, prompt: str, _params: Dict) -> Dict:
+def handle_openai(model_config: ModelConfig, prompt: str, _params: GenerationParams) -> HandlerResult:
     """
     Handle image generation for OpenAI (DALL-E 2/3 and gpt-image-1).
 
@@ -64,8 +78,8 @@ def handle_openai(model_config: Dict, prompt: str, _params: Dict) -> Dict:
     try:
         model_id = model_config["id"]
 
-        # Initialize OpenAI client with timeout
-        client = OpenAI(api_key=model_config.get('api_key') or None, timeout=120.0)
+        # Initialize OpenAI client with configurable timeout
+        client = OpenAI(api_key=model_config.get('api_key') or None, timeout=api_client_timeout)
 
         # gpt-image-1 uses different parameters and returns base64 directly
         if model_id == "gpt-image-1":
@@ -101,7 +115,7 @@ def handle_openai(model_config: Dict, prompt: str, _params: Dict) -> Dict:
             image_url = response.data[0].url
 
             # Download image
-            img_response = requests.get(image_url, timeout=30)
+            img_response = requests.get(image_url, timeout=image_download_timeout)
             img_response.raise_for_status()
 
             # Convert to base64
@@ -115,7 +129,7 @@ def handle_openai(model_config: Dict, prompt: str, _params: Dict) -> Dict:
         }
 
     except requests.Timeout:
-        error_msg = "Image download timeout after 30 seconds"
+        error_msg = f"Image download timeout after {image_download_timeout} seconds"
         return {
             'status': 'error',
             'error': error_msg,
@@ -132,7 +146,7 @@ def handle_openai(model_config: Dict, prompt: str, _params: Dict) -> Dict:
         }
 
 
-def handle_google_gemini(model_config: Dict, prompt: str, _params: Dict) -> Dict:
+def handle_google_gemini(model_config: ModelConfig, prompt: str, _params: GenerationParams) -> HandlerResult:
     """
     Handle image generation for Google Gemini 2.0.
 
@@ -192,7 +206,7 @@ def handle_google_gemini(model_config: Dict, prompt: str, _params: Dict) -> Dict
         }
 
 
-def handle_google_imagen(model_config: Dict, prompt: str, _params: Dict) -> Dict:
+def handle_google_imagen(model_config: ModelConfig, prompt: str, _params: GenerationParams) -> HandlerResult:
     """
     Handle image generation for Google Imagen 3.0.
 
@@ -245,7 +259,7 @@ def handle_google_imagen(model_config: Dict, prompt: str, _params: Dict) -> Dict
         }
 
 
-def handle_bedrock_nova(model_config: Dict, prompt: str, params: Dict) -> Dict:
+def handle_bedrock_nova(model_config: ModelConfig, prompt: str, params: GenerationParams) -> HandlerResult:
     """
     Handle image generation for AWS Bedrock Nova Canvas.
 
@@ -263,7 +277,7 @@ def handle_bedrock_nova(model_config: Dict, prompt: str, params: Dict) -> Dict:
         # Note: AWS credentials should be in environment or Lambda execution role
         bedrock = boto3.client(
             service_name='bedrock-runtime',
-            region_name='us-east-1'  # Nova Canvas requires us-east-1
+            region_name=bedrock_nova_region
         )
 
         # Build request body for Nova Canvas
@@ -314,7 +328,7 @@ def handle_bedrock_nova(model_config: Dict, prompt: str, params: Dict) -> Dict:
         }
 
 
-def handle_bedrock_sd(model_config: Dict, prompt: str, params: Dict) -> Dict:
+def handle_bedrock_sd(model_config: ModelConfig, prompt: str, params: GenerationParams) -> HandlerResult:
     """
     Handle image generation for AWS Bedrock Stable Diffusion.
 
@@ -331,7 +345,7 @@ def handle_bedrock_sd(model_config: Dict, prompt: str, params: Dict) -> Dict:
         # Create boto3 client
         bedrock = boto3.client(
             service_name='bedrock-runtime',
-            region_name='us-west-2'  # Stable Diffusion requires us-west-2
+            region_name=bedrock_sd_region
         )
 
         # Build request body for Stable Diffusion
@@ -381,7 +395,7 @@ def handle_bedrock_sd(model_config: Dict, prompt: str, params: Dict) -> Dict:
         }
 
 
-def handle_stability(model_config: Dict, prompt: str, params: Dict) -> Dict:
+def handle_stability(model_config: ModelConfig, prompt: str, params: GenerationParams) -> HandlerResult:
     """
     Handle image generation for Stability AI.
 
@@ -450,7 +464,7 @@ def handle_stability(model_config: Dict, prompt: str, params: Dict) -> Dict:
         }
 
 
-def handle_bfl(model_config: Dict, prompt: str, params: Dict) -> Dict:
+def handle_bfl(model_config: ModelConfig, prompt: str, params: GenerationParams) -> HandlerResult:
     """
     Handle image generation for Black Forest Labs (Flux).
 
@@ -488,10 +502,10 @@ def handle_bfl(model_config: Dict, prompt: str, params: Dict) -> Dict:
             raise ValueError("No job ID returned from BFL API")
 
 
-        # Poll for result (tunable via params)
+        # Poll for result (configurable via environment or params)
         result_url = f"https://api.bfl.ai/v1/get_result?id={job_id}"
-        max_attempts = params.get('max_poll_attempts', 40)  # Default: 40 attempts
-        poll_interval = params.get('poll_interval_seconds', 3)  # Default: 3 seconds
+        max_attempts = params.get('max_poll_attempts', bfl_max_poll_attempts)
+        poll_interval = params.get('poll_interval_seconds', bfl_poll_interval)
         attempt = 0
 
         while attempt < max_attempts:
@@ -537,7 +551,7 @@ def handle_bfl(model_config: Dict, prompt: str, params: Dict) -> Dict:
         }
 
 
-def handle_recraft(model_config: Dict, prompt: str, _params: Dict) -> Dict:
+def handle_recraft(model_config: ModelConfig, prompt: str, _params: GenerationParams) -> HandlerResult:
     """
     Handle image generation for Recraft.
 
@@ -592,7 +606,7 @@ def handle_recraft(model_config: Dict, prompt: str, _params: Dict) -> Dict:
         }
 
 
-def handle_generic(model_config: Dict, prompt: str, _params: Dict) -> Dict:
+def handle_generic(model_config: ModelConfig, prompt: str, _params: GenerationParams) -> HandlerResult:
     """
     Generic fallback handler for unknown providers.
 
@@ -660,7 +674,7 @@ def handle_generic(model_config: Dict, prompt: str, _params: Dict) -> Dict:
         }
 
 
-def get_handler(provider: str) -> Callable:
+def get_handler(provider: str) -> HandlerFunc:
     """
     Get the appropriate handler function for a provider.
 
@@ -693,7 +707,7 @@ def get_handler(provider: str) -> Callable:
 # ITERATION HANDLERS
 # ============================================================================
 
-def iterate_flux(model_config: Dict, source_image: bytes, prompt: str, context: list) -> Dict:
+def iterate_flux(model_config: ModelConfig, source_image: Union[str, bytes], prompt: str, context: List[Dict[str, Any]]) -> HandlerResult:
     """
     Iterate on an image using FLUX Fill API.
 
@@ -773,7 +787,7 @@ def iterate_flux(model_config: Dict, source_image: bytes, prompt: str, context: 
         }
 
 
-def iterate_recraft(model_config: Dict, source_image: bytes, prompt: str, context: list) -> Dict:
+def iterate_recraft(model_config: ModelConfig, source_image: Union[str, bytes], prompt: str, context: List[Dict[str, Any]]) -> HandlerResult:
     """
     Iterate on an image using Recraft imageToImage endpoint.
 
@@ -844,7 +858,7 @@ def iterate_recraft(model_config: Dict, source_image: bytes, prompt: str, contex
         }
 
 
-def iterate_gemini(model_config: Dict, source_image: bytes, prompt: str, context: list) -> Dict:
+def iterate_gemini(model_config: ModelConfig, source_image: Union[str, bytes], prompt: str, context: List[Dict[str, Any]]) -> HandlerResult:
     """
     Iterate on an image using Gemini multi-turn conversation.
 
@@ -919,7 +933,7 @@ def iterate_gemini(model_config: Dict, source_image: bytes, prompt: str, context
         }
 
 
-def iterate_openai(model_config: Dict, source_image: bytes, prompt: str, context: list) -> Dict:
+def iterate_openai(model_config: ModelConfig, source_image: Union[str, bytes], prompt: str, context: List[Dict[str, Any]]) -> HandlerResult:
     """
     Iterate on an image using OpenAI images.edit endpoint.
 
@@ -986,7 +1000,7 @@ def iterate_openai(model_config: Dict, source_image: bytes, prompt: str, context
         }
 
 
-def get_iterate_handler(provider: str) -> Callable:
+def get_iterate_handler(provider: str) -> IterateHandlerFunc:
     """
     Get the appropriate iteration handler for a provider.
 
@@ -1014,7 +1028,7 @@ def get_iterate_handler(provider: str) -> Callable:
 # OUTPAINTING HANDLERS
 # ============================================================================
 
-def outpaint_flux(model_config: Dict, source_image: bytes, preset: str, prompt: str) -> Dict:
+def outpaint_flux(model_config: ModelConfig, source_image: Union[str, bytes], preset: str, prompt: str) -> HandlerResult:
     """
     Expand an image using FLUX Fill with edge mask.
 
@@ -1117,7 +1131,7 @@ def outpaint_flux(model_config: Dict, source_image: bytes, preset: str, prompt: 
         }
 
 
-def outpaint_recraft(model_config: Dict, source_image: bytes, preset: str, prompt: str) -> Dict:
+def outpaint_recraft(model_config: ModelConfig, source_image: Union[str, bytes], preset: str, prompt: str) -> HandlerResult:
     """
     Expand an image using Recraft outpaint endpoint.
 
@@ -1193,7 +1207,7 @@ def outpaint_recraft(model_config: Dict, source_image: bytes, preset: str, promp
         }
 
 
-def outpaint_gemini(model_config: Dict, source_image: bytes, preset: str, prompt: str) -> Dict:
+def outpaint_gemini(model_config: ModelConfig, source_image: Union[str, bytes], preset: str, prompt: str) -> HandlerResult:
     """
     Expand an image using Gemini prompt-based outpainting.
 
@@ -1265,7 +1279,7 @@ def outpaint_gemini(model_config: Dict, source_image: bytes, preset: str, prompt
         }
 
 
-def outpaint_openai(model_config: Dict, source_image: bytes, preset: str, prompt: str) -> Dict:
+def outpaint_openai(model_config: ModelConfig, source_image: Union[str, bytes], preset: str, prompt: str) -> HandlerResult:
     """
     Expand an image using OpenAI images.edit with padded canvas.
 
@@ -1340,7 +1354,7 @@ def outpaint_openai(model_config: Dict, source_image: bytes, preset: str, prompt
         }
 
 
-def get_outpaint_handler(provider: str) -> Callable:
+def get_outpaint_handler(provider: str) -> OutpaintHandlerFunc:
     """
     Get the appropriate outpainting handler for a provider.
 

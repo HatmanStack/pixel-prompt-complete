@@ -22,6 +22,10 @@ class ModelConfig:
 # AWS configuration from Lambda execution environment
 aws_region = os.environ.get('AWS_REGION', 'us-west-2')
 
+# Bedrock-specific regions (some models require specific regions)
+bedrock_nova_region = os.environ.get('BEDROCK_NOVA_REGION', 'us-east-1')
+bedrock_sd_region = os.environ.get('BEDROCK_SD_REGION', 'us-west-2')
+
 # S3 and CloudFront
 s3_bucket = os.environ.get('S3_BUCKET')
 cloudfront_domain = os.environ.get('CLOUDFRONT_DOMAIN')
@@ -131,3 +135,14 @@ def get_model_config_dict(model: ModelConfig) -> Dict:
 
 # Model order for UI display (fixed order)
 MODEL_ORDER = ['flux', 'recraft', 'gemini', 'openai']
+
+# Operational Timeouts (seconds) - configurable via environment
+api_client_timeout = float(os.environ.get('API_CLIENT_TIMEOUT', '120.0'))
+image_download_timeout = int(os.environ.get('IMAGE_DOWNLOAD_TIMEOUT', '30'))
+handler_timeout = int(os.environ.get('HANDLER_TIMEOUT', '180'))
+max_thread_workers = int(os.environ.get('MAX_THREAD_WORKERS', '10'))
+generate_thread_workers = int(os.environ.get('GENERATE_THREAD_WORKERS', '4'))
+
+# BFL polling configuration
+bfl_max_poll_attempts = int(os.environ.get('BFL_MAX_POLL_ATTEMPTS', '40'))
+bfl_poll_interval = int(os.environ.get('BFL_POLL_INTERVAL', '3'))
