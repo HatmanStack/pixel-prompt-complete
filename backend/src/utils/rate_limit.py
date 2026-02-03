@@ -21,6 +21,16 @@ _rate_limit_cache: Dict[str, Any] = {
 CACHE_TTL_SECONDS = 5.0
 
 
+def reset_cache() -> None:
+    """Reset the module-level cache. Used for testing."""
+    global _rate_limit_cache
+    _rate_limit_cache = {
+        'data': None,
+        'timestamp': 0.0,
+        'dirty': False
+    }
+
+
 class RateLimiter:
     """
     S3-based rate limiting for API requests.
