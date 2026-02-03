@@ -8,8 +8,12 @@ import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Dict
+
+from config import handler_timeout, max_thread_workers
 from models.handlers import get_handler
-from config import max_thread_workers, handler_timeout
+
+# Hard cap on thread workers to prevent resource exhaustion
+MAX_THREAD_WORKERS_CAP = 10
 
 
 class JobExecutor:
@@ -50,8 +54,8 @@ class JobExecutor:
         models = self.model_registry.get_all_models()
 
 
-        # Create thread pool with one worker per model, capped at configurable max
-        with ThreadPoolExecutor(max_workers=min(len(models), max_thread_workers)) as executor:
+        # Create thread pool with one worker per model, capped at configurable max and hard limit
+        with ThreadPoolExecutor(max_workers=min(len(models), max_thread_workers, MAX_THREAD_WORKERS_CAP)) as executor:
             # Submit all tasks
             futures = {
                 executor.submit(

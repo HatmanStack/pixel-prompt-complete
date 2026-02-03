@@ -8,7 +8,8 @@ Uses module-level caching to reduce S3 calls during Lambda container reuse.
 import json
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
+
 from botocore.exceptions import ClientError
 
 # Module-level cache for Lambda container reuse

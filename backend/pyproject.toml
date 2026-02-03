@@ -1,3 +1,18 @@
+[project]
+name = "pixel-prompt-backend"
+version = "2.0.0"
+requires-python = ">=3.13"
+
+[project.optional-dependencies]
+dev = [
+    "mypy>=1.13.0",  # Python 3.13 support added in 1.13.0
+    "ruff>=0.8.0",   # Python 3.13 support
+    "pytest>=8.0.0",
+    "pytest-mock>=3.14.0",
+    "moto>=5.0.0",
+    "requests-mock>=1.12.0",
+]
+
 [tool.mypy]
 python_version = "3.13"
 warn_return_any = true
