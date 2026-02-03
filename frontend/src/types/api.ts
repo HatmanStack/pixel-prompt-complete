@@ -158,7 +158,7 @@ export interface ApiError {
 // Legacy Types (for backwards compatibility during transition)
 // ====================
 
-export type JobStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
+export type JobStatus = 'pending' | 'in_progress' | 'completed' | 'partial' | 'failed';
 
 export interface ImageResult {
   model: string;

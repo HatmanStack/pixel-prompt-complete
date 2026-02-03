@@ -172,6 +172,17 @@ Parameters:
     Default: ""
     Description: Comma-separated IP addresses to bypass rate limits
 
+  # AWS Bedrock Configuration
+  BedrockNovaRegion:
+    Type: String
+    Default: "us-east-1"
+    Description: AWS region for Bedrock Nova Canvas (requires us-east-1)
+
+  BedrockSdRegion:
+    Type: String
+    Default: "us-west-2"
+    Description: AWS region for Bedrock Stable Diffusion
+
 Globals:
   Function:
     Tags:
@@ -216,9 +227,30 @@ Resources:
           # S3 and CloudFront
           S3_BUCKET: !Ref PixelPromptBucket
           CLOUDFRONT_DOMAIN: !GetAtt CloudFrontDistribution.DomainName
+          # Bedrock Regions
+          BEDROCK_NOVA_REGION: !Ref BedrockNovaRegion
+          BEDROCK_SD_REGION: !Ref BedrockSdRegion
       Policies:
-        - S3CrudPolicy:
-            BucketName: !Ref PixelPromptBucket
+        - Version: '2012-10-17'
+          Statement:
+            - Sid: S3ReadWriteImages
+              Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+              Resource:
+                - !Sub '${PixelPromptBucket.Arn}/sessions/*'
+                - !Sub '${PixelPromptBucket.Arn}/rate-limit/*'
+                - !Sub '${PixelPromptBucket.Arn}/gallery/*'
+            - Sid: S3ListBucket
+              Effect: Allow
+              Action: s3:ListBucket
+              Resource: !GetAtt PixelPromptBucket.Arn
+              Condition:
+                StringLike:
+                  s3:prefix:
+                    - 'sessions/*'
+                    - 'gallery/*'
       Events:
         GenerateApi:
           Type: HttpApi

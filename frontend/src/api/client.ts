@@ -33,6 +33,9 @@ interface ApiErrorWithMeta extends Error {
   correlationId?: string;
 }
 
+// HTTP status codes that are safe to retry
+const RETRYABLE_STATUS_CODES = [429, 502, 503, 504];
+
 /**
  * Sleep utility for retry backoff
  */
@@ -94,12 +97,21 @@ async function apiFetch<T>(
       throw timeoutError;
     }
 
-    // Retry on network errors (not HTTP errors)
-    if (retryCount < RETRY_CONFIG.maxRetries && !apiError.status) {
-      const delay = Math.min(
+    // Determine if we should retry
+    const isRetryableStatus = apiError.status && RETRYABLE_STATUS_CODES.includes(apiError.status);
+    const isNetworkError = !apiError.status;
+    const shouldRetry = retryCount < RETRY_CONFIG.maxRetries && (isRetryableStatus || isNetworkError);
+
+    if (shouldRetry) {
+      let delay = Math.min(
         RETRY_CONFIG.initialDelay * Math.pow(2, retryCount),
         RETRY_CONFIG.maxDelay
       );
+
+      // Use longer delay for rate limit responses
+      if (apiError.status === 429) {
+        delay = Math.max(delay, 1000);
+      }
 
       await sleep(delay);
 

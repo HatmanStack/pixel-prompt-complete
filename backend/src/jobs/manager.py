@@ -10,10 +10,10 @@ import time
 import uuid
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
+
 from botocore.exceptions import ClientError
 
 from config import MAX_ITERATIONS
-
 
 # Maximum retries for optimistic locking conflicts
 MAX_RETRIES = 3

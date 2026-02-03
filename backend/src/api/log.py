@@ -5,8 +5,8 @@ Accepts frontend error logs and writes them to CloudWatch with structured format
 """
 
 from typing import Dict, Optional
-from utils.logger import StructuredLogger
 
+from utils.logger import StructuredLogger
 
 # Valid log levels
 VALID_LOG_LEVELS = {"ERROR", "WARNING", "INFO", "DEBUG"}

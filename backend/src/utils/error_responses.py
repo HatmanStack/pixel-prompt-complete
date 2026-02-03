@@ -4,7 +4,7 @@ Standardized Error Response Utilities.
 Provides consistent error response format across all API endpoints.
 """
 
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
 
 def error_response(

@@ -33,6 +33,7 @@ function useJobPolling(
   const startTimeRef = useRef<number | null>(null);
   const consecutiveErrorsRef = useRef(0);
   const isMountedRef = useRef(true);
+  const activeJobIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     // Reset mounted flag
@@ -43,8 +44,12 @@ function useJobPolling(
       setJobStatus(null);
       setIsPolling(false);
       setError(null);
+      activeJobIdRef.current = null;
       return;
     }
+
+    // Track active job ID for race condition prevention
+    activeJobIdRef.current = jobId;
 
     // Start polling
     setIsPolling(true);
@@ -67,11 +72,14 @@ function useJobPolling(
           return;
         }
 
-        // Fetch job status
-        const status = await getJobStatus(jobId);
+        // Capture current jobId for race condition check
+        const pollingJobId = jobId;
 
-        // Check again if still mounted
-        if (!isMountedRef.current) {
+        // Fetch job status
+        const status = await getJobStatus(pollingJobId);
+
+        // Check if still mounted and jobId hasn't changed during async call
+        if (!isMountedRef.current || activeJobIdRef.current !== pollingJobId) {
           return;
         }
 
@@ -83,7 +91,6 @@ function useJobPolling(
         // Stop polling if job is complete, partial, or failed
         if (
           status.status === 'completed' ||
-          // @ts-expect-error - 'partial' may be returned by API but not in JobStatus type
           status.status === 'partial' ||
           status.status === 'failed'
         ) {
@@ -127,6 +134,7 @@ function useJobPolling(
     // Cleanup on unmount or when jobId changes
     return () => {
       isMountedRef.current = false;
+      activeJobIdRef.current = null;
       if (pollingTimeoutRef.current) {
         clearTimeout(pollingTimeoutRef.current);
       }
