@@ -33,6 +33,19 @@ module = [
 ]
 ignore_missing_imports = true
 
+[tool.pytest.ini_options]
+markers = [
+    "e2e: E2E tests requiring LocalStack",
+    "slow: slow tests (deselect with -m 'not slow')",
+]
+
+[tool.coverage.run]
+source = ["."]
+omit = ["**/tests/**"]
+
+[tool.coverage.report]
+fail_under = 60
+
 [tool.ruff]
 line-length = 100
 target-version = "py313"
