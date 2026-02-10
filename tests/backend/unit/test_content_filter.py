@@ -117,7 +117,7 @@ class TestContentFilter:
         # 'gore' should NOT match 'gorgeous'
         assert content_filter.check_prompt("a gorgeous sunset") is False
 
-        # 'hate' should NOT match 'hateful' (the word is 'hateful', not 'hate')
+        # 'hate' should NOT match 'fate' (different word)
         assert content_filter.check_prompt("whatever the fate") is False
 
     def test_standalone_blocked_words_still_caught(self):

@@ -40,10 +40,11 @@ const ImageCard: FC<ImageCardProps> = ({
   const [imageError, setImageError] = useState(false);
   const [actionsVisible, setActionsVisible] = useState(false);
 
-  // Reset imageError when image prop changes
+  // Reset imageError and actionsVisible when image or status changes
   useEffect(() => {
     setImageError(false);
-  }, [image]);
+    setActionsVisible(false);
+  }, [image, status]);
 
   const handleImageError = () => {
     setImageError(true);
@@ -92,8 +93,7 @@ const ImageCard: FC<ImageCardProps> = ({
 
   const handleTouchToggle = useCallback(
     (e: TouchEvent<HTMLDivElement>) => {
-      if (isClickable) {
-        e.preventDefault();
+      if (isClickable && e.target === e.currentTarget) {
         setActionsVisible((v) => !v);
       }
     },
@@ -203,12 +203,14 @@ const ImageCard: FC<ImageCardProps> = ({
       `}
       onClick={handleClick}
       onKeyDown={handleKeyDown}
-      onTouchStart={handleTouchToggle}
       role={isClickable ? 'button' : undefined}
       tabIndex={isClickable ? 0 : undefined}
       aria-label={isClickable ? `View ${model || 'image'}` : undefined}
     >
-      <div className="relative w-full pt-[100%] overflow-hidden bg-primary/30">
+      <div
+        className="relative w-full pt-[100%] overflow-hidden bg-primary/30"
+        onTouchStart={handleTouchToggle}
+      >
         {renderContent()}
       </div>
 

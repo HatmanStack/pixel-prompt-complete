@@ -63,7 +63,7 @@ jobs:
       - name: Lint
         run: ruff check backend/src/
       - name: Run tests with coverage
-        run: pytest tests/backend/unit -v --tb=short --cov=. --cov-report=term-missing --cov-fail-under=60
+        run: pytest tests/backend/unit -v --tb=short --cov=backend/src --cov-report=term-missing --cov-fail-under=60
 
   e2e-tests:
     name: E2E Tests
