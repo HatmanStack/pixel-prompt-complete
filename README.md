@@ -9,6 +9,8 @@
 
 <p><b>Serverless text-to-image generation with parallel AI model execution</b></p>
 <p><a href="https://production.d2iujulgl0aoba.amplifyapp.com/">Live Demo</a></p>
+
+** THIS REPO IS IN ACTIVE DEVELOPMENT AND WILL CHANGE OFTEN **
 </div>
 
 ## What is this?
