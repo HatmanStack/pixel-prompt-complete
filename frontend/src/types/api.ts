@@ -78,13 +78,6 @@ export interface SessionGenerateResponse {
   status: string;
 }
 
-// Legacy generate response (for backwards compatibility)
-export interface GenerateResponse {
-  jobId: string;
-  status: JobStatus;
-  message?: string;
-}
-
 export interface IterateResponse {
   sessionId: string;
   model: ModelName;
@@ -155,10 +148,8 @@ export interface ApiError {
 }
 
 // ====================
-// Legacy Types (for backwards compatibility during transition)
+// Gallery Types
 // ====================
-
-export type JobStatus = 'pending' | 'in_progress' | 'completed' | 'partial' | 'failed';
 
 export interface ImageResult {
   model: string;
@@ -167,18 +158,6 @@ export interface ImageResult {
   status: 'success' | 'error';
   error?: string;
 }
-
-export interface Job {
-  jobId: string;
-  status: JobStatus;
-  prompt: string;
-  createdAt: string;
-  completedAt?: string;
-  results: ImageResult[];
-  modelCount: number;
-}
-
-export interface StatusResponse extends Job {}
 
 export interface GalleryPreview {
   id: string;

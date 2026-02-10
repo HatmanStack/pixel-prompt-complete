@@ -9,6 +9,23 @@ import boto3
 from utils.rate_limit import reset_cache as reset_rate_limit_cache
 
 
+def _reset_handler_singletons():
+    """Clear module-level client caches in handlers to ensure test isolation."""
+    import models.handlers as h
+    h._openai_clients.clear()
+    h._genai_clients.clear()
+    h._bedrock_nova_client = None
+    h._bedrock_sd_client = None
+
+
+@pytest.fixture(autouse=True)
+def _reset_singletons():
+    """Auto-reset handler singletons before each test."""
+    _reset_handler_singletons()
+    yield
+    _reset_handler_singletons()
+
+
 @pytest.fixture
 def mock_s3():
     """Mock S3 client for testing storage operations"""

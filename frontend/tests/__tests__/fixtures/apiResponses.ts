@@ -3,7 +3,6 @@
  */
 
 import type {
-  GenerateResponse,
   EnhanceResponse,
   GalleryListResponse,
   GalleryDetailResponse,
@@ -26,7 +25,7 @@ interface MockJobStatus {
   results: MockJobResult[];
 }
 
-export const mockGenerateResponse: GenerateResponse = {
+export const mockGenerateResponse = {
   jobId: 'test-job-123',
   status: 'pending',
   message: 'Job created successfully',

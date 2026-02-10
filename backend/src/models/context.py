@@ -6,8 +6,10 @@ Maintains a rolling 3-iteration context window per model column.
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Any, Dict, List
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+
+from botocore.exceptions import ClientError
 
 logger = logging.getLogger(__name__)
 
@@ -97,23 +99,41 @@ class ContextManager:
         Add entry to context, maintaining window size.
 
         Uses FIFO (first-in-first-out) to keep only the last 3 entries.
-
-        Args:
-            session_id: Session identifier
-            model: Model name
-            entry: ContextEntry to add
+        Retries on ETag conflict (context is append-only so merge is safe).
         """
-        # Load existing context
-        entries = self.get_context(session_id, model)
+        max_retries = 3
+        for _attempt in range(max_retries):
+            key = self._get_context_key(session_id, model)
+            etag = None
 
-        # Add new entry
-        entries.append(entry)
+            try:
+                resp = self.s3.get_object(Bucket=self.bucket, Key=key)
+                etag = resp.get('ETag')
+                data = json.loads(resp['Body'].read().decode('utf-8'))
+                entries = []
+                for item in data.get('window', []):
+                    try:
+                        entries.append(ContextEntry(
+                            iteration=item['iteration'],
+                            prompt=item['prompt'],
+                            image_key=item['imageKey'],
+                            timestamp=item['timestamp'],
+                        ))
+                    except (KeyError, TypeError):
+                        pass
+            except self.s3.exceptions.NoSuchKey:
+                entries = []
+            except (json.JSONDecodeError, Exception):
+                entries = []
 
-        # Maintain window size (FIFO)
-        if len(entries) > self.WINDOW_SIZE:
-            entries = entries[-self.WINDOW_SIZE:]
+            entries.append(entry)
+            if len(entries) > self.WINDOW_SIZE:
+                entries = entries[-self.WINDOW_SIZE:]
 
-        # Save back to S3
+            if self._save_context_conditional(session_id, model, entries, etag):
+                return
+
+        # Last attempt without condition
         self._save_context(session_id, model, entries)
 
     def clear_context(self, session_id: str, model: str) -> None:
@@ -159,9 +179,54 @@ class ContextManager:
         self.s3.put_object(
             Bucket=self.bucket,
             Key=key,
-            Body=json.dumps(data, indent=2),
+            Body=json.dumps(data),
             ContentType='application/json'
         )
+
+    def _save_context_conditional(
+        self,
+        session_id: str,
+        model: str,
+        entries: List[ContextEntry],
+        expected_etag: Optional[str] = None,
+    ) -> bool:
+        """Save context with ETag-based conditional write. Returns True on success."""
+        key = self._get_context_key(session_id, model)
+        data = {
+            'model': model,
+            'sessionId': session_id,
+            'window': [
+                {
+                    'iteration': e.iteration,
+                    'prompt': e.prompt,
+                    'imageKey': e.image_key,
+                    'timestamp': e.timestamp,
+                }
+                for e in entries
+            ],
+        }
+
+        try:
+            put_kwargs = {
+                'Bucket': self.bucket,
+                'Key': key,
+                'Body': json.dumps(data),
+                'ContentType': 'application/json',
+            }
+            if expected_etag:
+                put_kwargs['IfMatch'] = expected_etag
+
+            self.s3.put_object(**put_kwargs)
+            return True
+        except ClientError as e:
+            code = e.response['Error']['Code']
+            if code in ('PreconditionFailed', '412'):
+                return False
+            # If IfMatch not supported, just do unconditional write
+            if 'IfMatch' in str(e):
+                self._save_context(session_id, model, entries)
+                return True
+            raise
 
     def get_context_for_iteration(
         self,
@@ -213,5 +278,5 @@ def create_context_entry(
         iteration=iteration,
         prompt=prompt,
         image_key=image_key,
-        timestamp=datetime.utcnow().isoformat() + 'Z'
+        timestamp=datetime.now(timezone.utc).isoformat()
     )

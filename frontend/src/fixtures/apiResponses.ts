@@ -2,7 +2,7 @@
  * Mock API responses for testing
  */
 
-import type { GenerateResponse, EnhanceResponse, GalleryListResponse } from '@/types';
+import type { EnhanceResponse, GalleryListResponse } from '@/types';
 
 interface MockResult {
   model: string;
@@ -28,7 +28,7 @@ interface MockGalleryDetail {
   total: number;
 }
 
-export const mockGenerateResponse: GenerateResponse = {
+export const mockGenerateResponse = {
   jobId: 'test-job-123',
   status: 'in_progress',
   message: 'Job started',

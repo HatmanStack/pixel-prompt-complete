@@ -128,6 +128,52 @@ class ImageStorage:
             ContentType=content_type
         )
 
+    def upload_image(
+        self,
+        base64_image: str,
+        target: str,
+        model_name: str,
+        prompt: str,
+        iteration: int = None,
+    ) -> str:
+        """
+        Upload a generated image to S3 under sessions prefix with metadata.
+
+        Args:
+            base64_image: Base64-encoded image data
+            target: Target timestamp (groups images together)
+            model_name: Name of the AI model
+            prompt: Text prompt used
+            iteration: Iteration index (optional)
+
+        Returns:
+            S3 key where image is stored
+        """
+        normalized_model = self._normalize_model_name(model_name)
+        timestamp = datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')
+
+        iter_suffix = f"-iter{iteration}" if iteration is not None else ""
+        key = f"sessions/{target}/{normalized_model}-{timestamp}{iter_suffix}.json"
+
+        metadata = {
+            'output': base64_image,
+            'model': model_name,
+            'prompt': prompt,
+            'target': target,
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'NSFW': False,
+        }
+        if iteration is not None:
+            metadata['iteration'] = iteration
+
+        self._put_object_with_retry(
+            key=key,
+            body=json.dumps(metadata),
+            content_type='application/json',
+        )
+
+        return key
+
     def get_image(self, image_key: str) -> Optional[Dict]:
         """
         Get image data from S3.

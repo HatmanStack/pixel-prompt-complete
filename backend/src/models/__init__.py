@@ -1,8 +1,8 @@
 """
 Models package for Pixel Prompt Complete.
-Provides model registry and provider-specific handlers.
+Provides provider-specific handlers and context management.
 """
 
-from .registry import ModelRegistry
+from .handlers import get_handler, get_iterate_handler, get_outpaint_handler
 
-__all__ = ['ModelRegistry']
+__all__ = ['get_handler', 'get_iterate_handler', 'get_outpaint_handler']

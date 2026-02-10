@@ -6,13 +6,10 @@
 import { API_BASE_URL, API_ROUTES, REQUEST_TIMEOUT, RETRY_CONFIG } from './config';
 import { generateCorrelationId } from '../utils/correlation';
 import type {
-  GenerateResponse,
-  StatusResponse,
   EnhanceResponse,
   GalleryListResponse,
   GalleryDetailResponse,
   ApiError,
-  // New session-based types
   Session,
   SessionGenerateResponse,
   IterateResponse,
@@ -230,31 +227,6 @@ export async function getSessionDetail(sessionId: string): Promise<SessionGaller
   });
 }
 
-// ====================
-// Legacy API Methods (for backwards compatibility)
-// ====================
-
-/**
- * Generate images from prompt (legacy)
- */
-export async function generateImages(prompt: string): Promise<GenerateResponse> {
-  return apiFetch<GenerateResponse>(API_ROUTES.GENERATE, {
-    method: 'POST',
-    body: JSON.stringify({
-      prompt,
-    }),
-  });
-}
-
-/**
- * Get job status by job ID (legacy)
- */
-export async function getJobStatus(jobId: string): Promise<StatusResponse> {
-  return apiFetch<StatusResponse>(`${API_ROUTES.STATUS}/${jobId}`, {
-    method: 'GET',
-  });
-}
-
 /**
  * Enhance prompt using LLM
  */
@@ -266,7 +238,7 @@ export async function enhancePrompt(prompt: string): Promise<EnhanceResponse> {
 }
 
 /**
- * List all galleries (legacy)
+ * List all galleries
  */
 export async function listGalleries(): Promise<GalleryListResponse> {
   return apiFetch<GalleryListResponse>(API_ROUTES.GALLERY_LIST, {
@@ -275,7 +247,7 @@ export async function listGalleries(): Promise<GalleryListResponse> {
 }
 
 /**
- * Get gallery details and all images (legacy)
+ * Get gallery details and all images
  */
 export async function getGallery(galleryId: string): Promise<GalleryDetailResponse> {
   return apiFetch<GalleryDetailResponse>(`${API_ROUTES.GALLERY_DETAIL}/${galleryId}`, {
