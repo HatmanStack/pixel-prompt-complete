@@ -24,11 +24,7 @@ interface UseIterationResult {
  * Hook for managing iteration on a single model
  */
 export function useIteration(model: ModelName): UseIterationResult {
-  const {
-    currentSession,
-    checkIterationWarning,
-    iterationWarnings,
-  } = useAppStore();
+  const { currentSession, checkIterationWarning, iterationWarnings } = useAppStore();
 
   const column = currentSession?.models[model];
   const iterationCount = column?.iterations.length ?? 0;
@@ -50,7 +46,7 @@ export function useIteration(model: ModelName): UseIterationResult {
         throw err;
       }
     },
-    [currentSession, model, isAtLimit, isEnabled, checkIterationWarning]
+    [currentSession, model, isAtLimit, isEnabled, checkIterationWarning],
   );
 
   return {
@@ -93,7 +89,7 @@ export function useMultiIterate(): UseMultiIterateResult {
         throw err;
       }
     },
-    [currentSession, selectedModels, clearSelection]
+    [currentSession, selectedModels, clearSelection],
   );
 
   return {
@@ -108,7 +104,7 @@ export function useMultiIterate(): UseMultiIterateResult {
  */
 export function canModelIterate(
   currentSession: ReturnType<typeof useAppStore.getState>['currentSession'],
-  model: ModelName
+  model: ModelName,
 ): boolean {
   if (!currentSession) return false;
 
@@ -123,7 +119,7 @@ export function canModelIterate(
  */
 export function getIterationStatus(
   currentSession: ReturnType<typeof useAppStore.getState>['currentSession'],
-  model: ModelName
+  model: ModelName,
 ): {
   count: number;
   remaining: number;

@@ -2,12 +2,7 @@
  * Store State Types
  */
 
-import type {
-  Session,
-  SessionPreview,
-  ModelName,
-  Iteration,
-} from './api';
+import type { Session, SessionPreview, ModelName, Iteration } from './api';
 
 export type ViewType = 'generation' | 'gallery';
 

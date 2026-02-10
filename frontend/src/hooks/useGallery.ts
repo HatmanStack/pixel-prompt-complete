@@ -126,7 +126,11 @@ function useGallery(): UseGalleryReturn {
       imageBlobUrlsRef.current = [];
 
       const response = await getSessionDetail(galleryId);
-      const detail = response as unknown as { galleryId: string; images: GalleryImage[]; total: number };
+      const detail = response as unknown as {
+        galleryId: string;
+        images: GalleryImage[];
+        total: number;
+      };
 
       // Convert base64 images to blob URLs
       const imagesWithBlobs = ((detail.images || []) as GalleryImage[]).map((img) => {

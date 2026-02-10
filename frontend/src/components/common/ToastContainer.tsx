@@ -38,12 +38,7 @@ export const ToastContainer: FC = () => {
     >
       {toasts.map((toast) => (
         <div key={toast.id} className="pointer-events-auto">
-          <Toast
-            id={toast.id}
-            message={toast.message}
-            type={toast.type}
-            onDismiss={removeToast}
-          />
+          <Toast id={toast.id} message={toast.message} type={toast.type} onDismiss={removeToast} />
         </div>
       ))}
     </div>

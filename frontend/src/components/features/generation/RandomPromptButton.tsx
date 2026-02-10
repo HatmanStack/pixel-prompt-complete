@@ -72,7 +72,9 @@ export const RandomPromptButton: FC<RandomPromptButtonProps> = ({ disabled = fal
       aria-label="Get random prompt inspiration"
       title="Random Prompt (Ctrl+R)"
     >
-      <span className={`text-lg leading-none transition-transform duration-300 ${isAnimating ? 'animate-spin' : ''}`}>
+      <span
+        className={`text-lg leading-none transition-transform duration-300 ${isAnimating ? 'animate-spin' : ''}`}
+      >
         🎲
       </span>
       <span className="whitespace-nowrap">Inspire Me</span>

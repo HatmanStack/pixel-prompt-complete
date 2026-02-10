@@ -11,11 +11,7 @@ interface DesktopLayoutProps {
   className?: string;
 }
 
-export const DesktopLayout: FC<DesktopLayoutProps> = ({
-  gallery,
-  generation,
-  className = '',
-}) => {
+export const DesktopLayout: FC<DesktopLayoutProps> = ({ gallery, generation, className = '' }) => {
   return (
     <div
       className={`

@@ -28,8 +28,7 @@ interface UseSoundReturn {
  * Integrates with UIStore for global mute state
  */
 export function useSound(): UseSoundReturn {
-  const { isMuted, volume, soundsLoaded, toggleMute, setVolume, setSoundsLoaded } =
-    useUIStore();
+  const { isMuted, volume, soundsLoaded, toggleMute, setVolume, setSoundsLoaded } = useUIStore();
 
   const soundsRef = useRef<Record<SoundName, HTMLAudioElement | null>>({
     click: null,
@@ -68,26 +67,22 @@ export function useSound(): UseSoundReturn {
 
     // Cleanup
     return () => {
-      (Object.values(soundsRef.current) as (HTMLAudioElement | null)[]).forEach(
-        (audio) => {
-          if (audio) {
-            audio.pause();
-            audio.src = '';
-          }
+      (Object.values(soundsRef.current) as (HTMLAudioElement | null)[]).forEach((audio) => {
+        if (audio) {
+          audio.pause();
+          audio.src = '';
         }
-      );
+      });
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Update volume when store changes
   useEffect(() => {
-    (Object.values(soundsRef.current) as (HTMLAudioElement | null)[]).forEach(
-      (audio) => {
-        if (audio) {
-          audio.volume = volume;
-        }
+    (Object.values(soundsRef.current) as (HTMLAudioElement | null)[]).forEach((audio) => {
+      if (audio) {
+        audio.volume = volume;
       }
-    );
+    });
   }, [volume]);
 
   // Save mute preference to localStorage
@@ -119,7 +114,7 @@ export function useSound(): UseSoundReturn {
         }
       });
     },
-    [isMuted, soundsLoaded]
+    [isMuted, soundsLoaded],
   );
 
   return {

@@ -25,9 +25,7 @@ export const OutpaintControls: FC<OutpaintControlsProps> = ({ model }) => {
   const { currentSession } = useAppStore();
   const { isAtLimit, isEnabled } = useIteration(model);
 
-  const [selectedPreset, setSelectedPreset] = useState<OutpaintPreset | null>(
-    null
-  );
+  const [selectedPreset, setSelectedPreset] = useState<OutpaintPreset | null>(null);
   const [prompt, setPrompt] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,13 +34,7 @@ export const OutpaintControls: FC<OutpaintControlsProps> = ({ model }) => {
   const latestIteration = column?.iterations.slice(-1)[0];
 
   const handleOutpaint = async () => {
-    if (
-      !currentSession ||
-      !selectedPreset ||
-      !latestIteration ||
-      isAtLimit ||
-      !isEnabled
-    ) {
+    if (!currentSession || !selectedPreset || !latestIteration || isAtLimit || !isEnabled) {
       return;
     }
 
@@ -55,7 +47,7 @@ export const OutpaintControls: FC<OutpaintControlsProps> = ({ model }) => {
         model,
         latestIteration.index,
         selectedPreset,
-        prompt
+        prompt,
       );
       setSelectedPreset(null);
       setPrompt('');
@@ -83,18 +75,14 @@ export const OutpaintControls: FC<OutpaintControlsProps> = ({ model }) => {
 
   return (
     <div className="flex flex-col gap-2 p-2 bg-gray-50 dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700">
-      <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">
-        Expand image:
-      </span>
+      <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">Expand image:</span>
 
       {/* Preset buttons */}
       <div className="flex flex-wrap gap-1">
         {PRESETS.map(({ value, label }) => (
           <button
             key={value}
-            onClick={() =>
-              setSelectedPreset(selectedPreset === value ? null : value)
-            }
+            onClick={() => setSelectedPreset(selectedPreset === value ? null : value)}
             className={`
               px-2 py-1 text-xs rounded
               transition-colors

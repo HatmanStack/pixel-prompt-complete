@@ -19,5 +19,5 @@ createRoot(rootElement).render(
   <StrictMode>
     <App />
     <ToastContainer />
-  </StrictMode>
+  </StrictMode>,
 );

@@ -50,7 +50,7 @@ export const GalleryBrowser: FC<GalleryBrowserProps> = ({ onGallerySelect }) => 
         await loadGallery(gallery.id);
       }
     },
-    [selectedId, clearSelection, loadGallery, onGallerySelect, playSound]
+    [selectedId, clearSelection, loadGallery, onGallerySelect, playSound],
   );
 
   // Notify parent when gallery is loaded

@@ -53,11 +53,7 @@ const Checkbox: FC<{
           stroke="currentColor"
           strokeWidth={3}
         >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M5 13l4 4L19 7"
-          />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
         </svg>
       )}
     </div>
@@ -88,79 +84,75 @@ const DisabledState: FC<{ model: ModelName }> = ({ model }) => (
   </div>
 );
 
-export const ModelColumn: FC<ModelColumnProps> = memo(({
-  model,
-  column,
-  isSelected,
-  onToggleSelect,
-  onImageExpand,
-}) => {
-  const { isAtLimit } = useIteration(model);
+export const ModelColumn: FC<ModelColumnProps> = memo(
+  ({ model, column, isSelected, onToggleSelect, onImageExpand }) => {
+    const { isAtLimit } = useIteration(model);
 
-  if (!column.enabled) {
+    if (!column.enabled) {
+      return (
+        <div className="flex flex-col gap-4 min-w-[250px] max-w-[300px] flex-shrink-0">
+          {/* Header */}
+          <div className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-900 rounded-lg">
+            <h3 className="font-semibold text-gray-900 dark:text-gray-100">
+              {MODEL_DISPLAY_NAMES[model]}
+            </h3>
+          </div>
+
+          <DisabledState model={model} />
+        </div>
+      );
+    }
+
     return (
       <div className="flex flex-col gap-4 min-w-[250px] max-w-[300px] flex-shrink-0">
-        {/* Header */}
-        <div className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-900 rounded-lg">
+        {/* Header with model name and checkbox */}
+        <div className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-900 rounded-lg sticky top-0 z-20">
           <h3 className="font-semibold text-gray-900 dark:text-gray-100">
             {MODEL_DISPLAY_NAMES[model]}
           </h3>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-500 dark:text-gray-400">
+              {column.iterations.length}/{MAX_ITERATIONS}
+            </span>
+            <Checkbox
+              checked={isSelected}
+              onChange={onToggleSelect}
+              aria-label={`Select ${MODEL_DISPLAY_NAMES[model]} for batch editing`}
+            />
+          </div>
         </div>
 
-        <DisabledState model={model} />
+        {/* Iterations list */}
+        <div
+          className="flex flex-col gap-2 overflow-y-auto max-h-[60vh] pr-1 scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600"
+          role="list"
+          aria-label={`${MODEL_DISPLAY_NAMES[model]} iterations`}
+        >
+          {column.iterations.length === 0 ? (
+            <div className="text-sm text-gray-500 dark:text-gray-400 text-center p-4 bg-gray-100 dark:bg-gray-800 rounded-lg">
+              No images yet
+            </div>
+          ) : (
+            column.iterations.map((iteration) => (
+              <div key={iteration.index} role="listitem">
+                <IterationCard
+                  model={model}
+                  iteration={iteration}
+                  onExpand={() => onImageExpand?.(model, iteration)}
+                />
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* Per-column input */}
+        {!isAtLimit && column.enabled && <IterationInput model={model} />}
+
+        {/* Outpaint controls */}
+        <OutpaintControls model={model} />
       </div>
     );
-  }
-
-  return (
-    <div className="flex flex-col gap-4 min-w-[250px] max-w-[300px] flex-shrink-0">
-      {/* Header with model name and checkbox */}
-      <div className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-900 rounded-lg sticky top-0 z-20">
-        <h3 className="font-semibold text-gray-900 dark:text-gray-100">
-          {MODEL_DISPLAY_NAMES[model]}
-        </h3>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-500 dark:text-gray-400">
-            {column.iterations.length}/{MAX_ITERATIONS}
-          </span>
-          <Checkbox
-            checked={isSelected}
-            onChange={onToggleSelect}
-            aria-label={`Select ${MODEL_DISPLAY_NAMES[model]} for batch editing`}
-          />
-        </div>
-      </div>
-
-      {/* Iterations list */}
-      <div
-        className="flex flex-col gap-2 overflow-y-auto max-h-[60vh] pr-1 scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600"
-        role="list"
-        aria-label={`${MODEL_DISPLAY_NAMES[model]} iterations`}
-      >
-        {column.iterations.length === 0 ? (
-          <div className="text-sm text-gray-500 dark:text-gray-400 text-center p-4 bg-gray-100 dark:bg-gray-800 rounded-lg">
-            No images yet
-          </div>
-        ) : (
-          column.iterations.map((iteration) => (
-            <div key={iteration.index} role="listitem">
-              <IterationCard
-                model={model}
-                iteration={iteration}
-                onExpand={() => onImageExpand?.(model, iteration)}
-              />
-            </div>
-          ))
-        )}
-      </div>
-
-      {/* Per-column input */}
-      {!isAtLimit && column.enabled && <IterationInput model={model} />}
-
-      {/* Outpaint controls */}
-      <OutpaintControls model={model} />
-    </div>
-  );
-});
+  },
+);
 
 export default ModelColumn;

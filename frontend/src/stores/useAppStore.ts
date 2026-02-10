@@ -5,12 +5,7 @@
 
 import { create } from 'zustand';
 import type { AppStore, ViewType } from '@/types';
-import type {
-  Session,
-  SessionPreview,
-  ModelName,
-  Iteration,
-} from '@/types';
+import type { Session, SessionPreview, ModelName, Iteration } from '@/types';
 import { MODELS } from '@/types';
 
 const INITIAL_ITERATION_WARNINGS: Record<ModelName, boolean> = {
@@ -53,15 +48,11 @@ export const useAppStore = create<AppStore>((set) => ({
       const column = state.currentSession.models[model];
       if (!column) return state;
 
-      const existingIndex = column.iterations.findIndex(
-        (it) => it.index === iteration.index
-      );
+      const existingIndex = column.iterations.findIndex((it) => it.index === iteration.index);
 
       const newIterations =
         existingIndex >= 0
-          ? column.iterations.map((it, i) =>
-              i === existingIndex ? iteration : it
-            )
+          ? column.iterations.map((it, i) => (i === existingIndex ? iteration : it))
           : [...column.iterations, iteration];
 
       return {
@@ -124,8 +115,7 @@ export const useAppStore = create<AppStore>((set) => ({
   // Gallery Actions
   setSessions: (sessions: SessionPreview[]) => set({ sessions }),
 
-  setSelectedGallerySession: (session: Session | null) =>
-    set({ selectedGallerySession: session }),
+  setSelectedGallerySession: (session: Session | null) => set({ selectedGallerySession: session }),
 
   // Iteration Warning Actions
   checkIterationWarning: (model: ModelName) =>

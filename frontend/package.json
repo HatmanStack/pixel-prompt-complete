@@ -13,7 +13,9 @@
     "test:coverage": "vitest --coverage",
     "test:watch": "vitest --watch",
     "analyze": "vite build && echo 'Bundle analysis saved to dist/stats.html'",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write 'src/**/*.{ts,tsx,js,jsx,css,json}'",
+    "format:check": "prettier --check 'src/**/*.{ts,tsx,js,jsx,css,json}'"
   },
   "dependencies": {
     "react": "^19.2.0",
@@ -42,6 +44,7 @@
     "rollup-plugin-visualizer": "^6.0.5",
     "typescript": "^5.9.3",
     "vite": "^7.2.2",
+    "prettier": "^3.5.3",
     "vitest": "^1.0.4"
   }
 }

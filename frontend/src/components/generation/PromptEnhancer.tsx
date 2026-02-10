@@ -144,9 +144,10 @@ export const PromptEnhancer: FC<PromptEnhancerProps> = ({ disabled = false }) =>
                   border-none rounded-sm
                   cursor-pointer
                   transition-all duration-150
-                  ${!showLong
-                    ? 'text-text bg-accent'
-                    : 'text-text-secondary bg-transparent hover:text-text'
+                  ${
+                    !showLong
+                      ? 'text-text bg-accent'
+                      : 'text-text-secondary bg-transparent hover:text-text'
                   }
                 `}
                 onClick={() => setShowLong(false)}
@@ -161,9 +162,10 @@ export const PromptEnhancer: FC<PromptEnhancerProps> = ({ disabled = false }) =>
                   border-none rounded-sm
                   cursor-pointer
                   transition-all duration-150
-                  ${showLong
-                    ? 'text-text bg-accent'
-                    : 'text-text-secondary bg-transparent hover:text-text'
+                  ${
+                    showLong
+                      ? 'text-text bg-accent'
+                      : 'text-text-secondary bg-transparent hover:text-text'
                   }
                 `}
                 onClick={() => setShowLong(true)}

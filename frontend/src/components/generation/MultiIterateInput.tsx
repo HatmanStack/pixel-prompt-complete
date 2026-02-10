@@ -10,9 +10,7 @@ interface MultiIterateInputProps {
   selectedCount: number;
 }
 
-export const MultiIterateInput: FC<MultiIterateInputProps> = ({
-  selectedCount,
-}) => {
+export const MultiIterateInput: FC<MultiIterateInputProps> = ({ selectedCount }) => {
   const [prompt, setPrompt] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -29,9 +27,7 @@ export const MultiIterateInput: FC<MultiIterateInputProps> = ({
       await iterateSelected(prompt);
       setPrompt('');
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : 'Failed to iterate on selected models'
-      );
+      setError(err instanceof Error ? err.message : 'Failed to iterate on selected models');
     } finally {
       setIsSubmitting(false);
     }

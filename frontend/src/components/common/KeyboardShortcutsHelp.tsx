@@ -23,10 +23,7 @@ interface ShortcutSection {
   items: Shortcut[];
 }
 
-export const KeyboardShortcutsHelp: FC<KeyboardShortcutsHelpProps> = ({
-  isOpen,
-  onClose,
-}) => {
+export const KeyboardShortcutsHelp: FC<KeyboardShortcutsHelpProps> = ({ isOpen, onClose }) => {
   const isMac = useMemo(() => {
     if (typeof navigator !== 'undefined') {
       return navigator.platform?.toUpperCase().includes('MAC') ?? false;
@@ -114,9 +111,7 @@ export const KeyboardShortcutsHelp: FC<KeyboardShortcutsHelpProps> = ({
     >
       <div className="space-y-6">
         <p className="text-sm text-text-secondary">
-          {isMac
-            ? 'macOS shortcuts use ⌘ (Command)'
-            : 'Windows/Linux shortcuts use Ctrl'}
+          {isMac ? 'macOS shortcuts use ⌘ (Command)' : 'Windows/Linux shortcuts use Ctrl'}
         </p>
 
         {shortcuts.map((section) => (
@@ -126,13 +121,8 @@ export const KeyboardShortcutsHelp: FC<KeyboardShortcutsHelpProps> = ({
             </h3>
             <div className="space-y-2">
               {section.items.map((shortcut) => (
-                <div
-                  key={shortcut.action}
-                  className="flex items-center gap-4 py-2"
-                >
-                  <div className="w-32 font-medium text-text">
-                    {shortcut.action}
-                  </div>
+                <div key={shortcut.action} className="flex items-center gap-4 py-2">
+                  <div className="w-32 font-medium text-text">{shortcut.action}</div>
                   <div className="flex items-center gap-1">
                     {shortcut.keys.map((key, index) => (
                       <span key={index} className="flex items-center">
@@ -145,9 +135,7 @@ export const KeyboardShortcutsHelp: FC<KeyboardShortcutsHelpProps> = ({
                       </span>
                     ))}
                   </div>
-                  <div className="flex-1 text-sm text-text-secondary">
-                    {shortcut.description}
-                  </div>
+                  <div className="flex-1 text-sm text-text-secondary">{shortcut.description}</div>
                 </div>
               ))}
             </div>
@@ -156,10 +144,7 @@ export const KeyboardShortcutsHelp: FC<KeyboardShortcutsHelpProps> = ({
 
         <div className="pt-4 border-t border-primary/30">
           <p className="text-sm text-text-secondary">
-            Tip: Press{' '}
-            <kbd className="px-2 py-0.5 bg-primary rounded text-xs font-mono">
-              Esc
-            </kbd>{' '}
+            Tip: Press <kbd className="px-2 py-0.5 bg-primary rounded text-xs font-mono">Esc</kbd>{' '}
             to close this dialog
           </p>
         </div>

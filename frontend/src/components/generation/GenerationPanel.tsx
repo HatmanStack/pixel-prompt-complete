@@ -18,11 +18,7 @@ import { MultiIterateInput } from './MultiIterateInput';
 import GalleryBrowser from '@/components/gallery/GalleryBrowser';
 import { ErrorBoundary } from '@/components/features/errors/ErrorBoundary';
 import { ImageModal } from '@/components/features/generation/ImageModal';
-import type {
-  ModelName,
-  ModelColumn as ModelColumnType,
-  Iteration,
-} from '@/types';
+import type { ModelName, ModelColumn as ModelColumnType, Iteration } from '@/types';
 import { MODELS } from '@/types';
 
 interface ApiError extends Error {
@@ -88,10 +84,7 @@ const ProgressBar: FC<{ session: ReturnType<typeof useAppStore.getState>['curren
           style={{ width: `${percent}%` }}
         />
       </div>
-      <p
-        className="text-sm text-gray-600 dark:text-gray-400 text-center m-0"
-        aria-live="polite"
-      >
+      <p className="text-sm text-gray-600 dark:text-gray-400 text-center m-0" aria-live="polite">
         {text}
       </p>
     </div>
@@ -101,10 +94,7 @@ const ProgressBar: FC<{ session: ReturnType<typeof useAppStore.getState>['curren
 /**
  * Error banner component
  */
-const ErrorBanner: FC<{ error: string; onDismiss: () => void }> = ({
-  error,
-  onDismiss,
-}) => (
+const ErrorBanner: FC<{ error: string; onDismiss: () => void }> = ({ error, onDismiss }) => (
   <div
     className="
       flex items-center gap-4 p-4
@@ -155,10 +145,9 @@ export const GenerationPanel: FC = () => {
   } | null>(null);
 
   // Poll session status when we have a session ID
-  const { error: pollingError } = useSessionPolling(
-    currentSession?.sessionId ?? null,
-    { enabled: isGenerating }
-  );
+  const { error: pollingError } = useSessionPolling(currentSession?.sessionId ?? null, {
+    enabled: isGenerating,
+  });
 
   // Handle polling errors
   useEffect(() => {
@@ -208,7 +197,7 @@ export const GenerationPanel: FC = () => {
               acc[model] = createEmptyColumn(model);
               return acc;
             },
-            {} as Record<ModelName, ModelColumnType>
+            {} as Record<ModelName, ModelColumnType>,
           ),
         };
         setCurrentSession(initialSession);
@@ -227,13 +216,11 @@ export const GenerationPanel: FC = () => {
         setErrorMessage(msg);
         showError(msg);
       } else if (error.status === 400 && error.message?.includes('filter')) {
-        const msg =
-          'Prompt contains inappropriate content. Please try a different prompt.';
+        const msg = 'Prompt contains inappropriate content. Please try a different prompt.';
         setErrorMessage(msg);
         showError(msg);
       } else {
-        const msg =
-          error.message || 'Failed to start generation. Please try again.';
+        const msg = error.message || 'Failed to start generation. Please try again.';
         setErrorMessage(msg);
         showError(msg);
       }
@@ -293,22 +280,16 @@ export const GenerationPanel: FC = () => {
 
   // Legacy gallery handler - for backwards compatibility
   const handleGallerySelect = (
-    gallery: { id: string; images: { model: string; url?: string }[] } | null
+    gallery: { id: string; images: { model: string; url?: string }[] } | null,
   ) => {
     // Legacy handler - can be extended to load sessions in future
     console.log('Gallery selected:', gallery?.id);
   };
 
   return (
-    <article
-      className="w-full flex flex-col gap-8 md:gap-6"
-      aria-label="Image Generation"
-    >
+    <article className="w-full flex flex-col gap-8 md:gap-6" aria-label="Image Generation">
       {/* Input Section */}
-      <section
-        className="flex flex-col gap-6 md:gap-4"
-        aria-labelledby="prompt-section-heading"
-      >
+      <section className="flex flex-col gap-6 md:gap-4" aria-labelledby="prompt-section-heading">
         <h2 id="prompt-section-heading" className="sr-only">
           Create Your Image
         </h2>
@@ -340,10 +321,7 @@ export const GenerationPanel: FC = () => {
 
         {/* Error Message */}
         {errorMessage && (
-          <ErrorBanner
-            error={errorMessage}
-            onDismiss={() => setErrorMessage(null)}
-          />
+          <ErrorBanner error={errorMessage} onDismiss={() => setErrorMessage(null)} />
         )}
 
         {/* Progress */}

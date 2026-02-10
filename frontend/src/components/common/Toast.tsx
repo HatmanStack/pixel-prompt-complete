@@ -76,11 +76,7 @@ export const Toast: FC<ToastProps> = ({ id, message, type, onDismiss }) => {
           className="w-4 h-4"
           aria-hidden="true"
         >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M6 18L18 6M6 6l12 12"
-          />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
         </svg>
       </button>
     </div>
