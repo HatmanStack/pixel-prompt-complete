@@ -4,8 +4,33 @@ Loads 4 fixed model configurations with enable/disable support.
 """
 
 import os
+import warnings
 from dataclasses import dataclass
 from typing import Dict, List
+
+
+def _safe_int(env_var: str, default: int) -> int:
+    """Parse int from env var, returning default and warning on bad input."""
+    raw = os.environ.get(env_var)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except (ValueError, TypeError):
+        warnings.warn(f"Invalid integer for {env_var}={raw!r}, using default {default}", stacklevel=2)
+        return default
+
+
+def _safe_float(env_var: str, default: float) -> float:
+    """Parse float from env var, returning default and warning on bad input."""
+    raw = os.environ.get(env_var)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except (ValueError, TypeError):
+        warnings.warn(f"Invalid float for {env_var}={raw!r}, using default {default}", stacklevel=2)
+        return default
 
 
 @dataclass
@@ -29,10 +54,14 @@ bedrock_sd_region = os.environ.get('BEDROCK_SD_REGION', 'us-west-2')
 # S3 and CloudFront
 s3_bucket = os.environ.get('S3_BUCKET')
 cloudfront_domain = os.environ.get('CLOUDFRONT_DOMAIN')
+if s3_bucket is None:
+    warnings.warn("S3_BUCKET not set — storage operations will fail", stacklevel=1)
+if cloudfront_domain is None:
+    warnings.warn("CLOUDFRONT_DOMAIN not set — CDN URLs will be malformed", stacklevel=1)
 
 # Rate limiting
-global_limit = int(os.environ.get('GLOBAL_LIMIT', 1000))
-ip_limit = int(os.environ.get('IP_LIMIT', 50))
+global_limit = _safe_int('GLOBAL_LIMIT', 1000)
+ip_limit = _safe_int('IP_LIMIT', 50)
 ip_include_str = os.environ.get('IP_INCLUDE', '')
 ip_include = [ip.strip() for ip in ip_include_str.split(',') if ip.strip()]
 
@@ -137,12 +166,12 @@ def get_model_config_dict(model: ModelConfig) -> Dict:
 MODEL_ORDER = ['flux', 'recraft', 'gemini', 'openai']
 
 # Operational Timeouts (seconds) - configurable via environment
-api_client_timeout = float(os.environ.get('API_CLIENT_TIMEOUT', '120.0'))
-image_download_timeout = int(os.environ.get('IMAGE_DOWNLOAD_TIMEOUT', '30'))
-handler_timeout = int(os.environ.get('HANDLER_TIMEOUT', '180'))
-max_thread_workers = int(os.environ.get('MAX_THREAD_WORKERS', '10'))
-generate_thread_workers = int(os.environ.get('GENERATE_THREAD_WORKERS', '4'))
+api_client_timeout = _safe_float('API_CLIENT_TIMEOUT', 120.0)
+image_download_timeout = _safe_int('IMAGE_DOWNLOAD_TIMEOUT', 30)
+handler_timeout = _safe_int('HANDLER_TIMEOUT', 180)
+max_thread_workers = _safe_int('MAX_THREAD_WORKERS', 10)
+generate_thread_workers = _safe_int('GENERATE_THREAD_WORKERS', 4)
 
 # BFL polling configuration
-bfl_max_poll_attempts = int(os.environ.get('BFL_MAX_POLL_ATTEMPTS', '40'))
-bfl_poll_interval = int(os.environ.get('BFL_POLL_INTERVAL', '3'))
+bfl_max_poll_attempts = _safe_int('BFL_MAX_POLL_ATTEMPTS', 40)
+bfl_poll_interval = _safe_int('BFL_POLL_INTERVAL', 3)

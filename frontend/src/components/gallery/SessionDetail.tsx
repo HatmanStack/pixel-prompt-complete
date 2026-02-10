@@ -4,7 +4,7 @@
  */
 
 import { useEffect, useState, type FC } from 'react';
-import { getSessionDetail } from '@/api/client';
+import { getSessionStatus } from '@/api/client';
 import { ModelColumn } from '@/components/generation/ModelColumn';
 import { ImageModal } from '@/components/features/generation/ImageModal';
 import Modal from '@/components/common/Modal';
@@ -46,9 +46,9 @@ export const SessionDetail: FC<SessionDetailProps> = ({ sessionId, onClose }) =>
       try {
         setLoading(true);
         setError(null);
-        const response = await getSessionDetail(sessionId);
+        const session = await getSessionStatus(sessionId);
         if (mounted) {
-          setSession(response.session);
+          setSession(session);
         }
       } catch (err) {
         if (mounted) {
@@ -99,9 +99,7 @@ export const SessionDetail: FC<SessionDetailProps> = ({ sessionId, onClose }) =>
       <Modal isOpen onClose={onClose} ariaLabel="Error loading session">
         <div className="flex flex-col items-center gap-4 p-8 text-center">
           <span className="text-4xl">⚠</span>
-          <p className="text-lg font-semibold text-red-600 dark:text-red-400">
-            {error}
-          </p>
+          <p className="text-lg font-semibold text-red-600 dark:text-red-400">{error}</p>
           <button
             onClick={onClose}
             className="px-4 py-2 bg-accent text-white rounded hover:bg-accent/90"
@@ -133,11 +131,7 @@ export const SessionDetail: FC<SessionDetailProps> = ({ sessionId, onClose }) =>
 
   return (
     <>
-      <Modal
-        isOpen
-        onClose={onClose}
-        ariaLabel={`Session: ${session.prompt}`}
-      >
+      <Modal isOpen onClose={onClose} ariaLabel={`Session: ${session.prompt}`}>
         <div className="flex flex-col gap-4 max-w-[95vw] max-h-[90vh]">
           {/* Header */}
           <div className="flex flex-col gap-2 p-4 border-b border-gray-200 dark:border-gray-700">

@@ -87,8 +87,8 @@ export const SessionCard: FC<SessionCardProps> = ({ session, onClick }) => {
         {session.prompt}
       </p>
       <p className="text-xs text-gray-500 dark:text-gray-400">
-        {session.totalIterations} iteration{session.totalIterations !== 1 ? 's' : ''}{' '}
-        · {formatDate(session.createdAt)}
+        {session.totalIterations} iteration{session.totalIterations !== 1 ? 's' : ''} ·{' '}
+        {formatDate(session.createdAt)}
       </p>
     </div>
   );

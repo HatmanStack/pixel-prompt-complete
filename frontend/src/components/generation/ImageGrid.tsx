@@ -77,7 +77,7 @@ export const ImageGrid: FC<ImageGridProps> = ({ images, modelNames = [] }) => {
         setModalOpen(true);
       }
     },
-    [completedImages, playSound]
+    [completedImages, playSound],
   );
 
   // Memoize handleCloseModal callback
@@ -163,9 +163,7 @@ export const ImageGrid: FC<ImageGridProps> = ({ images, modelNames = [] }) => {
             disabled={isDownloading}
             aria-label={`Download all ${completedImages.length} images`}
           >
-            {isDownloading
-              ? '⏳ Downloading...'
-              : `⬇ Download All (${completedImages.length})`}
+            {isDownloading ? '⏳ Downloading...' : `⬇ Download All (${completedImages.length})`}
           </button>
         </div>
       )}

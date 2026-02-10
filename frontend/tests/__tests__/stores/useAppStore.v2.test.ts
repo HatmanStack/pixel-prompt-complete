@@ -73,11 +73,6 @@ describe('useAppStore - Session-based state', () => {
         gemini: false,
         openai: false,
       },
-      // Legacy state
-      currentJob: null,
-      generatedImages: Array(9).fill(null),
-      selectedGallery: null,
-      galleries: [],
       currentView: 'generation',
     });
   });

@@ -7,7 +7,9 @@ iteration, outpainting, and session status.
 import json
 import random
 import re
+import time
 import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from uuid import uuid4
@@ -21,6 +23,7 @@ from config import (
     MAX_ITERATIONS,
     MODELS,
     cloudfront_domain,
+    generate_thread_workers,
     get_enabled_models,
     get_model,
     get_model_config_dict,
@@ -63,6 +66,9 @@ content_filter = ContentFilter()
 
 # Prompt enhancer
 prompt_enhancer = PromptEnhancer()
+
+# Module-level thread pool for Lambda container reuse
+_executor = ThreadPoolExecutor(max_workers=generate_thread_workers)
 
 
 def extract_correlation_id(event: LambdaEvent) -> str:
@@ -116,8 +122,11 @@ def lambda_handler(event: LambdaEvent, context: LambdaContext) -> ApiResponse:
             return response(404, {'error': 'Not found', 'path': path, 'method': method})
 
     except Exception as e:
-        StructuredLogger.error(f"Error in lambda_handler: {str(e)}", correlation_id=correlation_id)
-        traceback.print_exc()
+        StructuredLogger.error(
+            f"Error in lambda_handler: {e}",
+            correlation_id=correlation_id,
+            traceback=traceback.format_exc(),
+        )
         return response(500, {'error': 'Internal server error'})
 
 
@@ -168,10 +177,6 @@ def handle_generate(event: LambdaEvent, correlation_id: Optional[str] = None) ->
             sessionId=session_id,
             models=enabled_model_names
         )
-
-        # Generate initial images for all enabled models in parallel
-        import time
-        from concurrent.futures import ThreadPoolExecutor, as_completed
 
         results = {}
         target = datetime.now(timezone.utc).strftime('%Y-%m-%d-%H-%M-%S')
@@ -232,15 +237,14 @@ def handle_generate(event: LambdaEvent, correlation_id: Optional[str] = None) ->
             except Exception as e:
                 return model_name, {'status': 'error', 'error': str(e)}
 
-        # Execute in parallel
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            futures = {
-                executor.submit(generate_for_model, model): model
-                for model in enabled_models
-            }
-            for future in as_completed(futures):
-                model_name, result = future.result()
-                results[model_name] = result
+        # Execute in parallel using module-level executor
+        futures = {
+            _executor.submit(generate_for_model, model): model
+            for model in enabled_models
+        }
+        for future in as_completed(futures):
+            model_name, result = future.result()
+            results[model_name] = result
 
         return response(200, {
             'sessionId': session_id,
@@ -251,8 +255,11 @@ def handle_generate(event: LambdaEvent, correlation_id: Optional[str] = None) ->
     except json.JSONDecodeError:
         return response(400, error_responses.invalid_json())
     except Exception as e:
-        StructuredLogger.error(f"Error in handle_generate: {str(e)}", correlation_id=correlation_id)
-        traceback.print_exc()
+        StructuredLogger.error(
+            f"Error in handle_generate: {e}",
+            correlation_id=correlation_id,
+            traceback=traceback.format_exc(),
+        )
         return response(500, error_responses.internal_server_error())
 
 
@@ -334,7 +341,6 @@ def handle_iterate(event: LambdaEvent, correlation_id: Optional[str] = None) -> 
         # Get context
         context = context_manager.get_context_for_iteration(session_id, model_name)
 
-        import time
         start_time = time.time()
 
         # Add iteration
@@ -394,8 +400,11 @@ def handle_iterate(event: LambdaEvent, correlation_id: Optional[str] = None) -> 
     except json.JSONDecodeError:
         return response(400, error_responses.invalid_json())
     except Exception as e:
-        StructuredLogger.error(f"Error in handle_iterate: {str(e)}", correlation_id=correlation_id)
-        traceback.print_exc()
+        StructuredLogger.error(
+            f"Error in handle_iterate: {e}",
+            correlation_id=correlation_id,
+            traceback=traceback.format_exc(),
+        )
         return response(500, error_responses.internal_server_error())
 
 
@@ -472,7 +481,6 @@ def handle_outpaint(event: LambdaEvent, correlation_id: Optional[str] = None) ->
 
         source_image = source_data['output']  # base64
 
-        import time
         start_time = time.time()
 
         # Add iteration (outpaint)
@@ -532,8 +540,11 @@ def handle_outpaint(event: LambdaEvent, correlation_id: Optional[str] = None) ->
     except json.JSONDecodeError:
         return response(400, error_responses.invalid_json())
     except Exception as e:
-        StructuredLogger.error(f"Error in handle_outpaint: {str(e)}", correlation_id=correlation_id)
-        traceback.print_exc()
+        StructuredLogger.error(
+            f"Error in handle_outpaint: {e}",
+            correlation_id=correlation_id,
+            traceback=traceback.format_exc(),
+        )
         return response(500, error_responses.internal_server_error())
 
 
@@ -560,8 +571,11 @@ def handle_status(event: LambdaEvent, correlation_id: Optional[str] = None) -> A
         return response(200, session)
 
     except Exception as e:
-        StructuredLogger.error(f"Error in handle_status: {str(e)}", correlation_id=correlation_id)
-        traceback.print_exc()
+        StructuredLogger.error(
+            f"Error in handle_status: {e}",
+            correlation_id=correlation_id,
+            traceback=traceback.format_exc(),
+        )
         return response(500, error_responses.internal_server_error())
 
 
@@ -590,8 +604,11 @@ def handle_enhance(event: LambdaEvent, correlation_id: Optional[str] = None) -> 
     except json.JSONDecodeError:
         return response(400, error_responses.invalid_json())
     except Exception as e:
-        StructuredLogger.error(f"Error in handle_enhance: {str(e)}", correlation_id=correlation_id)
-        traceback.print_exc()
+        StructuredLogger.error(
+            f"Error in handle_enhance: {e}",
+            correlation_id=correlation_id,
+            traceback=traceback.format_exc(),
+        )
         return response(500, error_responses.internal_server_error())
 
 
@@ -600,8 +617,7 @@ def handle_gallery_list(event: LambdaEvent, correlation_id: Optional[str] = None
     try:
         gallery_folders = image_storage.list_galleries()
 
-        galleries = []
-        for folder in gallery_folders:
+        def _build_gallery_entry(folder):
             all_images = image_storage.list_gallery_images(folder)
             thumbnails = [img for img in all_images if '-thumb.json' in img]
             images = [img for img in all_images if '-thumb.json' not in img]
@@ -618,17 +634,36 @@ def handle_gallery_list(event: LambdaEvent, correlation_id: Optional[str] = None
             except (IndexError, ValueError):
                 timestamp_str = folder
 
-            galleries.append({
+            return {
                 'id': folder,
                 'timestamp': timestamp_str,
                 'previewData': preview_data,
-                'imageCount': len(images)
-            })
+                'imageCount': len(images),
+            }
+
+        # Fetch gallery entries in parallel
+        galleries = []
+        futures = {_executor.submit(_build_gallery_entry, f): f for f in gallery_folders}
+        for future in as_completed(futures):
+            try:
+                galleries.append(future.result())
+            except Exception as e:
+                StructuredLogger.warning(
+                    f"Failed to load gallery {futures[future]}: {e}",
+                    correlation_id=correlation_id,
+                )
+
+        # Sort by ID (timestamp) descending
+        galleries.sort(key=lambda g: g['id'], reverse=True)
 
         return response(200, {'galleries': galleries, 'total': len(galleries)})
 
-    except Exception:
-        traceback.print_exc()
+    except Exception as e:
+        StructuredLogger.error(
+            f"Error in handle_gallery_list: {e}",
+            correlation_id=correlation_id,
+            traceback=traceback.format_exc(),
+        )
         return response(500, {'error': 'Internal server error'})
 
 
@@ -649,8 +684,11 @@ def handle_log_endpoint(event: LambdaEvent) -> ApiResponse:
 
     except json.JSONDecodeError:
         return response(400, {'error': 'Invalid JSON in request body'})
-    except Exception:
-        traceback.print_exc()
+    except Exception as e:
+        StructuredLogger.error(
+            f"Error in handle_log_endpoint: {e}",
+            traceback=traceback.format_exc(),
+        )
         return response(500, {'error': 'Internal server error'})
 
 
@@ -671,27 +709,45 @@ def handle_gallery_detail(event: LambdaEvent, correlation_id: Optional[str] = No
 
         image_keys = image_storage.list_gallery_images(gallery_id)
 
-        images = []
-        for key in image_keys:
+        def _load_image(key):
             metadata = image_storage.get_image(key)
             if metadata:
-                images.append({
+                return {
                     'key': key,
                     'url': image_storage.get_cloudfront_url(key),
                     'model': metadata.get('model', 'Unknown'),
                     'prompt': metadata.get('prompt', ''),
                     'timestamp': metadata.get('timestamp'),
-                    'output': metadata.get('output')
-                })
+                    'output': metadata.get('output'),
+                }
+            return None
+
+        # Fetch image metadata in parallel
+        images = []
+        futures = {_executor.submit(_load_image, key): key for key in image_keys}
+        for future in as_completed(futures):
+            try:
+                result = future.result()
+                if result:
+                    images.append(result)
+            except Exception as e:
+                StructuredLogger.warning(
+                    f"Failed to load image {futures[future]}: {e}",
+                    correlation_id=correlation_id,
+                )
 
         return response(200, {
             'galleryId': gallery_id,
             'images': images,
-            'total': len(images)
+            'total': len(images),
         })
 
-    except Exception:
-        traceback.print_exc()
+    except Exception as e:
+        StructuredLogger.error(
+            f"Error in handle_gallery_detail: {e}",
+            correlation_id=correlation_id,
+            traceback=traceback.format_exc(),
+        )
         return response(500, {'error': 'Internal server error'})
 
 

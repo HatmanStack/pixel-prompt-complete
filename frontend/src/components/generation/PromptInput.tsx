@@ -134,7 +134,10 @@ export const PromptInput: FC<PromptInputProps> = ({
           {prompt.length} / {maxLength}
         </span>
 
-        <span id="prompt-hint" className="text-xs text-text-secondary/70 text-right hidden md:block">
+        <span
+          id="prompt-hint"
+          className="text-xs text-text-secondary/70 text-right hidden md:block"
+        >
           Press Ctrl+Enter to generate • Esc to clear
         </span>
       </div>

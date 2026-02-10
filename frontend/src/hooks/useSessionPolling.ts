@@ -23,7 +23,7 @@ interface UseSessionPollingResult {
 
 export function useSessionPolling(
   sessionId: string | null,
-  options: UseSessionPollingOptions = {}
+  options: UseSessionPollingOptions = {},
 ): UseSessionPollingResult {
   const { intervalMs = DEFAULT_INTERVAL_MS, enabled = true } = options;
 

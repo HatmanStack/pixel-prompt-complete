@@ -35,23 +35,19 @@ export const ErrorFallback: FC<ErrorFallbackProps> = ({
         <div className="text-6xl mb-4">⚠️</div>
 
         {/* Title */}
-        <h2 className="text-2xl font-display text-error mb-3">
-          Something went wrong
-        </h2>
+        <h2 className="text-2xl font-display text-error mb-3">Something went wrong</h2>
 
         {/* Message */}
         <p className="text-text-secondary mb-6">
-          We encountered an unexpected error. Please try refreshing the page or
-          contact support if the problem persists.
+          We encountered an unexpected error. Please try refreshing the page or contact support if
+          the problem persists.
         </p>
 
         {/* Correlation ID */}
         {correlationId && (
           <p className="text-sm text-text-secondary mb-6">
             Error ID:{' '}
-            <code className="px-2 py-0.5 bg-secondary rounded text-xs">
-              {correlationId}
-            </code>
+            <code className="px-2 py-0.5 bg-secondary rounded text-xs">{correlationId}</code>
           </p>
         )}
 

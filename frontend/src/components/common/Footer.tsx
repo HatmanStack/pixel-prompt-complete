@@ -27,19 +27,12 @@ export const Footer: FC<FooterProps> = ({ className = '' }) => {
           </h4>
           <div className="flex flex-wrap gap-3 justify-center sm:justify-start text-sm text-text-secondary">
             <span className="flex items-center gap-1">
-              <kbd className="px-2 py-0.5 bg-primary rounded text-xs font-mono">
-                Ctrl
-              </kbd>
-              +
-              <kbd className="px-2 py-0.5 bg-primary rounded text-xs font-mono">
-                Enter
-              </kbd>
+              <kbd className="px-2 py-0.5 bg-primary rounded text-xs font-mono">Ctrl</kbd>+
+              <kbd className="px-2 py-0.5 bg-primary rounded text-xs font-mono">Enter</kbd>
               <span className="ml-1">Generate</span>
             </span>
             <span className="flex items-center gap-1">
-              <kbd className="px-2 py-0.5 bg-primary rounded text-xs font-mono">
-                Esc
-              </kbd>
+              <kbd className="px-2 py-0.5 bg-primary rounded text-xs font-mono">Esc</kbd>
               <span className="ml-1">Clear prompt</span>
             </span>
           </div>

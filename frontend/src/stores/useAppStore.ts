@@ -1,23 +1,12 @@
 /**
  * App Store
  * Main application state using Zustand
- * Supports both new session-based state and legacy job-based state
  */
 
 import { create } from 'zustand';
 import type { AppStore, ViewType } from '@/types';
-import type {
-  Job,
-  ImageResult,
-  GalleryPreview,
-  Session,
-  SessionPreview,
-  ModelName,
-  Iteration,
-} from '@/types';
+import type { Session, SessionPreview, ModelName, Iteration } from '@/types';
 import { MODELS } from '@/types';
-
-const INITIAL_IMAGES: (ImageResult | null)[] = Array(9).fill(null);
 
 const INITIAL_ITERATION_WARNINGS: Record<ModelName, boolean> = {
   flux: false,
@@ -27,9 +16,7 @@ const INITIAL_ITERATION_WARNINGS: Record<ModelName, boolean> = {
 };
 
 export const useAppStore = create<AppStore>((set) => ({
-  // ====================
-  // New Session-based State
-  // ====================
+  // Session state
   currentSession: null,
   isGenerating: false,
   prompt: '',
@@ -38,30 +25,20 @@ export const useAppStore = create<AppStore>((set) => ({
   selectedModels: new Set<ModelName>(),
   isMultiSelectMode: false,
 
-  // Gallery state (new)
+  // Gallery state
   sessions: [],
   selectedGallerySession: null,
 
   // Iteration warnings
   iterationWarnings: INITIAL_ITERATION_WARNINGS,
 
-  // ====================
-  // Legacy State
-  // ====================
-  currentJob: null,
-  generatedImages: INITIAL_IMAGES,
-  selectedGallery: null,
-  galleries: [],
+  // View
   currentView: 'generation' as ViewType,
 
-  // ====================
   // Prompt Actions
-  // ====================
   setPrompt: (prompt: string) => set({ prompt }),
 
-  // ====================
-  // New Session Actions
-  // ====================
+  // Session Actions
   setCurrentSession: (session: Session | null) => set({ currentSession: session }),
 
   updateModelIteration: (model: ModelName, iteration: Iteration) =>
@@ -71,17 +48,11 @@ export const useAppStore = create<AppStore>((set) => ({
       const column = state.currentSession.models[model];
       if (!column) return state;
 
-      // Find existing iteration index
-      const existingIndex = column.iterations.findIndex(
-        (it) => it.index === iteration.index
-      );
+      const existingIndex = column.iterations.findIndex((it) => it.index === iteration.index);
 
-      // Create new iterations array immutably
       const newIterations =
         existingIndex >= 0
-          ? column.iterations.map((it, i) =>
-              i === existingIndex ? iteration : it
-            )
+          ? column.iterations.map((it, i) => (i === existingIndex ? iteration : it))
           : [...column.iterations, iteration];
 
       return {
@@ -108,9 +79,7 @@ export const useAppStore = create<AppStore>((set) => ({
       iterationWarnings: INITIAL_ITERATION_WARNINGS,
     }),
 
-  // ====================
   // Selection Actions
-  // ====================
   toggleModelSelection: (model: ModelName) =>
     set((state) => {
       const newSelection = new Set(state.selectedModels);
@@ -143,17 +112,12 @@ export const useAppStore = create<AppStore>((set) => ({
       selectedModels: enabled ? state.selectedModels : new Set<ModelName>(),
     })),
 
-  // ====================
-  // Gallery Actions (New)
-  // ====================
+  // Gallery Actions
   setSessions: (sessions: SessionPreview[]) => set({ sessions }),
 
-  setSelectedGallerySession: (session: Session | null) =>
-    set({ selectedGallerySession: session }),
+  setSelectedGallerySession: (session: Session | null) => set({ selectedGallerySession: session }),
 
-  // ====================
   // Iteration Warning Actions
-  // ====================
   checkIterationWarning: (model: ModelName) =>
     set((state) => {
       const column = state.currentSession?.models[model];
@@ -176,44 +140,15 @@ export const useAppStore = create<AppStore>((set) => ({
       },
     })),
 
-  // ====================
-  // Legacy Job Actions
-  // ====================
-  setCurrentJob: (job: Job | null) => set({ currentJob: job }),
-
-  updateJobStatus: (job: Job) => set({ currentJob: job }),
-
-  setGeneratedImages: (images: (ImageResult | null)[]) =>
-    set({ generatedImages: images }),
-
-  updateGeneratedImage: (index: number, image: ImageResult) =>
-    set((state) => {
-      const newImages = [...state.generatedImages];
-      newImages[index] = image;
-      return { generatedImages: newImages };
-    }),
-
+  // Reset
   resetGeneration: () =>
     set({
-      currentJob: null,
-      generatedImages: INITIAL_IMAGES,
-      isGenerating: false,
-      // Also reset new session state
       currentSession: null,
+      isGenerating: false,
       selectedModels: new Set<ModelName>(),
       iterationWarnings: INITIAL_ITERATION_WARNINGS,
     }),
 
-  // ====================
-  // Legacy Gallery Actions
-  // ====================
-  setSelectedGallery: (gallery: GalleryPreview | null) =>
-    set({ selectedGallery: gallery }),
-
-  setGalleries: (galleries: GalleryPreview[]) => set({ galleries }),
-
-  // ====================
   // View Actions
-  // ====================
   setCurrentView: (view: ViewType) => set({ currentView: view }),
 }));

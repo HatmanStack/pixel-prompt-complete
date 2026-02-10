@@ -16,8 +16,7 @@ export const IterationInput: FC<IterationInputProps> = ({ model }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const { iterate, isAtLimit, showWarning, remainingIterations, isEnabled } =
-    useIteration(model);
+  const { iterate, isAtLimit, showWarning, remainingIterations, isEnabled } = useIteration(model);
 
   const handleSubmit = async () => {
     if (!prompt.trim() || isAtLimit || isSubmitting || !isEnabled) return;
@@ -45,11 +44,7 @@ export const IterationInput: FC<IterationInputProps> = ({ model }) => {
   };
 
   if (!isEnabled) {
-    return (
-      <div className="text-sm text-gray-400 text-center p-2">
-        Model not enabled
-      </div>
-    );
+    return <div className="text-sm text-gray-400 text-center p-2">Model not enabled</div>;
   }
 
   if (isAtLimit) {
@@ -65,8 +60,7 @@ export const IterationInput: FC<IterationInputProps> = ({ model }) => {
       {/* Warning message */}
       {showWarning && (
         <div className="text-sm text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 p-2 rounded border border-amber-200 dark:border-amber-800">
-          {remainingIterations} iteration{remainingIterations !== 1 ? 's' : ''}{' '}
-          remaining
+          {remainingIterations} iteration{remainingIterations !== 1 ? 's' : ''} remaining
         </div>
       )}
 

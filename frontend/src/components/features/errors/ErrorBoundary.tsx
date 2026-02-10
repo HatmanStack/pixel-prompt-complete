@@ -36,10 +36,7 @@ function generateCorrelationId(): string {
   return `err_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
-export class ErrorBoundary extends Component<
-  ErrorBoundaryProps,
-  ErrorBoundaryState
-> {
+export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {
     super(props);
     this.state = {
@@ -91,7 +88,7 @@ export class ErrorBoundary extends Component<
   componentDidUpdate(prevProps: ErrorBoundaryProps): void {
     if (this.props.resetKeys && this.state.hasError) {
       const hasChanged = this.props.resetKeys.some(
-        (key, index) => key !== prevProps.resetKeys?.[index]
+        (key, index) => key !== prevProps.resetKeys?.[index],
       );
 
       if (hasChanged) {
@@ -116,9 +113,7 @@ export class ErrorBoundary extends Component<
       // Default fallback UI
       return (
         <div className="p-6 m-4 border-2 border-error rounded-lg bg-error/10">
-          <h2 className="text-xl font-display text-error mb-2">
-            Something went wrong
-          </h2>
+          <h2 className="text-xl font-display text-error mb-2">Something went wrong</h2>
           <p className="text-text-secondary mb-4">
             We're sorry, but an error occurred while rendering this section.
           </p>
@@ -134,10 +129,7 @@ export class ErrorBoundary extends Component<
             <Button variant="primary" onClick={this.resetError}>
               Try Again
             </Button>
-            <Button
-              variant="secondary"
-              onClick={() => window.location.reload()}
-            >
+            <Button variant="secondary" onClick={() => window.location.reload()}>
               Refresh Page
             </Button>
           </div>

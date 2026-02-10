@@ -4,7 +4,16 @@
  * Memoized to prevent unnecessary re-renders in grid
  */
 
-import { useState, useEffect, memo, type FC, type KeyboardEvent, type MouseEvent } from 'react';
+import {
+  useState,
+  useEffect,
+  memo,
+  useCallback,
+  type FC,
+  type KeyboardEvent,
+  type MouseEvent,
+  type TouchEvent,
+} from 'react';
 import { useToast } from '@/stores/useToastStore';
 import { downloadImage } from '@/utils/imageHelpers';
 import { useSound } from '@/hooks/useSound';
@@ -29,12 +38,13 @@ const ImageCard: FC<ImageCardProps> = ({
   const { success, error: errorToast } = useToast();
   const { playSound } = useSound();
   const [imageError, setImageError] = useState(false);
-  const [showActions, setShowActions] = useState(false);
+  const [actionsVisible, setActionsVisible] = useState(false);
 
-  // Reset imageError when image prop changes
+  // Reset imageError and actionsVisible when image or status changes
   useEffect(() => {
     setImageError(false);
-  }, [image]);
+    setActionsVisible(false);
+  }, [image, status]);
 
   const handleImageError = () => {
     setImageError(true);
@@ -80,6 +90,15 @@ const ImageCard: FC<ImageCardProps> = ({
 
   const isCompleted = status === 'completed' || status === 'success';
   const isClickable = isCompleted && image && !imageError;
+
+  const handleTouchToggle = useCallback(
+    (e: TouchEvent<HTMLDivElement>) => {
+      if (isClickable && e.target === e.currentTarget) {
+        setActionsVisible((v) => !v);
+      }
+    },
+    [isClickable],
+  );
 
   const renderContent = () => {
     if (status === 'pending' || status === 'loading') {
@@ -127,42 +146,42 @@ const ImageCard: FC<ImageCardProps> = ({
             onError={handleImageError}
             loading="lazy"
           />
-          {showActions && (
-            <div className="absolute top-2 right-2 flex gap-1 z-10 animate-in fade-in duration-150">
-              <button
-                className="
-                  w-8 h-8 flex items-center justify-center
-                  bg-black/70 text-white
-                  border border-white/20 rounded-md
-                  text-base cursor-pointer
-                  transition-all duration-150
-                  backdrop-blur-sm
-                  hover:bg-black/90 hover:scale-110
-                "
-                onClick={handleDownload}
-                aria-label="Download image"
-                title="Download"
-              >
-                ⬇
-              </button>
-              <button
-                className="
-                  w-8 h-8 flex items-center justify-center
-                  bg-black/70 text-white
-                  border border-white/20 rounded-md
-                  text-base cursor-pointer
-                  transition-all duration-150
-                  backdrop-blur-sm
-                  hover:bg-black/90 hover:scale-110
-                "
-                onClick={handleCopyUrl}
-                aria-label="Copy image URL"
-                title="Copy URL"
-              >
-                🔗
-              </button>
-            </div>
-          )}
+          <div
+            className={`absolute top-2 right-2 flex gap-1 z-10 transition-opacity duration-150 ${actionsVisible ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'}`}
+          >
+            <button
+              className="
+                w-8 h-8 flex items-center justify-center
+                bg-black/70 text-white
+                border border-white/20 rounded-md
+                text-base cursor-pointer
+                transition-all duration-150
+                backdrop-blur-sm
+                hover:bg-black/90 hover:scale-110
+              "
+              onClick={handleDownload}
+              aria-label="Download image"
+              title="Download"
+            >
+              ⬇
+            </button>
+            <button
+              className="
+                w-8 h-8 flex items-center justify-center
+                bg-black/70 text-white
+                border border-white/20 rounded-md
+                text-base cursor-pointer
+                transition-all duration-150
+                backdrop-blur-sm
+                hover:bg-black/90 hover:scale-110
+              "
+              onClick={handleCopyUrl}
+              aria-label="Copy image URL"
+              title="Copy URL"
+            >
+              🔗
+            </button>
+          </div>
         </>
       );
     }
@@ -173,7 +192,7 @@ const ImageCard: FC<ImageCardProps> = ({
   return (
     <div
       className={`
-        flex flex-col
+        group flex flex-col
         bg-secondary border border-accent/30 rounded-lg
         overflow-hidden
         shadow-md
@@ -184,13 +203,14 @@ const ImageCard: FC<ImageCardProps> = ({
       `}
       onClick={handleClick}
       onKeyDown={handleKeyDown}
-      onMouseEnter={() => setShowActions(true)}
-      onMouseLeave={() => setShowActions(false)}
       role={isClickable ? 'button' : undefined}
       tabIndex={isClickable ? 0 : undefined}
       aria-label={isClickable ? `View ${model || 'image'}` : undefined}
     >
-      <div className="relative w-full pt-[100%] overflow-hidden bg-primary/30">
+      <div
+        className="relative w-full pt-[100%] overflow-hidden bg-primary/30"
+        onTouchStart={handleTouchToggle}
+      >
         {renderContent()}
       </div>
 

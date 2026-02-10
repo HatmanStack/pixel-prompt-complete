@@ -80,7 +80,10 @@ const SessionImageModal: FC<SessionImageModalProps> = ({
     if (imageUrl) {
       const timestamp = new Date().toISOString().slice(0, 19).replace(/[:-]/g, '');
       const safeModelName = model.replace(/\s+/g, '-');
-      downloadImage(imageUrl, `pixel-prompt-${safeModelName}-iter${iteration.index}-${timestamp}.png`);
+      downloadImage(
+        imageUrl,
+        `pixel-prompt-${safeModelName}-iter${iteration.index}-${timestamp}.png`,
+      );
       playSound('click');
       onDownload?.();
     }
@@ -119,9 +122,7 @@ const SessionImageModal: FC<SessionImageModalProps> = ({
           <h3 className="font-semibold text-lg text-gray-900 dark:text-gray-100">
             {MODEL_DISPLAY_NAMES[model]} - Iteration {iteration.index}
           </h3>
-          <p className="text-sm text-gray-700 dark:text-gray-300">
-            {iteration.prompt}
-          </p>
+          <p className="text-sm text-gray-700 dark:text-gray-300">{iteration.prompt}</p>
           {iteration.completedAt && (
             <p className="text-xs text-gray-500 dark:text-gray-400">
               Generated: {formatDateTime(iteration.completedAt)}

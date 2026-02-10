@@ -68,6 +68,12 @@ export default defineConfig({
         'src/main.jsx',
         'src/main.tsx',
       ],
+      thresholds: {
+        statements: 55,
+        lines: 55,
+        branches: 45,
+        functions: 45,
+      },
     },
   },
 })

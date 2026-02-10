@@ -47,13 +47,11 @@ export function revokeBlobUrl(url: string | null | undefined): void {
  */
 export async function fetchImageFromS3(
   imageKey: string,
-  cloudFrontDomain: string
+  cloudFrontDomain: string,
 ): Promise<ImageJsonData> {
   try {
     // Build CloudFront URL
-    const url = imageKey.startsWith('http')
-      ? imageKey
-      : `https://${cloudFrontDomain}/${imageKey}`;
+    const url = imageKey.startsWith('http') ? imageKey : `https://${cloudFrontDomain}/${imageKey}`;
 
     const response = await fetch(url);
 

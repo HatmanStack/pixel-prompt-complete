@@ -11,12 +11,12 @@ if (!apiEndpoint) {
   if (import.meta.env.PROD) {
     throw new Error(
       'VITE_API_ENDPOINT environment variable is not configured. ' +
-        'Please set it to your API Gateway URL before building for production.'
+        'Please set it to your API Gateway URL before building for production.',
     );
   } else {
     console.warn(
       'VITE_API_ENDPOINT is not set. API calls will fail. ' +
-        'Set VITE_API_ENDPOINT in your .env file.'
+        'Set VITE_API_ENDPOINT in your .env file.',
     );
   }
 }

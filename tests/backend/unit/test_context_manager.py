@@ -151,4 +151,4 @@ class TestCreateContextEntry:
         assert entry.iteration == 2
         assert entry.prompt == 'test prompt'
         assert entry.image_key == 'test-key'
-        assert entry.timestamp.endswith('Z')  # ISO8601 with Z suffix
+        assert '+00:00' in entry.timestamp or entry.timestamp.endswith('Z')  # ISO8601 UTC

@@ -16,12 +16,9 @@ import GenerateButton from './GenerateButton';
 import { ModelColumn } from './ModelColumn';
 import { MultiIterateInput } from './MultiIterateInput';
 import GalleryBrowser from '@/components/gallery/GalleryBrowser';
+import { ErrorBoundary } from '@/components/features/errors/ErrorBoundary';
 import { ImageModal } from '@/components/features/generation/ImageModal';
-import type {
-  ModelName,
-  ModelColumn as ModelColumnType,
-  Iteration,
-} from '@/types';
+import type { ModelName, ModelColumn as ModelColumnType, Iteration } from '@/types';
 import { MODELS } from '@/types';
 
 interface ApiError extends Error {
@@ -87,10 +84,7 @@ const ProgressBar: FC<{ session: ReturnType<typeof useAppStore.getState>['curren
           style={{ width: `${percent}%` }}
         />
       </div>
-      <p
-        className="text-sm text-gray-600 dark:text-gray-400 text-center m-0"
-        aria-live="polite"
-      >
+      <p className="text-sm text-gray-600 dark:text-gray-400 text-center m-0" aria-live="polite">
         {text}
       </p>
     </div>
@@ -100,10 +94,7 @@ const ProgressBar: FC<{ session: ReturnType<typeof useAppStore.getState>['curren
 /**
  * Error banner component
  */
-const ErrorBanner: FC<{ error: string; onDismiss: () => void }> = ({
-  error,
-  onDismiss,
-}) => (
+const ErrorBanner: FC<{ error: string; onDismiss: () => void }> = ({ error, onDismiss }) => (
   <div
     className="
       flex items-center gap-4 p-4
@@ -154,10 +145,9 @@ export const GenerationPanel: FC = () => {
   } | null>(null);
 
   // Poll session status when we have a session ID
-  const { error: pollingError } = useSessionPolling(
-    currentSession?.sessionId ?? null,
-    { enabled: isGenerating }
-  );
+  const { error: pollingError } = useSessionPolling(currentSession?.sessionId ?? null, {
+    enabled: isGenerating,
+  });
 
   // Handle polling errors
   useEffect(() => {
@@ -207,7 +197,7 @@ export const GenerationPanel: FC = () => {
               acc[model] = createEmptyColumn(model);
               return acc;
             },
-            {} as Record<ModelName, ModelColumnType>
+            {} as Record<ModelName, ModelColumnType>,
           ),
         };
         setCurrentSession(initialSession);
@@ -226,13 +216,11 @@ export const GenerationPanel: FC = () => {
         setErrorMessage(msg);
         showError(msg);
       } else if (error.status === 400 && error.message?.includes('filter')) {
-        const msg =
-          'Prompt contains inappropriate content. Please try a different prompt.';
+        const msg = 'Prompt contains inappropriate content. Please try a different prompt.';
         setErrorMessage(msg);
         showError(msg);
       } else {
-        const msg =
-          error.message || 'Failed to start generation. Please try again.';
+        const msg = error.message || 'Failed to start generation. Please try again.';
         setErrorMessage(msg);
         showError(msg);
       }
@@ -290,24 +278,17 @@ export const GenerationPanel: FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prompt, isGenerating, expandedImage]);
 
-  // Legacy gallery handler - for backwards compatibility
+  // Legacy gallery handler - no-op, kept for GalleryBrowser prop compatibility
   const handleGallerySelect = (
-    gallery: { id: string; images: { model: string; url?: string }[] } | null
+    _gallery: { id: string; images: { model: string; url?: string }[] } | null,
   ) => {
-    // Legacy handler - can be extended to load sessions in future
-    console.log('Gallery selected:', gallery?.id);
+    // No-op: gallery selection handled internally by GalleryBrowser
   };
 
   return (
-    <article
-      className="w-full flex flex-col gap-8 md:gap-6"
-      aria-label="Image Generation"
-    >
+    <article className="w-full flex flex-col gap-8 md:gap-6" aria-label="Image Generation">
       {/* Input Section */}
-      <section
-        className="flex flex-col gap-6 md:gap-4"
-        aria-labelledby="prompt-section-heading"
-      >
+      <section className="flex flex-col gap-6 md:gap-4" aria-labelledby="prompt-section-heading">
         <h2 id="prompt-section-heading" className="sr-only">
           Create Your Image
         </h2>
@@ -339,10 +320,7 @@ export const GenerationPanel: FC = () => {
 
         {/* Error Message */}
         {errorMessage && (
-          <ErrorBanner
-            error={errorMessage}
-            onDismiss={() => setErrorMessage(null)}
-          />
+          <ErrorBanner error={errorMessage} onDismiss={() => setErrorMessage(null)} />
         )}
 
         {/* Progress */}
@@ -361,13 +339,15 @@ export const GenerationPanel: FC = () => {
           const column = currentSession?.models[model] ?? createEmptyColumn(model);
           return (
             <div key={model} className="snap-center">
-              <ModelColumn
-                model={model}
-                column={column}
-                isSelected={selectedModels.has(model)}
-                onToggleSelect={() => toggleModelSelection(model)}
-                onImageExpand={handleImageExpand}
-              />
+              <ErrorBoundary componentName={`ModelColumn-${model}`}>
+                <ModelColumn
+                  model={model}
+                  column={column}
+                  isSelected={selectedModels.has(model)}
+                  onToggleSelect={() => toggleModelSelection(model)}
+                  onImageExpand={handleImageExpand}
+                />
+              </ErrorBoundary>
             </div>
           );
         })}
@@ -378,7 +358,9 @@ export const GenerationPanel: FC = () => {
         <h2 id="gallery-section-heading" className="sr-only">
           Previous Generations
         </h2>
-        <GalleryBrowser onGallerySelect={handleGallerySelect} />
+        <ErrorBoundary componentName="GalleryBrowser">
+          <GalleryBrowser onGallerySelect={handleGallerySelect} />
+        </ErrorBoundary>
       </section>
 
       {/* Image Modal */}

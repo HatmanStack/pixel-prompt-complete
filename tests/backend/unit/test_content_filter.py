@@ -107,28 +107,26 @@ class TestContentFilter:
         # Keyword at end
         assert content_filter.check_prompt("artistic portrait that is explicit") is True
 
-    def test_partial_word_match(self):
-        """Test that keywords match as substrings"""
+    def test_word_boundary_avoids_false_positives(self):
+        """Test that word-boundary matching avoids false positives."""
         content_filter = ContentFilter()
 
-        # 'nude' should match 'denuded', 'seminude', etc.
-        assert content_filter.check_prompt("a denuded landscape") is True
+        # 'nude' should NOT match 'denuded' (not a standalone word)
+        assert content_filter.check_prompt("a denuded landscape") is False
 
-        # This is expected behavior for simple keyword filtering
-        # More sophisticated filtering would use word boundaries
+        # 'gore' should NOT match 'gorgeous'
+        assert content_filter.check_prompt("a gorgeous sunset") is False
 
-    def test_safe_words_containing_blocked_substrings(self):
-        """Test edge cases where safe words contain blocked substrings"""
+        # 'hate' should NOT match 'fate' (different word)
+        assert content_filter.check_prompt("whatever the fate") is False
+
+    def test_standalone_blocked_words_still_caught(self):
+        """Test that standalone blocked words are still caught."""
         content_filter = ContentFilter()
 
-        # These might be false positives with simple keyword matching
-        # Testing actual behavior
-        result = content_filter.check_prompt("a hateful of apples")  # Contains 'hate'
-        # This will be blocked because 'hate' is in 'hateful'
-        assert result is True
-
-        # For production use, would need word boundary detection
-        # Currently testing the actual implementation
+        assert content_filter.check_prompt("pure hate speech") is True
+        assert content_filter.check_prompt("show me nude art") is True
+        assert content_filter.check_prompt("add blood effects") is True
 
     def test_multiple_blocked_keywords_in_prompt(self):
         """Test prompts containing multiple blocked keywords"""
@@ -156,3 +154,47 @@ class TestContentFilter:
 
         for prompt in prompts:
             assert content_filter.check_prompt(prompt) is True, f"Keyword with punctuation not blocked: {repr(prompt)}"
+
+
+class TestContentFilterEvasion:
+    """Tests for filter evasion resistance."""
+
+    def test_leetspeak_evasion(self):
+        content_filter = ContentFilter()
+        assert content_filter.check_prompt("nud3") is True
+        assert content_filter.check_prompt("3xplicit") is True
+        assert content_filter.check_prompt("h@t3") is True
+        assert content_filter.check_prompt("n4k3d") is True
+        assert content_filter.check_prompt("vi0l3nt") is True
+
+    def test_spaced_evasion(self):
+        content_filter = ContentFilter()
+        assert content_filter.check_prompt("n u d e") is True
+        assert content_filter.check_prompt("n-u-d-e") is True
+        assert content_filter.check_prompt("n_u_d_e") is True
+        assert content_filter.check_prompt("n.u.d.e") is True
+        assert content_filter.check_prompt("e x p l i c i t") is True
+
+    def test_unicode_evasion(self):
+        content_filter = ContentFilter()
+        # Accented characters
+        assert content_filter.check_prompt("nud\u00e9") is True  # nudé
+        assert content_filter.check_prompt("gor\u00e9") is True  # goré
+
+    def test_combined_evasion(self):
+        content_filter = ContentFilter()
+        # Leetspeak + spacing
+        assert content_filter.check_prompt("n.u.d.3") is True
+        assert content_filter.check_prompt("3 x p l 1 c 1 t") is True
+
+    def test_clean_prompts_still_pass(self):
+        content_filter = ContentFilter()
+        safe = [
+            "a beautiful landscape with mountains",
+            "a cat sitting on a window sill",
+            "abstract art with bright colors",
+            "a futuristic robot in a garden",
+            "a painting of a sunset at the beach",
+        ]
+        for prompt in safe:
+            assert content_filter.check_prompt(prompt) is False, f"Clean prompt blocked: {prompt}"

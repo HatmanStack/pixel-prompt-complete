@@ -10,20 +10,26 @@ from typing import Optional
 from google import genai
 from openai import OpenAI
 
+from config import prompt_model_api_key, prompt_model_id, prompt_model_provider
+
 
 class PromptEnhancer:
     """
     Enhances short prompts into detailed image generation prompts using LLM.
     """
 
-    def __init__(self, model_registry):
-        """
-        Initialize Prompt Enhancer.
-
-        Args:
-            model_registry: ModelRegistry instance
-        """
-        self.model_registry = model_registry
+    def __init__(self):
+        """Initialize Prompt Enhancer from config module settings."""
+        # Build prompt model config from config.py values
+        if prompt_model_provider and prompt_model_id:
+            self.prompt_model = {
+                'provider': prompt_model_provider,
+                'id': prompt_model_id,
+            }
+            if prompt_model_api_key:
+                self.prompt_model['api_key'] = prompt_model_api_key
+        else:
+            self.prompt_model = None
 
         # System prompt for prompt enhancement
         self.system_prompt = """You are an expert at creating detailed, vivid image generation prompts.
@@ -57,9 +63,7 @@ Enhance the following prompt:"""
         if not prompt:
             return None
 
-
-        # Get prompt enhancement model
-        prompt_model = self.model_registry.get_prompt_model()
+        prompt_model = self.prompt_model
 
         if not prompt_model:
             return prompt

@@ -1,9 +1,8 @@
 """
 Jobs package for Pixel Prompt Complete.
-Provides job lifecycle management and parallel execution.
+Provides session lifecycle management.
 """
 
-from .executor import JobExecutor
-from .manager import JobManager
+from .manager import SessionManager
 
-__all__ = ['JobManager', 'JobExecutor']
+__all__ = ['SessionManager']

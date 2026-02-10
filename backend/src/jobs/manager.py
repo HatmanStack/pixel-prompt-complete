@@ -20,6 +20,11 @@ MAX_RETRIES = 3
 RETRY_DELAY_MS = 50
 
 
+class ConcurrencyError(Exception):
+    """Raised when optimistic locking retries are exhausted."""
+    pass
+
+
 class SessionManager:
     """
     Manages image generation sessions with iteration tracking per model.
@@ -166,14 +171,14 @@ class SessionManager:
             session['updatedAt'] = now
             session['version'] = original_version + 1
 
-            if self._save_status_with_version(session_id, session, original_version):
+            if self._save_status_with_version(session_id, session):
                 return iteration_index
 
             time.sleep(RETRY_DELAY_MS / 1000.0)
 
-        # Force save on retry exhaustion
-        self._save_status(session_id, session)
-        return iteration_index
+        raise ConcurrencyError(
+            f"Failed to add iteration after {MAX_RETRIES} retries for session {session_id}"
+        )
 
     def complete_iteration(
         self,
@@ -226,12 +231,14 @@ class SessionManager:
             session['updatedAt'] = now
             session['version'] = original_version + 1
 
-            if self._save_status_with_version(session_id, session, original_version):
+            if self._save_status_with_version(session_id, session):
                 return
 
             time.sleep(RETRY_DELAY_MS / 1000.0)
 
-        self._save_status(session_id, session)
+        raise ConcurrencyError(
+            f"Failed to complete iteration after {MAX_RETRIES} retries for session {session_id}"
+        )
 
     def fail_iteration(
         self,
@@ -280,12 +287,14 @@ class SessionManager:
             session['updatedAt'] = now
             session['version'] = original_version + 1
 
-            if self._save_status_with_version(session_id, session, original_version):
+            if self._save_status_with_version(session_id, session):
                 return
 
             time.sleep(RETRY_DELAY_MS / 1000.0)
 
-        self._save_status(session_id, session)
+        raise ConcurrencyError(
+            f"Failed to fail iteration after {MAX_RETRIES} retries for session {session_id}"
+        )
 
     def get_iteration_count(self, session_id: str, model: str) -> int:
         """
@@ -341,31 +350,43 @@ class SessionManager:
         return latest.get('imageKey')
 
     def _save_status(self, session_id: str, status: Dict) -> None:
-        """Save session status to S3."""
+        """Save session status to S3 (unconditional write for new sessions)."""
         key = f"sessions/{session_id}/status.json"
         self.s3.put_object(
             Bucket=self.bucket,
             Key=key,
-            Body=json.dumps(status, indent=2),
-            ContentType='application/json'
+            Body=json.dumps(status),
+            ContentType='application/json',
         )
 
     def _save_status_with_version(
         self,
         session_id: str,
         status: Dict,
-        expected_version: int
     ) -> bool:
         """
-        Save with optimistic locking version check.
+        Save with ETag-based conditional write for optimistic locking.
 
         Returns True if successful, False if version conflict.
         """
-        current = self.get_session(session_id)
-        if current and current.get('version', 1) != expected_version:
-            return False
-        self._save_status(session_id, status)
-        return True
+        key = f"sessions/{session_id}/status.json"
+        try:
+            head = self.s3.head_object(Bucket=self.bucket, Key=key)
+            current_etag = head['ETag']
+
+            self.s3.put_object(
+                Bucket=self.bucket,
+                Key=key,
+                Body=json.dumps(status),
+                ContentType='application/json',
+                IfMatch=current_etag,
+            )
+            return True
+        except ClientError as e:
+            code = e.response['Error']['Code']
+            if code in ('PreconditionFailed', '412'):
+                return False
+            raise
 
     def _compute_model_status(self, model_data: Dict) -> str:
         """Compute status for a single model based on its iterations."""
@@ -416,7 +437,3 @@ class SessionManager:
             return 'partial'
         else:
             return 'completed'
-
-
-# Backward compatibility alias
-JobManager = SessionManager

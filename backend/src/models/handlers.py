@@ -33,6 +33,118 @@ from config import (
     image_download_timeout,
 )
 
+# Module-level client singletons for Lambda container reuse
+_openai_clients: Dict[str, OpenAI] = {}
+_genai_clients: Dict[str, genai.Client] = {}
+_bedrock_nova_client = None
+_bedrock_sd_client = None
+
+
+def _get_openai_client(api_key: str, **kwargs) -> OpenAI:
+    """Get or create a cached OpenAI client keyed by api_key and relevant kwargs."""
+    extra = tuple(sorted((k, v) for k, v in kwargs.items() if k in ('base_url', 'timeout')))
+    cache_key = (api_key or '__default__', extra)
+    if cache_key not in _openai_clients:
+        _openai_clients[cache_key] = OpenAI(
+            api_key=api_key or None,
+            timeout=kwargs.get('timeout', api_client_timeout),
+            **{k: v for k, v in kwargs.items() if k != 'timeout'},
+        )
+    return _openai_clients[cache_key]
+
+
+def _get_genai_client(api_key: str) -> genai.Client:
+    """Get or create a cached Google genai client keyed by api_key."""
+    cache_key = api_key or '__default__'
+    if cache_key not in _genai_clients:
+        _genai_clients[cache_key] = genai.Client(api_key=api_key or None)
+    return _genai_clients[cache_key]
+
+
+def _get_bedrock_nova_client():
+    """Get or create a cached Bedrock Nova client."""
+    global _bedrock_nova_client
+    if _bedrock_nova_client is None:
+        _bedrock_nova_client = boto3.client(
+            service_name='bedrock-runtime',
+            region_name=bedrock_nova_region,
+        )
+    return _bedrock_nova_client
+
+
+def _get_bedrock_sd_client():
+    """Get or create a cached Bedrock SD client."""
+    global _bedrock_sd_client
+    if _bedrock_sd_client is None:
+        _bedrock_sd_client = boto3.client(
+            service_name='bedrock-runtime',
+            region_name=bedrock_sd_region,
+        )
+    return _bedrock_sd_client
+
+
+# Common handler helpers
+def _decode_source_image(source_image: Union[str, bytes]) -> bytes:
+    """Common base64 decode logic used by all iterate/outpaint handlers."""
+    if isinstance(source_image, str):
+        return base64.b64decode(source_image)
+    return source_image
+
+
+def _build_context_prompt(prompt: str, context: List[Dict[str, Any]], max_history: int = 2) -> str:
+    """Build context-enriched prompt from iteration history."""
+    if not context:
+        return prompt
+    history = " | ".join([c['prompt'] for c in context[-max_history:]])
+    return f"Previous: {history}. Now: {prompt}"
+
+
+def _ensure_base64(source_image: Union[str, bytes]) -> str:
+    """Ensure image is base64-encoded string."""
+    if isinstance(source_image, str):
+        return source_image
+    return base64.b64encode(source_image).decode('utf-8')
+
+
+def _poll_bfl_job(job_id: str, headers: dict, max_attempts: int = 40, interval: int = 3) -> str:
+    """Common BFL polling logic. Returns base64 image or raises."""
+    result_url = f"https://api.bfl.ai/v1/get_result?id={job_id}"
+    for _attempt in range(max_attempts):
+        time.sleep(interval)
+        result_response = requests.get(result_url, headers=headers, timeout=10)
+        result_response.raise_for_status()
+        result_data = result_response.json()
+
+        if result_data.get('status') == 'Ready':
+            image_url = result_data['result']['sample']
+            img_response = requests.get(image_url, timeout=30)
+            img_response.raise_for_status()
+            return base64.b64encode(img_response.content).decode('utf-8')
+        elif result_data.get('status') == 'Error':
+            raise ValueError(f"BFL job failed: {result_data.get('error', 'Unknown error')}")
+
+    raise TimeoutError(f"BFL job timeout after {max_attempts * interval} seconds")
+
+
+def _extract_gemini_image(response) -> str:
+    """Extract image data from Gemini response and return as base64."""
+    if not response.candidates or len(response.candidates) == 0:
+        raise ValueError("Gemini returned empty candidates array")
+
+    for part in response.candidates[0].content.parts:
+        if hasattr(part, 'inline_data') and part.inline_data:
+            return base64.b64encode(part.inline_data.data).decode('utf-8')
+
+    raise ValueError("No image data found in Gemini response")
+
+
+def _download_image_as_base64(url: str, timeout: int = 30) -> str:
+    """Download image from URL and return as base64."""
+    img_response = requests.get(url, timeout=timeout)
+    img_response.raise_for_status()
+    return base64.b64encode(img_response.content).decode('utf-8')
+
+
 # Type aliases for handler contracts
 ModelConfig = Dict[str, Any]
 GenerationParams = Dict[str, Any]
@@ -67,6 +179,17 @@ def sanitize_error_message(error: Union[Exception, str]) -> str:
     return error_str
 
 
+def _success_result(image: str, model_config: ModelConfig, provider: str) -> HandlerResult:
+    """Build standardized success response."""
+    return {'status': 'success', 'image': image, 'model': model_config.get('id', ''), 'provider': provider}
+
+
+def _error_result(error: Exception | str, model_config: ModelConfig, provider: str) -> HandlerResult:
+    """Build standardized error response."""
+    msg = sanitize_error_message(error) if isinstance(error, Exception) else error
+    return {'status': 'error', 'error': msg, 'model': model_config.get('id', ''), 'provider': provider}
+
+
 def handle_openai(model_config: ModelConfig, prompt: str, _params: GenerationParams) -> HandlerResult:
     """
     Handle image generation for OpenAI (DALL-E 2/3 and gpt-image-1).
@@ -82,8 +205,7 @@ def handle_openai(model_config: ModelConfig, prompt: str, _params: GenerationPar
     try:
         model_id = model_config["id"]
 
-        # Initialize OpenAI client with configurable timeout
-        client = OpenAI(api_key=model_config.get('api_key') or None, timeout=api_client_timeout)
+        client = _get_openai_client(model_config.get('api_key', ''))
 
         # gpt-image-1 uses different parameters and returns base64 directly
         if model_id == "gpt-image-1":
@@ -125,29 +247,13 @@ def handle_openai(model_config: ModelConfig, prompt: str, _params: GenerationPar
             # Convert to base64
             image_base64 = base64.b64encode(img_response.content).decode('utf-8')
 
-        return {
-            'status': 'success',
-            'image': image_base64,
-            'model': model_id,
-            'provider': 'openai'
-        }
+        return _success_result(image_base64, model_config, 'openai')
 
     except requests.Timeout:
-        error_msg = f"Image download timeout after {image_download_timeout} seconds"
-        return {
-            'status': 'error',
-            'error': error_msg,
-            'model': model_config['id'],
-            'provider': 'openai'
-        }
+        return _error_result(f"Image download timeout after {image_download_timeout} seconds", model_config, 'openai')
 
     except Exception as e:
-        return {
-            'status': 'error',
-            'error': sanitize_error_message(e),
-            'model': model_config['id'],
-            'provider': 'openai'
-        }
+        return _error_result(e, model_config, 'openai')
 
 
 def handle_google_gemini(model_config: ModelConfig, prompt: str, _params: GenerationParams) -> HandlerResult:
@@ -164,10 +270,8 @@ def handle_google_gemini(model_config: ModelConfig, prompt: str, _params: Genera
     """
     try:
 
-        # Create Gemini client
-        client = genai.Client(api_key=model_config.get('api_key') or None)
+        client = _get_genai_client(model_config.get('api_key', ''))
 
-        # Generate image with multimodal model
         response = client.models.generate_content(
             model=model_config["id"],
             contents=prompt,
@@ -176,38 +280,12 @@ def handle_google_gemini(model_config: ModelConfig, prompt: str, _params: Genera
             )
         )
 
-        # Validate response structure
-        if not response.candidates or len(response.candidates) == 0:
-            raise ValueError("Gemini returned empty candidates array")
+        image_base64 = _extract_gemini_image(response)
 
-        # Extract inline image data from response parts
-        image_data = None
-        for part in response.candidates[0].content.parts:
-            if hasattr(part, 'inline_data') and part.inline_data:
-                image_data = part.inline_data.data
-                break
-
-        if not image_data:
-            raise ValueError("No image data found in Gemini response")
-
-        # Convert bytes to base64
-        image_base64 = base64.b64encode(image_data).decode('utf-8')
-
-
-        return {
-            'status': 'success',
-            'image': image_base64,
-            'model': model_config['id'],
-            'provider': 'google_gemini'
-        }
+        return _success_result(image_base64, model_config, 'google_gemini')
 
     except Exception as e:
-        return {
-            'status': 'error',
-            'error': sanitize_error_message(e),
-            'model': model_config['id'],
-            'provider': 'google_gemini'
-        }
+        return _error_result(e, model_config, 'google_gemini')
 
 
 def handle_google_imagen(model_config: ModelConfig, prompt: str, _params: GenerationParams) -> HandlerResult:
@@ -224,8 +302,7 @@ def handle_google_imagen(model_config: ModelConfig, prompt: str, _params: Genera
     """
     try:
 
-        # Create Imagen client
-        client = genai.Client(api_key=model_config.get('api_key') or None)
+        client = _get_genai_client(model_config.get('api_key', ''))
 
         # Generate image
         response = client.models.generate_images(
@@ -246,21 +323,10 @@ def handle_google_imagen(model_config: ModelConfig, prompt: str, _params: Genera
         # Convert bytes directly to base64
         image_base64 = base64.b64encode(image_bytes).decode('utf-8')
 
-
-        return {
-            'status': 'success',
-            'image': image_base64,
-            'model': model_config['id'],
-            'provider': 'google_imagen'
-        }
+        return _success_result(image_base64, model_config, 'google_imagen')
 
     except Exception as e:
-        return {
-            'status': 'error',
-            'error': sanitize_error_message(e),
-            'model': model_config['id'],
-            'provider': 'google_imagen'
-        }
+        return _error_result(e, model_config, 'google_imagen')
 
 
 def handle_bedrock_nova(model_config: ModelConfig, prompt: str, params: GenerationParams) -> HandlerResult:
@@ -277,12 +343,7 @@ def handle_bedrock_nova(model_config: ModelConfig, prompt: str, params: Generati
     """
     try:
 
-        # Create boto3 session with credentials
-        # Note: AWS credentials should be in environment or Lambda execution role
-        bedrock = boto3.client(
-            service_name='bedrock-runtime',
-            region_name=bedrock_nova_region
-        )
+        bedrock = _get_bedrock_nova_client()
 
         # Build request body for Nova Canvas
         request_body = {
@@ -315,21 +376,10 @@ def handle_bedrock_nova(model_config: ModelConfig, prompt: str, params: Generati
         # Extract base64 image from response
         image_base64 = response_body['images'][0]
 
-
-        return {
-            'status': 'success',
-            'image': image_base64,
-            'model': model_config['id'],
-            'provider': 'bedrock_nova'
-        }
+        return _success_result(image_base64, model_config, 'bedrock_nova')
 
     except Exception as e:
-        return {
-            'status': 'error',
-            'error': sanitize_error_message(e),
-            'model': model_config['id'],
-            'provider': 'bedrock_nova'
-        }
+        return _error_result(e, model_config, 'bedrock_nova')
 
 
 def handle_bedrock_sd(model_config: ModelConfig, prompt: str, params: GenerationParams) -> HandlerResult:
@@ -346,11 +396,7 @@ def handle_bedrock_sd(model_config: ModelConfig, prompt: str, params: Generation
     """
     try:
 
-        # Create boto3 client
-        bedrock = boto3.client(
-            service_name='bedrock-runtime',
-            region_name=bedrock_sd_region
-        )
+        bedrock = _get_bedrock_sd_client()
 
         # Build request body for Stable Diffusion
         request_body = {
@@ -382,21 +428,10 @@ def handle_bedrock_sd(model_config: ModelConfig, prompt: str, params: Generation
         # Extract base64 image from response
         image_base64 = response_body['images'][0]
 
-
-        return {
-            'status': 'success',
-            'image': image_base64,
-            'model': model_config['id'],
-            'provider': 'bedrock_sd'
-        }
+        return _success_result(image_base64, model_config, 'bedrock_sd')
 
     except Exception as e:
-        return {
-            'status': 'error',
-            'error': sanitize_error_message(e),
-            'model': model_config['id'],
-            'provider': 'bedrock_sd'
-        }
+        return _error_result(e, model_config, 'bedrock_sd')
 
 
 def handle_stability(model_config: ModelConfig, prompt: str, params: GenerationParams) -> HandlerResult:
@@ -442,30 +477,13 @@ def handle_stability(model_config: ModelConfig, prompt: str, params: GenerationP
         # Response is raw image bytes - convert to base64
         image_base64 = base64.b64encode(response.content).decode('utf-8')
 
-
-        return {
-            'status': 'success',
-            'image': image_base64,
-            'model': model_config['id'],
-            'provider': 'stability'
-        }
+        return _success_result(image_base64, model_config, 'stability')
 
     except requests.Timeout:
-        error_msg = "Stability AI request timeout after 60 seconds"
-        return {
-            'status': 'error',
-            'error': error_msg,
-            'model': model_config['id'],
-            'provider': 'stability'
-        }
+        return _error_result("Stability AI request timeout after 60 seconds", model_config, 'stability')
 
     except Exception as e:
-        return {
-            'status': 'error',
-            'error': sanitize_error_message(e),
-            'model': model_config['id'],
-            'provider': 'stability'
-        }
+        return _error_result(e, model_config, 'stability')
 
 
 def handle_bfl(model_config: ModelConfig, prompt: str, params: GenerationParams) -> HandlerResult:
@@ -531,13 +549,7 @@ def handle_bfl(model_config: ModelConfig, prompt: str, params: GenerationParams)
                 # Convert to base64
                 image_base64 = base64.b64encode(img_response.content).decode('utf-8')
 
-
-                return {
-                    'status': 'success',
-                    'image': image_base64,
-                    'model': model_config['id'],
-                    'provider': 'bfl'
-                }
+                return _success_result(image_base64, model_config, 'bfl')
 
             elif status == 'Error':
                 error_msg = result_data.get('error', 'Unknown error')
@@ -547,12 +559,7 @@ def handle_bfl(model_config: ModelConfig, prompt: str, params: GenerationParams)
         raise TimeoutError(f"BFL job timeout after {max_attempts * 3} seconds")
 
     except Exception as e:
-        return {
-            'status': 'error',
-            'error': sanitize_error_message(e),
-            'model': model_config['id'],
-            'provider': 'bfl'
-        }
+        return _error_result(e, model_config, 'bfl')
 
 
 def handle_recraft(model_config: ModelConfig, prompt: str, _params: GenerationParams) -> HandlerResult:
@@ -570,9 +577,9 @@ def handle_recraft(model_config: ModelConfig, prompt: str, _params: GenerationPa
     try:
 
         # Recraft uses OpenAI-compatible API with custom base URL
-        client = OpenAI(
-            api_key=model_config.get('api_key') or None,
-            base_url="https://external.api.recraft.ai/v1"
+        client = _get_openai_client(
+            model_config.get('api_key', ''),
+            base_url="https://external.api.recraft.ai/v1",
         )
 
         # Call image generation (OpenAI-compatible)
@@ -593,21 +600,10 @@ def handle_recraft(model_config: ModelConfig, prompt: str, _params: GenerationPa
         # Convert to base64
         image_base64 = base64.b64encode(img_response.content).decode('utf-8')
 
-
-        return {
-            'status': 'success',
-            'image': image_base64,
-            'model': model_config['id'],
-            'provider': 'recraft'
-        }
+        return _success_result(image_base64, model_config, 'recraft')
 
     except Exception as e:
-        return {
-            'status': 'error',
-            'error': sanitize_error_message(e),
-            'model': model_config['id'],
-            'provider': 'recraft'
-        }
+        return _error_result(e, model_config, 'recraft')
 
 
 def handle_generic(model_config: ModelConfig, prompt: str, _params: GenerationParams) -> HandlerResult:
@@ -660,22 +656,13 @@ def handle_generic(model_config: ModelConfig, prompt: str, _params: GenerationPa
         # Convert to base64
         image_base64 = base64.b64encode(img_response.content).decode('utf-8')
 
-
-        return {
-            'status': 'success',
-            'image': image_base64,
-            'model': model_config['id'],
-            'provider': 'generic'
-        }
+        return _success_result(image_base64, model_config, 'generic')
 
     except Exception as e:
-        error_msg = f"Generic handler failed (model may not be OpenAI-compatible): {sanitize_error_message(e)}"
-        return {
-            'status': 'error',
-            'error': error_msg,
-            'model': model_config['id'],
-            'provider': 'generic'
-        }
+        return _error_result(
+            f"Generic handler failed (model may not be OpenAI-compatible): {sanitize_error_message(e)}",
+            model_config, 'generic',
+        )
 
 
 def get_handler(provider: str) -> HandlerFunc:
@@ -727,281 +714,114 @@ def iterate_flux(model_config: ModelConfig, source_image: Union[str, bytes], pro
         Standardized response dict
     """
     try:
-        # BFL Fill endpoint for image editing
         url = "https://api.bfl.ai/v1/flux-pro-1.1-fill"
         headers = {
             "x-key": model_config.get('api_key', ''),
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
 
-        # Build context prompt from history
-        context_prompt = prompt
-        if context:
-            history = " | ".join([c['prompt'] for c in context[-2:]])
-            context_prompt = f"Previous: {history}. Now: {prompt}"
-
+        context_prompt = _build_context_prompt(prompt, context)
         payload = {
-            "image": source_image if isinstance(source_image, str) else base64.b64encode(source_image).decode('utf-8'),
+            "image": _ensure_base64(source_image),
             "prompt": context_prompt,
             "width": 1024,
-            "height": 1024
+            "height": 1024,
         }
 
-        # Start job
         response = requests.post(url, headers=headers, json=payload, timeout=30)
         response.raise_for_status()
-        job_data = response.json()
-        job_id = job_data.get('id')
-
+        job_id = response.json().get('id')
         if not job_id:
             raise ValueError("No job ID returned from BFL Fill API")
 
-        # Poll for result
-        result_url = f"https://api.bfl.ai/v1/get_result?id={job_id}"
-        for attempt in range(40):
-            time.sleep(3)
-            result_response = requests.get(result_url, headers=headers, timeout=10)
-            result_response.raise_for_status()
-            result_data = result_response.json()
+        image_base64 = _poll_bfl_job(job_id, headers)
 
-            if result_data.get('status') == 'Ready':
-                image_url = result_data['result']['sample']
-                img_response = requests.get(image_url, timeout=30)
-                img_response.raise_for_status()
-                image_base64 = base64.b64encode(img_response.content).decode('utf-8')
-
-                return {
-                    'status': 'success',
-                    'image': image_base64,
-                    'model': model_config.get('id', 'flux-pro-1.1'),
-                    'provider': 'bfl'
-                }
-
-            elif result_data.get('status') == 'Error':
-                raise ValueError(f"BFL Fill job failed: {result_data.get('error', 'Unknown error')}")
-
-        raise TimeoutError("BFL Fill job timeout after 120 seconds")
+        return _success_result(image_base64, model_config, 'bfl')
 
     except Exception as e:
-        return {
-            'status': 'error',
-            'error': sanitize_error_message(e),
-            'model': model_config.get('id', 'flux'),
-            'provider': 'bfl'
-        }
+        return _error_result(e, model_config, 'bfl')
 
 
 def iterate_recraft(model_config: ModelConfig, source_image: Union[str, bytes], prompt: str, context: List[Dict[str, Any]]) -> HandlerResult:
-    """
-    Iterate on an image using Recraft imageToImage endpoint.
-
-    Args:
-        model_config: Model configuration with API key
-        source_image: Base64-encoded source image
-        prompt: Refinement instruction
-        context: Rolling 3-iteration context window (unused for Recraft)
-
-    Returns:
-        Standardized response dict
-    """
+    """Iterate on an image using Recraft imageToImage endpoint."""
     try:
         url = "https://external.api.recraft.ai/v1/images/imageToImage"
-        headers = {
-            "Authorization": f"Bearer {model_config.get('api_key', '')}",
-        }
+        headers = {"Authorization": f"Bearer {model_config.get('api_key', '')}"}
 
-        # Decode base64 if string, otherwise use bytes directly
-        if isinstance(source_image, str):
-            image_bytes = base64.b64decode(source_image)
-        else:
-            image_bytes = source_image
+        image_bytes = _decode_source_image(source_image)
+        context_prompt = _build_context_prompt(prompt, context)
 
-        # Build context prompt
-        context_prompt = prompt
-        if context:
-            history = " | ".join([c['prompt'] for c in context[-2:]])
-            context_prompt = f"Previous: {history}. Now: {prompt}"
-
-        # Multipart form data
-        files = {
-            'image': ('image.png', image_bytes, 'image/png'),
-        }
-        data = {
-            'prompt': context_prompt,
-            'model': 'recraftv3',
-            'response_format': 'url',
-        }
+        files = {'image': ('image.png', image_bytes, 'image/png')}
+        data = {'prompt': context_prompt, 'model': 'recraftv3', 'response_format': 'url'}
 
         response = requests.post(url, headers=headers, files=files, data=data, timeout=60)
         response.raise_for_status()
         result = response.json()
 
-        # Get image URL from response
         image_url = result.get('data', [{}])[0].get('url')
         if not image_url:
             raise ValueError("No image URL in Recraft response")
 
-        # Download image
-        img_response = requests.get(image_url, timeout=30)
-        img_response.raise_for_status()
-        image_base64 = base64.b64encode(img_response.content).decode('utf-8')
+        image_base64 = _download_image_as_base64(image_url)
 
-        return {
-            'status': 'success',
-            'image': image_base64,
-            'model': model_config.get('id', 'recraftv3'),
-            'provider': 'recraft'
-        }
+        return _success_result(image_base64, model_config, 'recraft')
 
     except Exception as e:
-        return {
-            'status': 'error',
-            'error': sanitize_error_message(e),
-            'model': model_config.get('id', 'recraft'),
-            'provider': 'recraft'
-        }
+        return _error_result(e, model_config, 'recraft')
 
 
 def iterate_gemini(model_config: ModelConfig, source_image: Union[str, bytes], prompt: str, context: List[Dict[str, Any]]) -> HandlerResult:
-    """
-    Iterate on an image using Gemini multi-turn conversation.
-
-    Gemini natively supports sending images with prompts for refinement.
-
-    Args:
-        model_config: Model configuration with API key
-        source_image: Base64-encoded source image
-        prompt: Refinement instruction
-        context: Rolling 3-iteration context window
-
-    Returns:
-        Standardized response dict
-    """
+    """Iterate on an image using Gemini multi-turn conversation."""
     try:
-        client = genai.Client(api_key=model_config.get('api_key', ''))
+        client = _get_genai_client(model_config.get('api_key', ''))
+        image_bytes = _decode_source_image(source_image)
+        context_prompt = _build_context_prompt(prompt, context)
 
-        # Decode base64 if string
-        if isinstance(source_image, str):
-            image_bytes = base64.b64decode(source_image)
-        else:
-            image_bytes = source_image
-
-        # Build prompt with context history
-        context_prompt = prompt
-        if context:
-            history = " | ".join([f"Previous: {ctx['prompt']}" for ctx in context[-2:]])
-            context_prompt = f"{history}. Now: {prompt}"
-
-        # Create content with image and context-enriched prompt
         content_parts = [
             types.Part.from_bytes(data=image_bytes, mime_type='image/png'),
-            types.Part.from_text(f"Edit this image: {context_prompt}")
+            types.Part.from_text(f"Edit this image: {context_prompt}"),
         ]
 
         response = client.models.generate_content(
             model=model_config.get('id', 'gemini-2.0-flash-exp'),
             contents=content_parts,
-            config=types.GenerateContentConfig(
-                response_modalities=['Image']
-            )
+            config=types.GenerateContentConfig(response_modalities=['Image']),
         )
 
-        # Extract image from response
-        if not response.candidates or len(response.candidates) == 0:
-            raise ValueError("Gemini returned empty candidates array")
+        image_base64 = _extract_gemini_image(response)
 
-        image_data = None
-        for part in response.candidates[0].content.parts:
-            if hasattr(part, 'inline_data') and part.inline_data:
-                image_data = part.inline_data.data
-                break
-
-        if not image_data:
-            raise ValueError("No image data found in Gemini response")
-
-        image_base64 = base64.b64encode(image_data).decode('utf-8')
-
-        return {
-            'status': 'success',
-            'image': image_base64,
-            'model': model_config.get('id', 'gemini-2.0-flash-exp'),
-            'provider': 'google_gemini'
-        }
+        return _success_result(image_base64, model_config, 'google_gemini')
 
     except Exception as e:
-        return {
-            'status': 'error',
-            'error': sanitize_error_message(e),
-            'model': model_config.get('id', 'gemini'),
-            'provider': 'google_gemini'
-        }
+        return _error_result(e, model_config, 'google_gemini')
 
 
 def iterate_openai(model_config: ModelConfig, source_image: Union[str, bytes], prompt: str, context: List[Dict[str, Any]]) -> HandlerResult:
-    """
-    Iterate on an image using OpenAI images.edit endpoint.
-
-    gpt-image-1 supports editing images with prompts.
-
-    Args:
-        model_config: Model configuration with API key
-        source_image: Base64-encoded source image
-        prompt: Refinement instruction
-        context: Rolling 3-iteration context window (unused for OpenAI)
-
-    Returns:
-        Standardized response dict
-    """
+    """Iterate on an image using OpenAI images.edit endpoint."""
     try:
-        client = OpenAI(api_key=model_config.get('api_key', ''), timeout=120.0)
+        client = _get_openai_client(model_config.get('api_key', ''), timeout=120.0)
+        image_bytes = _decode_source_image(source_image)
+        context_prompt = _build_context_prompt(prompt, context)
 
-        # Decode base64 if string
-        if isinstance(source_image, str):
-            image_bytes = base64.b64decode(source_image)
-        else:
-            image_bytes = source_image
-
-        # Build context prompt
-        context_prompt = prompt
-        if context:
-            history = " | ".join([c['prompt'] for c in context[-2:]])
-            context_prompt = f"Previous: {history}. Now: {prompt}"
-
-        # Use images.edit endpoint
         response = client.images.edit(
             model=model_config.get('id', 'gpt-image-1'),
             image=image_bytes,
             prompt=context_prompt,
-            size="1024x1024"
+            size="1024x1024",
         )
 
         if not response.data or len(response.data) == 0:
             raise ValueError("OpenAI returned empty data array")
 
-        # gpt-image-1 returns base64
         if hasattr(response.data[0], 'b64_json') and response.data[0].b64_json:
             image_base64 = response.data[0].b64_json
         else:
-            # Fall back to URL if present
-            image_url = response.data[0].url
-            img_response = requests.get(image_url, timeout=30)
-            img_response.raise_for_status()
-            image_base64 = base64.b64encode(img_response.content).decode('utf-8')
+            image_base64 = _download_image_as_base64(response.data[0].url)
 
-        return {
-            'status': 'success',
-            'image': image_base64,
-            'model': model_config.get('id', 'gpt-image-1'),
-            'provider': 'openai'
-        }
+        return _success_result(image_base64, model_config, 'openai')
 
     except Exception as e:
-        return {
-            'status': 'error',
-            'error': sanitize_error_message(e),
-            'model': model_config.get('id', 'openai'),
-            'provider': 'openai'
-        }
+        return _error_result(e, model_config, 'openai')
 
 
 def get_iterate_handler(provider: str) -> IterateHandlerFunc:
@@ -1053,126 +873,53 @@ def outpaint_flux(model_config: ModelConfig, source_image: Union[str, bytes], pr
             pad_image_with_transparency,
         )
 
-        # Decode source image
-        if isinstance(source_image, str):
-            image_bytes = base64.b64decode(source_image)
-        else:
-            image_bytes = source_image
-
-        # Get dimensions and calculate expansion
+        image_bytes = _decode_source_image(source_image)
         width, height = get_image_dimensions(image_bytes)
         expansion = calculate_expansion(width, height, preset)
 
-        # If no expansion needed, return original
         if expansion['left'] == 0 and expansion['right'] == 0 and \
            expansion['top'] == 0 and expansion['bottom'] == 0:
-            return {
-                'status': 'success',
-                'image': source_image if isinstance(source_image, str) else base64.b64encode(source_image).decode('utf-8'),
-                'model': model_config.get('id', 'flux-pro-1.1'),
-                'provider': 'bfl'
-            }
+            return _success_result(_ensure_base64(source_image), model_config, 'bfl')
 
-        # Create padded image and mask
         padded_image = pad_image_with_transparency(image_bytes, expansion)
         mask = create_expansion_mask(width, height, expansion, mask_format='base64')
-        padded_base64 = base64.b64encode(padded_image).decode('utf-8')
 
-        # BFL Fill endpoint
         url = "https://api.bfl.ai/v1/flux-pro-1.1-fill"
-        headers = {
-            "x-key": model_config.get('api_key', ''),
-            "Content-Type": "application/json"
-        }
-
+        headers = {"x-key": model_config.get('api_key', ''), "Content-Type": "application/json"}
         payload = {
-            "image": padded_base64,
+            "image": base64.b64encode(padded_image).decode('utf-8'),
             "mask": mask,
             "prompt": f"Expand the image: {prompt}",
             "width": expansion['new_width'],
-            "height": expansion['new_height']
+            "height": expansion['new_height'],
         }
 
-        # Start job
         response = requests.post(url, headers=headers, json=payload, timeout=30)
         response.raise_for_status()
-        job_data = response.json()
-        job_id = job_data.get('id')
-
+        job_id = response.json().get('id')
         if not job_id:
             raise ValueError("No job ID returned from BFL Fill API")
 
-        # Poll for result
-        result_url = f"https://api.bfl.ai/v1/get_result?id={job_id}"
-        for attempt in range(40):
-            time.sleep(3)
-            result_response = requests.get(result_url, headers=headers, timeout=10)
-            result_response.raise_for_status()
-            result_data = result_response.json()
+        image_base64 = _poll_bfl_job(job_id, headers)
 
-            if result_data.get('status') == 'Ready':
-                image_url = result_data['result']['sample']
-                img_response = requests.get(image_url, timeout=30)
-                img_response.raise_for_status()
-                image_base64 = base64.b64encode(img_response.content).decode('utf-8')
-
-                return {
-                    'status': 'success',
-                    'image': image_base64,
-                    'model': model_config.get('id', 'flux-pro-1.1'),
-                    'provider': 'bfl'
-                }
-
-            elif result_data.get('status') == 'Error':
-                raise ValueError(f"BFL outpaint job failed: {result_data.get('error', 'Unknown')}")
-
-        raise TimeoutError("BFL outpaint job timeout after 120 seconds")
+        return _success_result(image_base64, model_config, 'bfl')
 
     except Exception as e:
-        return {
-            'status': 'error',
-            'error': sanitize_error_message(e),
-            'model': model_config.get('id', 'flux'),
-            'provider': 'bfl'
-        }
+        return _error_result(e, model_config, 'bfl')
 
 
 def outpaint_recraft(model_config: ModelConfig, source_image: Union[str, bytes], preset: str, prompt: str) -> HandlerResult:
-    """
-    Expand an image using Recraft outpaint endpoint.
-
-    Args:
-        model_config: Model configuration with API key
-        source_image: Base64-encoded source image
-        preset: Aspect preset
-        prompt: Description for expanded regions
-
-    Returns:
-        Standardized response dict
-    """
+    """Expand an image using Recraft outpaint endpoint."""
     try:
         from utils.outpaint import calculate_expansion, get_image_dimensions
 
-        # Decode source image
-        if isinstance(source_image, str):
-            image_bytes = base64.b64decode(source_image)
-        else:
-            image_bytes = source_image
-
-        # Get dimensions and calculate expansion
+        image_bytes = _decode_source_image(source_image)
         width, height = get_image_dimensions(image_bytes)
         expansion = calculate_expansion(width, height, preset)
 
-        # Recraft outpaint endpoint
         url = "https://external.api.recraft.ai/v1/images/outpaint"
-        headers = {
-            "Authorization": f"Bearer {model_config.get('api_key', '')}",
-        }
-
-        # Calculate direction parameters for Recraft
-        files = {
-            'image': ('image.png', image_bytes, 'image/png'),
-        }
+        headers = {"Authorization": f"Bearer {model_config.get('api_key', '')}"}
+        files = {'image': ('image.png', image_bytes, 'image/png')}
         data = {
             'prompt': prompt,
             'model': 'recraftv3',
@@ -1187,117 +934,50 @@ def outpaint_recraft(model_config: ModelConfig, source_image: Union[str, bytes],
         response.raise_for_status()
         result = response.json()
 
-        # Get image URL from response
         image_url = result.get('data', [{}])[0].get('url')
         if not image_url:
             raise ValueError("No image URL in Recraft outpaint response")
 
-        # Download image
-        img_response = requests.get(image_url, timeout=30)
-        img_response.raise_for_status()
-        image_base64 = base64.b64encode(img_response.content).decode('utf-8')
+        image_base64 = _download_image_as_base64(image_url)
 
-        return {
-            'status': 'success',
-            'image': image_base64,
-            'model': model_config.get('id', 'recraftv3'),
-            'provider': 'recraft'
-        }
+        return _success_result(image_base64, model_config, 'recraft')
 
     except Exception as e:
-        return {
-            'status': 'error',
-            'error': sanitize_error_message(e),
-            'model': model_config.get('id', 'recraft'),
-            'provider': 'recraft'
-        }
+        return _error_result(e, model_config, 'recraft')
 
 
 def outpaint_gemini(model_config: ModelConfig, source_image: Union[str, bytes], preset: str, prompt: str) -> HandlerResult:
-    """
-    Expand an image using Gemini prompt-based outpainting.
-
-    Gemini doesn't have native outpainting, so we use prompt engineering.
-
-    Args:
-        model_config: Model configuration with API key
-        source_image: Base64-encoded source image
-        preset: Aspect preset
-        prompt: Description for expanded regions
-
-    Returns:
-        Standardized response dict
-    """
+    """Expand an image using Gemini prompt-based outpainting."""
     try:
         from utils.outpaint import get_direction_description
 
-        # Decode source image
-        if isinstance(source_image, str):
-            image_bytes = base64.b64decode(source_image)
-        else:
-            image_bytes = source_image
-
+        image_bytes = _decode_source_image(source_image)
         direction = get_direction_description(preset)
         full_prompt = f"Extend this image {direction}. Fill the extended areas with: {prompt}"
 
-        client = genai.Client(api_key=model_config.get('api_key', ''))
+        client = _get_genai_client(model_config.get('api_key', ''))
 
         content_parts = [
             types.Part.from_bytes(data=image_bytes, mime_type='image/png'),
-            types.Part.from_text(full_prompt)
+            types.Part.from_text(full_prompt),
         ]
 
         response = client.models.generate_content(
             model=model_config.get('id', 'gemini-2.0-flash-exp'),
             contents=content_parts,
-            config=types.GenerateContentConfig(
-                response_modalities=['Image']
-            )
+            config=types.GenerateContentConfig(response_modalities=['Image']),
         )
 
-        if not response.candidates or len(response.candidates) == 0:
-            raise ValueError("Gemini returned empty candidates array")
+        image_base64 = _extract_gemini_image(response)
 
-        image_data = None
-        for part in response.candidates[0].content.parts:
-            if hasattr(part, 'inline_data') and part.inline_data:
-                image_data = part.inline_data.data
-                break
-
-        if not image_data:
-            raise ValueError("No image data found in Gemini outpaint response")
-
-        image_base64 = base64.b64encode(image_data).decode('utf-8')
-
-        return {
-            'status': 'success',
-            'image': image_base64,
-            'model': model_config.get('id', 'gemini-2.0-flash-exp'),
-            'provider': 'google_gemini'
-        }
+        return _success_result(image_base64, model_config, 'google_gemini')
 
     except Exception as e:
-        return {
-            'status': 'error',
-            'error': sanitize_error_message(e),
-            'model': model_config.get('id', 'gemini'),
-            'provider': 'google_gemini'
-        }
+        return _error_result(e, model_config, 'google_gemini')
 
 
 def outpaint_openai(model_config: ModelConfig, source_image: Union[str, bytes], preset: str, prompt: str) -> HandlerResult:
-    """
-    Expand an image using OpenAI images.edit with padded canvas.
-
-    Args:
-        model_config: Model configuration with API key
-        source_image: Base64-encoded source image
-        preset: Aspect preset
-        prompt: Description for expanded regions
-
-    Returns:
-        Standardized response dict
-    """
+    """Expand an image using OpenAI images.edit with padded canvas."""
     try:
         from utils.outpaint import (
             calculate_expansion,
@@ -1306,33 +986,19 @@ def outpaint_openai(model_config: ModelConfig, source_image: Union[str, bytes], 
             pad_image_with_transparency,
         )
 
-        # Decode source image
-        if isinstance(source_image, str):
-            image_bytes = base64.b64decode(source_image)
-        else:
-            image_bytes = source_image
-
-        # Get dimensions and calculate expansion
+        image_bytes = _decode_source_image(source_image)
         width, height = get_image_dimensions(image_bytes)
         expansion = calculate_expansion(width, height, preset)
-
-        # Create padded image with transparency
         padded_image = pad_image_with_transparency(image_bytes, expansion)
 
-        client = OpenAI(api_key=model_config.get('api_key', ''), timeout=120.0)
+        client = _get_openai_client(model_config.get('api_key', ''), timeout=120.0)
+        target_size = get_openai_compatible_size(expansion['new_width'], expansion['new_height'])
 
-        # Calculate appropriate size based on target aspect ratio
-        target_size = get_openai_compatible_size(
-            expansion['new_width'], expansion['new_height']
-        )
-
-        # Use images.edit with padded image
-        # OpenAI will fill transparent areas
         response = client.images.edit(
             model=model_config.get('id', 'gpt-image-1'),
             image=padded_image,
             prompt=f"Expand the scene. Fill the transparent areas with: {prompt}",
-            size=target_size
+            size=target_size,
         )
 
         if not response.data or len(response.data) == 0:
@@ -1341,25 +1007,12 @@ def outpaint_openai(model_config: ModelConfig, source_image: Union[str, bytes], 
         if hasattr(response.data[0], 'b64_json') and response.data[0].b64_json:
             image_base64 = response.data[0].b64_json
         else:
-            image_url = response.data[0].url
-            img_response = requests.get(image_url, timeout=30)
-            img_response.raise_for_status()
-            image_base64 = base64.b64encode(img_response.content).decode('utf-8')
+            image_base64 = _download_image_as_base64(response.data[0].url)
 
-        return {
-            'status': 'success',
-            'image': image_base64,
-            'model': model_config.get('id', 'gpt-image-1'),
-            'provider': 'openai'
-        }
+        return _success_result(image_base64, model_config, 'openai')
 
     except Exception as e:
-        return {
-            'status': 'error',
-            'error': sanitize_error_message(e),
-            'model': model_config.get('id', 'openai'),
-            'provider': 'openai'
-        }
+        return _error_result(e, model_config, 'openai')
 
 
 def get_outpaint_handler(provider: str) -> OutpaintHandlerFunc:

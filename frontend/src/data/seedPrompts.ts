@@ -105,9 +105,7 @@ export function getRandomPrompt(lastPrompt: SeedPrompt | null = null): SeedPromp
   }
 
   // Filter out last prompt to prevent consecutive duplicates
-  const availablePrompts = lastPrompt
-    ? seedPrompts.filter(p => p !== lastPrompt)
-    : seedPrompts;
+  const availablePrompts = lastPrompt ? seedPrompts.filter((p) => p !== lastPrompt) : seedPrompts;
 
   const randomIndex = Math.floor(Math.random() * availablePrompts.length);
   return availablePrompts[randomIndex];

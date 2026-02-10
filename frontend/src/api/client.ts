@@ -6,13 +6,8 @@
 import { API_BASE_URL, API_ROUTES, REQUEST_TIMEOUT, RETRY_CONFIG } from './config';
 import { generateCorrelationId } from '../utils/correlation';
 import type {
-  GenerateResponse,
-  StatusResponse,
   EnhanceResponse,
-  GalleryListResponse,
-  GalleryDetailResponse,
   ApiError,
-  // New session-based types
   Session,
   SessionGenerateResponse,
   IterateResponse,
@@ -49,7 +44,7 @@ function sleep(ms: number): Promise<void> {
 async function apiFetch<T>(
   endpoint: string,
   options: FetchOptions = {},
-  retryCount = 0
+  retryCount = 0,
 ): Promise<T> {
   // Create abort controller for timeout
   const controller = new AbortController();
@@ -75,7 +70,7 @@ async function apiFetch<T>(
     if (!response.ok) {
       const errorData: Partial<ApiError> = await response.json().catch(() => ({}));
       const error: ApiErrorWithMeta = new Error(
-        errorData.error || errorData.message || `HTTP ${response.status}: ${response.statusText}`
+        errorData.error || errorData.message || `HTTP ${response.status}: ${response.statusText}`,
       );
       error.status = response.status;
       error.code = errorData.code;
@@ -91,7 +86,7 @@ async function apiFetch<T>(
     // Handle timeout errors
     if (apiError.name === 'AbortError') {
       const timeoutError: ApiErrorWithMeta = new Error(
-        'Request timeout - server took too long to respond'
+        'Request timeout - server took too long to respond',
       );
       timeoutError.code = 'TIMEOUT';
       throw timeoutError;
@@ -100,12 +95,13 @@ async function apiFetch<T>(
     // Determine if we should retry
     const isRetryableStatus = apiError.status && RETRYABLE_STATUS_CODES.includes(apiError.status);
     const isNetworkError = !apiError.status;
-    const shouldRetry = retryCount < RETRY_CONFIG.maxRetries && (isRetryableStatus || isNetworkError);
+    const shouldRetry =
+      retryCount < RETRY_CONFIG.maxRetries && (isRetryableStatus || isNetworkError);
 
     if (shouldRetry) {
       let delay = Math.min(
         RETRY_CONFIG.initialDelay * Math.pow(2, retryCount),
-        RETRY_CONFIG.maxDelay
+        RETRY_CONFIG.maxDelay,
       );
 
       // Use longer delay for rate limit responses
@@ -157,7 +153,7 @@ export async function getSessionStatus(sessionId: string): Promise<Session> {
 export async function iterateImage(
   sessionId: string,
   model: ModelName,
-  prompt: string
+  prompt: string,
 ): Promise<IterateResponse> {
   return apiFetch<IterateResponse>(API_ROUTES.ITERATE, {
     method: 'POST',
@@ -173,7 +169,7 @@ export async function outpaintImage(
   model: ModelName,
   iterationIndex: number,
   preset: OutpaintPreset,
-  prompt: string
+  prompt: string,
 ): Promise<OutpaintResponse> {
   return apiFetch<OutpaintResponse>(API_ROUTES.OUTPAINT, {
     method: 'POST',
@@ -193,10 +189,10 @@ export async function outpaintImage(
 export async function iterateMultiple(
   sessionId: string,
   models: ModelName[],
-  prompt: string
+  prompt: string,
 ): Promise<IterateResponse[]> {
   const results = await Promise.allSettled(
-    models.map((model) => iterateImage(sessionId, model, prompt))
+    models.map((model) => iterateImage(sessionId, model, prompt)),
   );
 
   // Return successful results, log failures
@@ -230,31 +226,6 @@ export async function getSessionDetail(sessionId: string): Promise<SessionGaller
   });
 }
 
-// ====================
-// Legacy API Methods (for backwards compatibility)
-// ====================
-
-/**
- * Generate images from prompt (legacy)
- */
-export async function generateImages(prompt: string): Promise<GenerateResponse> {
-  return apiFetch<GenerateResponse>(API_ROUTES.GENERATE, {
-    method: 'POST',
-    body: JSON.stringify({
-      prompt,
-    }),
-  });
-}
-
-/**
- * Get job status by job ID (legacy)
- */
-export async function getJobStatus(jobId: string): Promise<StatusResponse> {
-  return apiFetch<StatusResponse>(`${API_ROUTES.STATUS}/${jobId}`, {
-    method: 'GET',
-  });
-}
-
 /**
  * Enhance prompt using LLM
  */
@@ -262,24 +233,6 @@ export async function enhancePrompt(prompt: string): Promise<EnhanceResponse> {
   return apiFetch<EnhanceResponse>(API_ROUTES.ENHANCE, {
     method: 'POST',
     body: JSON.stringify({ prompt }),
-  });
-}
-
-/**
- * List all galleries (legacy)
- */
-export async function listGalleries(): Promise<GalleryListResponse> {
-  return apiFetch<GalleryListResponse>(API_ROUTES.GALLERY_LIST, {
-    method: 'GET',
-  });
-}
-
-/**
- * Get gallery details and all images (legacy)
- */
-export async function getGallery(galleryId: string): Promise<GalleryDetailResponse> {
-  return apiFetch<GalleryDetailResponse>(`${API_ROUTES.GALLERY_DETAIL}/${galleryId}`, {
-    method: 'GET',
   });
 }
 

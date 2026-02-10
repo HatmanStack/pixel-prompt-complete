@@ -22,22 +22,10 @@ export const ResponsiveLayout: FC<ResponsiveLayoutProps> = ({
   const { isDesktop } = useBreakpoint();
 
   if (isDesktop) {
-    return (
-      <DesktopLayout
-        gallery={gallery}
-        generation={generation}
-        className={className}
-      />
-    );
+    return <DesktopLayout gallery={gallery} generation={generation} className={className} />;
   }
 
-  return (
-    <MobileLayout
-      gallery={gallery}
-      generation={generation}
-      className={className}
-    />
-  );
+  return <MobileLayout gallery={gallery} generation={generation} className={className} />;
 };
 
 export default ResponsiveLayout;

@@ -17,29 +17,21 @@ export const useUIStore = create<UIStore>((set) => ({
   isMobileMenuOpen: false,
 
   // Modal actions
-  openModal: (content: string) =>
-    set({ isModalOpen: true, modalContent: content }),
+  openModal: (content: string) => set({ isModalOpen: true, modalContent: content }),
 
-  closeModal: () =>
-    set({ isModalOpen: false, modalContent: null }),
+  closeModal: () => set({ isModalOpen: false, modalContent: null }),
 
   // Sound actions
-  toggleMute: () =>
-    set((state) => ({ isMuted: !state.isMuted })),
+  toggleMute: () => set((state) => ({ isMuted: !state.isMuted })),
 
-  setVolume: (volume: number) =>
-    set({ volume: Math.max(0, Math.min(1, volume)) }),
+  setVolume: (volume: number) => set({ volume: Math.max(0, Math.min(1, volume)) }),
 
-  setSoundsLoaded: (loaded: boolean) =>
-    set({ soundsLoaded: loaded }),
+  setSoundsLoaded: (loaded: boolean) => set({ soundsLoaded: loaded }),
 
   // Mobile actions
-  toggleGalleryDrawer: () =>
-    set((state) => ({ isGalleryDrawerOpen: !state.isGalleryDrawerOpen })),
+  toggleGalleryDrawer: () => set((state) => ({ isGalleryDrawerOpen: !state.isGalleryDrawerOpen })),
 
-  toggleMobileMenu: () =>
-    set((state) => ({ isMobileMenuOpen: !state.isMobileMenuOpen })),
+  toggleMobileMenu: () => set((state) => ({ isMobileMenuOpen: !state.isMobileMenuOpen })),
 
-  closeMobileMenu: () =>
-    set({ isMobileMenuOpen: false }),
+  closeMobileMenu: () => set({ isMobileMenuOpen: false }),
 }));

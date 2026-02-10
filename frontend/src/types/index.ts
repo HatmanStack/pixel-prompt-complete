@@ -3,7 +3,7 @@
  * Re-exports all types for convenient importing
  */
 
-// API types - New session-based types
+// API types
 export type {
   ModelName,
   IterationStatus,
@@ -21,15 +21,6 @@ export type {
   SessionGalleryDetailResponse,
   SelectionState,
   ApiError,
-  // Legacy types (for backwards compatibility)
-  JobStatus,
-  ImageResult,
-  Job,
-  StatusResponse,
-  GalleryPreview,
-  GenerateResponse,
-  GalleryListResponse,
-  GalleryDetailResponse,
 } from './api';
 
 // API constants

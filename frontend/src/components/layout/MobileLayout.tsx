@@ -12,21 +12,14 @@ interface MobileLayoutProps {
   className?: string;
 }
 
-export const MobileLayout: FC<MobileLayoutProps> = ({
-  gallery,
-  generation,
-  className = '',
-}) => {
+export const MobileLayout: FC<MobileLayoutProps> = ({ gallery, generation, className = '' }) => {
   const { isGalleryDrawerOpen, toggleGalleryDrawer } = useUIStore();
 
   return (
     <div className={`relative flex flex-col h-full w-full ${className}`}>
       {/* Main content - generation panel */}
       <main className="flex-1 overflow-hidden">
-        <section
-          className="h-full flex flex-col rounded-lg bg-secondary"
-          aria-label="Generation"
-        >
+        <section className="h-full flex flex-col rounded-lg bg-secondary" aria-label="Generation">
           {generation}
         </section>
       </main>
@@ -104,19 +97,13 @@ export const MobileLayout: FC<MobileLayoutProps> = ({
                 stroke="currentColor"
                 className="w-6 h-6"
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M6 18L18 6M6 6l12 12"
-                />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
           </div>
 
           {/* Gallery content */}
-          <div className="flex-1 overflow-auto">
-            {gallery}
-          </div>
+          <div className="flex-1 overflow-auto">{gallery}</div>
         </div>
       </aside>
     </div>

@@ -23,7 +23,14 @@ export const MODELS: ModelName[] = ['flux', 'recraft', 'gemini', 'openai'];
 
 // Status values from backend API (in_progress) are mapped to 'loading' in frontend
 // 'disabled' is used for models that are not enabled
-export type IterationStatus = 'pending' | 'loading' | 'in_progress' | 'completed' | 'error' | 'disabled' | 'partial';
+export type IterationStatus =
+  | 'pending'
+  | 'loading'
+  | 'in_progress'
+  | 'completed'
+  | 'error'
+  | 'disabled'
+  | 'partial';
 
 export interface Iteration {
   index: number;
@@ -78,13 +85,6 @@ export interface SessionGenerateResponse {
   status: string;
 }
 
-// Legacy generate response (for backwards compatibility)
-export interface GenerateResponse {
-  jobId: string;
-  status: JobStatus;
-  message?: string;
-}
-
 export interface IterateResponse {
   sessionId: string;
   model: ModelName;
@@ -108,29 +108,33 @@ export interface EnhanceResponse {
   original_prompt?: string;
 }
 
-// New session-based gallery list response
-export interface SessionGalleryListResponse {
-  sessions: SessionPreview[];
-  total: number;
-}
-
-// Legacy gallery list response (for backwards compatibility)
-export interface GalleryListResponse {
-  galleries: GalleryPreview[];
-  total: number;
-}
-
-// New session-based gallery detail response
-export interface SessionGalleryDetailResponse {
-  session: Session;
-}
-
-// Legacy gallery detail response (for backwards compatibility)
-export interface GalleryDetailResponse {
+// Gallery list response (matches backend handle_gallery_list)
+export interface GalleryListItem {
   id: string;
-  prompt: string;
   timestamp: string;
-  images: ImageResult[];
+  previewData?: string;
+  imageCount: number;
+}
+
+export interface SessionGalleryListResponse {
+  galleries: GalleryListItem[];
+  total: number;
+}
+
+// Gallery detail response (matches backend handle_gallery_detail)
+export interface GalleryDetailImage {
+  key: string;
+  url: string;
+  model: string;
+  prompt: string;
+  timestamp?: string;
+  output?: string;
+}
+
+export interface SessionGalleryDetailResponse {
+  galleryId: string;
+  images: GalleryDetailImage[];
+  total: number;
 }
 
 // ====================
@@ -152,38 +156,4 @@ export interface ApiError {
   message?: string;
   status?: number;
   correlationId?: string;
-}
-
-// ====================
-// Legacy Types (for backwards compatibility during transition)
-// ====================
-
-export type JobStatus = 'pending' | 'in_progress' | 'completed' | 'partial' | 'failed';
-
-export interface ImageResult {
-  model: string;
-  provider: string;
-  url: string;
-  status: 'success' | 'error';
-  error?: string;
-}
-
-export interface Job {
-  jobId: string;
-  status: JobStatus;
-  prompt: string;
-  createdAt: string;
-  completedAt?: string;
-  results: ImageResult[];
-  modelCount: number;
-}
-
-export interface StatusResponse extends Job {}
-
-export interface GalleryPreview {
-  id: string;
-  timestamp: string;
-  prompt: string;
-  thumbnailUrl: string;
-  imageCount: number;
 }

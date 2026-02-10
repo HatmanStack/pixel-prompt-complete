@@ -3,10 +3,7 @@
  */
 
 import type {
-  GenerateResponse,
   EnhanceResponse,
-  GalleryListResponse,
-  GalleryDetailResponse,
   ApiError,
 } from '@/types';
 
@@ -26,7 +23,7 @@ interface MockJobStatus {
   results: MockJobResult[];
 }
 
-export const mockGenerateResponse: GenerateResponse = {
+export const mockGenerateResponse = {
   jobId: 'test-job-123',
   status: 'pending',
   message: 'Job created successfully',
@@ -163,7 +160,7 @@ export const mockEnhanceResponse: EnhanceResponse = {
   enhanced_prompt: 'A majestic orange tabby cat sitting regally on a velvet cushion, photographed in soft natural lighting',
 };
 
-export const mockGalleryListResponse: GalleryListResponse = {
+export const mockGalleryListResponse = {
   galleries: [
     {
       id: '2025-11-16-10-30-00',
@@ -183,7 +180,7 @@ export const mockGalleryListResponse: GalleryListResponse = {
   total: 2
 };
 
-export const mockGalleryDetailResponse: GalleryDetailResponse = {
+export const mockGalleryDetailResponse = {
   id: '2025-11-16-10-30-00',
   prompt: 'test prompt',
   timestamp: '2025-11-16T10:30:00Z',

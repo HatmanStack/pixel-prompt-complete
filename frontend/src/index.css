@@ -1,4 +1,4 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 
 /* Custom Design Tokens (from Phase-0 spec) */
 @theme {
@@ -7,26 +7,26 @@
   --color-secondary: #3a3c3f;
 
   /* Accent colors - adjusted for WCAG AA contrast compliance */
-  --color-accent: #C49AAB;
-  --color-accent-hover: #D5B0BF;
-  --color-accent-muted: #A9A1B5;
+  --color-accent: #c49aab;
+  --color-accent-hover: #d5b0bf;
+  --color-accent-muted: #a9a1b5;
 
   /* Text */
-  --color-text: #FFFFFF;
-  --color-text-secondary: #CCCCCC;
+  --color-text: #ffffff;
+  --color-text-secondary: #cccccc;
   --color-text-dark: #000000;
 
   /* Interactive */
-  --color-button: #958DA5;
-  --color-button-pressed: #7A7085;
-  --color-button-success: #9DA58D;
-  --color-button-danger: #FF6B6B;
+  --color-button: #958da5;
+  --color-button-pressed: #7a7085;
+  --color-button-success: #9da58d;
+  --color-button-danger: #ff6b6b;
 
   /* Semantic */
-  --color-success: #9DA58D;
-  --color-error: #FF6B6B;
-  --color-warning: #FFB347;
-  --color-info: #87CEEB;
+  --color-success: #9da58d;
+  --color-error: #ff6b6b;
+  --color-warning: #ffb347;
+  --color-info: #87ceeb;
 
   /* Typography */
   --font-display: 'Sigmar', cursive;
@@ -44,7 +44,8 @@
 
 /* Custom keyframes */
 @keyframes breathe {
-  0%, 100% {
+  0%,
+  100% {
     transform: scale(1);
     opacity: 1;
   }
@@ -56,7 +57,8 @@
 
 /* Letter breathing animation for header - refined for organic feel */
 @keyframes letter-breathe {
-  0%, 100% {
+  0%,
+  100% {
     transform: scale(1) translateY(0);
     opacity: 1;
     filter: brightness(1);
@@ -79,7 +81,8 @@
 }
 
 @keyframes pulse-soft {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 1;
   }
   50% {
@@ -132,7 +135,8 @@
 
 /* Playful bounce animation for spinners */
 @keyframes spinBounce {
-  0%, 100% {
+  0%,
+  100% {
     transform: rotate(0deg) scale(1);
   }
   25% {
@@ -148,7 +152,8 @@
 
 /* Gentle pulse animation for loading indicators */
 @keyframes gentlePulse {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 1;
     transform: scale(1);
   }

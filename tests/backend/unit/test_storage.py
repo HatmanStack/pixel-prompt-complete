@@ -126,6 +126,48 @@ class TestImageStorage:
         assert retrieved['model'] == 'Test Model'
         assert retrieved['prompt'] == 'test'
 
+    def test_upload_image_to_sessions(self, mock_s3):
+        """Test uploading image to S3 under sessions prefix"""
+        s3_client, bucket_name = mock_s3
+
+        storage = ImageStorage(s3_client, bucket_name, 'https://cdn.example.com')
+
+        image_data = SAMPLE_IMAGE_BASE64
+
+        key = storage.upload_image(
+            base64_image=image_data,
+            target='2025-11-16-10-30-00',
+            model_name='flux',
+            prompt='test prompt',
+            iteration=0,
+        )
+
+        assert key is not None
+        assert 'sessions/' in key
+        assert 'flux' in key
+        assert 'iter0' in key
+
+        # Verify image was uploaded
+        response = s3_client.get_object(Bucket=bucket_name, Key=key)
+        assert response is not None
+
+    def test_upload_image_without_iteration(self, mock_s3):
+        """Test uploading image without iteration index"""
+        s3_client, bucket_name = mock_s3
+
+        storage = ImageStorage(s3_client, bucket_name, 'https://cdn.example.com')
+
+        key = storage.upload_image(
+            base64_image=SAMPLE_IMAGE_BASE64,
+            target='2025-11-16-10-30-00',
+            model_name='gemini',
+            prompt='test prompt',
+        )
+
+        assert key is not None
+        assert 'sessions/' in key
+        assert 'iter' not in key
+
     def test_error_handling_invalid_key(self, mock_s3):
         """Test error handling for invalid S3 keys"""
         s3_client, bucket_name = mock_s3

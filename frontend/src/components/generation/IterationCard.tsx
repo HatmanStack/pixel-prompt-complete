@@ -3,7 +3,7 @@
  * Displays a single iteration with image, status, and metadata
  */
 
-import type { FC } from 'react';
+import { memo, type FC } from 'react';
 import { LoadingSkeleton } from '@/components/common/LoadingSkeleton';
 import type { ModelName, Iteration } from '@/types';
 import { MODEL_DISPLAY_NAMES } from '@/types';
@@ -39,9 +39,7 @@ const StatusBadge: FC<{ status: Iteration['status'] }> = ({ status }) => {
   };
 
   return (
-    <span
-      className={`px-2 py-0.5 text-xs font-medium rounded-full ${statusStyles[status]}`}
-    >
+    <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${statusStyles[status]}`}>
       {statusLabels[status]}
     </span>
   );
@@ -76,12 +74,7 @@ const ErrorState: FC<{ error?: string }> = ({ error }) => (
  */
 const PendingPlaceholder: FC = () => (
   <div className="w-full aspect-square bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
-    <svg
-      className="w-8 h-8 text-gray-400"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-    >
+    <svg className="w-8 h-8 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -100,11 +93,7 @@ function truncate(text: string, length: number): string {
   return text.slice(0, length - 3) + '...';
 }
 
-export const IterationCard: FC<IterationCardProps> = ({
-  model,
-  iteration,
-  onExpand,
-}) => {
+export const IterationCard: FC<IterationCardProps> = memo(({ model, iteration, onExpand }) => {
   const isClickable = iteration.status === 'completed' && iteration.imageUrl;
 
   return (
@@ -128,9 +117,7 @@ export const IterationCard: FC<IterationCardProps> = ({
           : undefined
       }
       aria-label={
-        isClickable
-          ? `View ${MODEL_DISPLAY_NAMES[model]} iteration ${iteration.index}`
-          : undefined
+        isClickable ? `View ${MODEL_DISPLAY_NAMES[model]} iteration ${iteration.index}` : undefined
       }
     >
       {/* Status indicator badge */}
@@ -162,6 +149,6 @@ export const IterationCard: FC<IterationCardProps> = ({
       </div>
     </div>
   );
-};
+});
 
 export default IterationCard;

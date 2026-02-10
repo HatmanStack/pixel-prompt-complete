@@ -4,9 +4,16 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { listGalleries, getGallery } from '@/api/client';
+import { listSessions, getSessionDetail } from '@/api/client';
 import { base64ToBlobUrl } from '@/utils/imageHelpers';
-import type { GalleryPreview } from '@/types';
+
+interface GalleryItem {
+  id: string;
+  timestamp: string;
+  imageCount: number;
+  previewData?: string;
+  preview?: string;
+}
 
 interface GalleryImage {
   model: string;
@@ -21,13 +28,8 @@ interface SelectedGallery {
   total: number;
 }
 
-interface GalleryWithPreview extends GalleryPreview {
-  previewData?: string;
-  preview?: string;
-}
-
 interface UseGalleryReturn {
-  galleries: GalleryWithPreview[];
+  galleries: GalleryItem[];
   selectedGallery: SelectedGallery | null;
   loading: boolean;
   error: string | null;
@@ -43,7 +45,7 @@ interface UseGalleryReturn {
  * Custom hook for gallery management
  */
 function useGallery(): UseGalleryReturn {
-  const [galleries, setGalleries] = useState<GalleryWithPreview[]>([]);
+  const [galleries, setGalleries] = useState<GalleryItem[]>([]);
   const [selectedGallery, setSelectedGallery] = useState<SelectedGallery | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,7 +63,7 @@ function useGallery(): UseGalleryReturn {
     setError(null);
 
     try {
-      const response = await listGalleries();
+      const response = await listSessions();
 
       // Revoke old preview blob URLs to prevent memory leaks
       previewBlobUrlsRef.current.forEach((url) => {
@@ -71,25 +73,27 @@ function useGallery(): UseGalleryReturn {
       });
       previewBlobUrlsRef.current = [];
 
-      // Convert preview base64 data to blob URLs
-      const galleriesWithPreviews = (
-        (response.galleries || []) as GalleryWithPreview[]
-      ).map((gallery) => {
+      // Map API response to GalleryItem with blob URL previews
+      const galleriesWithPreviews = (response.galleries || []).map((gallery): GalleryItem => {
+        const item: GalleryItem = {
+          id: gallery.id,
+          timestamp: gallery.timestamp,
+          imageCount: gallery.imageCount,
+          previewData: gallery.previewData,
+        };
+
         if (gallery.previewData) {
           try {
             const previewBlob = base64ToBlobUrl(gallery.previewData);
             if (previewBlob) {
               previewBlobUrlsRef.current.push(previewBlob);
-              return {
-                ...gallery,
-                preview: previewBlob,
-              };
+              return { ...item, preview: previewBlob };
             }
           } catch (err) {
             console.warn(`Failed to convert preview for gallery ${gallery.id}:`, err);
           }
         }
-        return gallery;
+        return item;
       });
 
       setGalleries(galleriesWithPreviews);
@@ -123,31 +127,34 @@ function useGallery(): UseGalleryReturn {
       });
       imageBlobUrlsRef.current = [];
 
-      const response = await getGallery(galleryId);
+      const detail = await getSessionDetail(galleryId);
 
       // Convert base64 images to blob URLs
-      const imagesWithBlobs = ((response.images || []) as GalleryImage[]).map((img) => {
+      const imagesWithBlobs: GalleryImage[] = (detail.images || []).map((img) => {
+        const galleryImage: GalleryImage = {
+          model: img.model,
+          url: img.url,
+          output: img.output,
+        };
+
         if (img.output) {
           try {
             const blobUrl = base64ToBlobUrl(img.output);
             if (blobUrl) {
               imageBlobUrlsRef.current.push(blobUrl);
-              return {
-                ...img,
-                blobUrl,
-              };
+              return { ...galleryImage, blobUrl };
             }
           } catch (err) {
             console.warn(`Failed to convert image blob for ${img.model}:`, err);
           }
         }
-        return img;
+        return galleryImage;
       });
 
       setSelectedGallery({
-        id: response.id,
+        id: detail.galleryId,
         images: imagesWithBlobs,
-        total: response.images?.length || 0,
+        total: detail.total,
       });
     } catch (err) {
       console.error(`Error loading gallery ${galleryId}:`, err);
