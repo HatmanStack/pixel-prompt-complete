@@ -171,7 +171,7 @@ class SessionManager:
             session['updatedAt'] = now
             session['version'] = original_version + 1
 
-            if self._save_status_with_version(session_id, session, original_version):
+            if self._save_status_with_version(session_id, session):
                 return iteration_index
 
             time.sleep(RETRY_DELAY_MS / 1000.0)
@@ -231,7 +231,7 @@ class SessionManager:
             session['updatedAt'] = now
             session['version'] = original_version + 1
 
-            if self._save_status_with_version(session_id, session, original_version):
+            if self._save_status_with_version(session_id, session):
                 return
 
             time.sleep(RETRY_DELAY_MS / 1000.0)
@@ -287,7 +287,7 @@ class SessionManager:
             session['updatedAt'] = now
             session['version'] = original_version + 1
 
-            if self._save_status_with_version(session_id, session, original_version):
+            if self._save_status_with_version(session_id, session):
                 return
 
             time.sleep(RETRY_DELAY_MS / 1000.0)
@@ -363,7 +363,6 @@ class SessionManager:
         self,
         session_id: str,
         status: Dict,
-        expected_version: int,
     ) -> bool:
         """
         Save with ETag-based conditional write for optimistic locking.

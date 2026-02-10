@@ -73,25 +73,27 @@ function useGallery(): UseGalleryReturn {
       });
       previewBlobUrlsRef.current = [];
 
-      // Convert preview base64 data to blob URLs
-      const galleriesWithPreviews = (
-        ((response as unknown as Record<string, unknown>).galleries || []) as GalleryItem[]
-      ).map((gallery) => {
+      // Map API response to GalleryItem with blob URL previews
+      const galleriesWithPreviews = (response.galleries || []).map((gallery): GalleryItem => {
+        const item: GalleryItem = {
+          id: gallery.id,
+          timestamp: gallery.timestamp,
+          imageCount: gallery.imageCount,
+          previewData: gallery.previewData,
+        };
+
         if (gallery.previewData) {
           try {
             const previewBlob = base64ToBlobUrl(gallery.previewData);
             if (previewBlob) {
               previewBlobUrlsRef.current.push(previewBlob);
-              return {
-                ...gallery,
-                preview: previewBlob,
-              };
+              return { ...item, preview: previewBlob };
             }
           } catch (err) {
             console.warn(`Failed to convert preview for gallery ${gallery.id}:`, err);
           }
         }
-        return gallery;
+        return item;
       });
 
       setGalleries(galleriesWithPreviews);
@@ -125,36 +127,34 @@ function useGallery(): UseGalleryReturn {
       });
       imageBlobUrlsRef.current = [];
 
-      const response = await getSessionDetail(galleryId);
-      const detail = response as unknown as {
-        galleryId: string;
-        images: GalleryImage[];
-        total: number;
-      };
+      const detail = await getSessionDetail(galleryId);
 
       // Convert base64 images to blob URLs
-      const imagesWithBlobs = ((detail.images || []) as GalleryImage[]).map((img) => {
+      const imagesWithBlobs: GalleryImage[] = (detail.images || []).map((img) => {
+        const galleryImage: GalleryImage = {
+          model: img.model,
+          url: img.url,
+          output: img.output,
+        };
+
         if (img.output) {
           try {
             const blobUrl = base64ToBlobUrl(img.output);
             if (blobUrl) {
               imageBlobUrlsRef.current.push(blobUrl);
-              return {
-                ...img,
-                blobUrl,
-              };
+              return { ...galleryImage, blobUrl };
             }
           } catch (err) {
             console.warn(`Failed to convert image blob for ${img.model}:`, err);
           }
         }
-        return img;
+        return galleryImage;
       });
 
       setSelectedGallery({
         id: detail.galleryId,
         images: imagesWithBlobs,
-        total: detail.images?.length || 0,
+        total: detail.total,
       });
     } catch (err) {
       console.error(`Error loading gallery ${galleryId}:`, err);

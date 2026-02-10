@@ -278,12 +278,11 @@ export const GenerationPanel: FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prompt, isGenerating, expandedImage]);
 
-  // Legacy gallery handler - for backwards compatibility
+  // Legacy gallery handler - no-op, kept for GalleryBrowser prop compatibility
   const handleGallerySelect = (
-    gallery: { id: string; images: { model: string; url?: string }[] } | null,
+    _gallery: { id: string; images: { model: string; url?: string }[] } | null,
   ) => {
-    // Legacy handler - can be extended to load sessions in future
-    console.log('Gallery selected:', gallery?.id);
+    // No-op: gallery selection handled internally by GalleryBrowser
   };
 
   return (

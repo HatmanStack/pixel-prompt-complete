@@ -108,15 +108,33 @@ export interface EnhanceResponse {
   original_prompt?: string;
 }
 
-// New session-based gallery list response
+// Gallery list response (matches backend handle_gallery_list)
+export interface GalleryListItem {
+  id: string;
+  timestamp: string;
+  previewData?: string;
+  imageCount: number;
+}
+
 export interface SessionGalleryListResponse {
-  sessions: SessionPreview[];
+  galleries: GalleryListItem[];
   total: number;
 }
 
-// New session-based gallery detail response
+// Gallery detail response (matches backend handle_gallery_detail)
+export interface GalleryDetailImage {
+  key: string;
+  url: string;
+  model: string;
+  prompt: string;
+  timestamp?: string;
+  output?: string;
+}
+
 export interface SessionGalleryDetailResponse {
-  session: Session;
+  galleryId: string;
+  images: GalleryDetailImage[];
+  total: number;
 }
 
 // ====================

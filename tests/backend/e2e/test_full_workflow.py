@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-from tests.backend.e2e.conftest import skip_no_localstack
+from .conftest import skip_no_localstack
 
 pytestmark = [pytest.mark.e2e, skip_no_localstack]
 

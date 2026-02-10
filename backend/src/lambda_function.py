@@ -726,9 +726,15 @@ def handle_gallery_detail(event: LambdaEvent, correlation_id: Optional[str] = No
         images = []
         futures = {_executor.submit(_load_image, key): key for key in image_keys}
         for future in as_completed(futures):
-            result = future.result()
-            if result:
-                images.append(result)
+            try:
+                result = future.result()
+                if result:
+                    images.append(result)
+            except Exception as e:
+                StructuredLogger.warning(
+                    f"Failed to load image {futures[future]}: {e}",
+                    correlation_id=correlation_id,
+                )
 
         return response(200, {
             'galleryId': gallery_id,

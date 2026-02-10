@@ -4,7 +4,7 @@
  */
 
 import { useEffect, useState, type FC } from 'react';
-import { getSessionDetail } from '@/api/client';
+import { getSessionStatus } from '@/api/client';
 import { ModelColumn } from '@/components/generation/ModelColumn';
 import { ImageModal } from '@/components/features/generation/ImageModal';
 import Modal from '@/components/common/Modal';
@@ -46,9 +46,9 @@ export const SessionDetail: FC<SessionDetailProps> = ({ sessionId, onClose }) =>
       try {
         setLoading(true);
         setError(null);
-        const response = await getSessionDetail(sessionId);
+        const session = await getSessionStatus(sessionId);
         if (mounted) {
-          setSession(response.session);
+          setSession(session);
         }
       } catch (err) {
         if (mounted) {

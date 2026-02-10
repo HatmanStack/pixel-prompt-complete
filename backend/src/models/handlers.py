@@ -41,8 +41,9 @@ _bedrock_sd_client = None
 
 
 def _get_openai_client(api_key: str, **kwargs) -> OpenAI:
-    """Get or create a cached OpenAI client keyed by api_key."""
-    cache_key = api_key or '__default__'
+    """Get or create a cached OpenAI client keyed by api_key and relevant kwargs."""
+    extra = tuple(sorted((k, v) for k, v in kwargs.items() if k in ('base_url', 'timeout')))
+    cache_key = (api_key or '__default__', extra)
     if cache_key not in _openai_clients:
         _openai_clients[cache_key] = OpenAI(
             api_key=api_key or None,

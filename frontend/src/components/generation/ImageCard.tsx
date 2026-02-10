@@ -4,7 +4,16 @@
  * Memoized to prevent unnecessary re-renders in grid
  */
 
-import { useState, useEffect, memo, type FC, type KeyboardEvent, type MouseEvent } from 'react';
+import {
+  useState,
+  useEffect,
+  memo,
+  useCallback,
+  type FC,
+  type KeyboardEvent,
+  type MouseEvent,
+  type TouchEvent,
+} from 'react';
 import { useToast } from '@/stores/useToastStore';
 import { downloadImage } from '@/utils/imageHelpers';
 import { useSound } from '@/hooks/useSound';
@@ -29,6 +38,7 @@ const ImageCard: FC<ImageCardProps> = ({
   const { success, error: errorToast } = useToast();
   const { playSound } = useSound();
   const [imageError, setImageError] = useState(false);
+  const [actionsVisible, setActionsVisible] = useState(false);
 
   // Reset imageError when image prop changes
   useEffect(() => {
@@ -80,6 +90,16 @@ const ImageCard: FC<ImageCardProps> = ({
   const isCompleted = status === 'completed' || status === 'success';
   const isClickable = isCompleted && image && !imageError;
 
+  const handleTouchToggle = useCallback(
+    (e: TouchEvent<HTMLDivElement>) => {
+      if (isClickable) {
+        e.preventDefault();
+        setActionsVisible((v) => !v);
+      }
+    },
+    [isClickable],
+  );
+
   const renderContent = () => {
     if (status === 'pending' || status === 'loading') {
       return (
@@ -126,7 +146,9 @@ const ImageCard: FC<ImageCardProps> = ({
             onError={handleImageError}
             loading="lazy"
           />
-          <div className="absolute top-2 right-2 flex gap-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+          <div
+            className={`absolute top-2 right-2 flex gap-1 z-10 transition-opacity duration-150 ${actionsVisible ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'}`}
+          >
             <button
               className="
                 w-8 h-8 flex items-center justify-center
@@ -181,6 +203,7 @@ const ImageCard: FC<ImageCardProps> = ({
       `}
       onClick={handleClick}
       onKeyDown={handleKeyDown}
+      onTouchStart={handleTouchToggle}
       role={isClickable ? 'button' : undefined}
       tabIndex={isClickable ? 0 : undefined}
       aria-label={isClickable ? `View ${model || 'image'}` : undefined}

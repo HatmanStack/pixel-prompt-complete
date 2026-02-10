@@ -118,7 +118,7 @@ class ImageStorage:
         target: str,
         model_name: str,
         prompt: str,
-        iteration: int = None,
+        iteration: Optional[int] = None,
     ) -> str:
         """Upload a generated image to S3 under sessions prefix with metadata."""
         normalized_model = self._normalize_model_name(model_name)

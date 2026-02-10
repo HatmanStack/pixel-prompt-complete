@@ -61,14 +61,14 @@ class RateLimiter:
         ip_hash = hashlib.sha256(ip_address.encode()).hexdigest()[:16]
         ip_key = f"rate-limit/ip/{ip_hash}/{now.strftime('%Y-%m-%d')}.json"
 
+        # Check IP first to avoid inflating global counter on per-IP rejection
+        ip_count = self._atomic_increment(ip_key, self.ip_limit)
+        if ip_count is None:
+            return True
+
         # Atomic check-and-increment global counter
         global_count = self._atomic_increment(global_key, self.global_limit)
         if global_count is None:
-            return True
-
-        # Atomic check-and-increment IP counter
-        ip_count = self._atomic_increment(ip_key, self.ip_limit)
-        if ip_count is None:
             return True
 
         StructuredLogger.debug(
@@ -97,9 +97,8 @@ class RateLimiter:
 
             time.sleep(0.05 * (_attempt + 1))
 
-        # Final fallback: re-read and check limit only
-        count, _ = self._read_counter(key)
-        return None if count >= limit else count + 1
+        # Final fallback: reject to avoid inconsistent counter state
+        return None
 
     def _read_counter(self, key: str) -> tuple[int, str | None]:
         """Read a counter value and ETag from S3. Returns (count, etag)."""

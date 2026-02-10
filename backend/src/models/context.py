@@ -221,6 +221,8 @@ class ContextManager:
             }
             if expected_etag:
                 put_kwargs['IfMatch'] = expected_etag
+            else:
+                put_kwargs['IfNoneMatch'] = '*'
 
             self.s3.put_object(**put_kwargs)
             return True

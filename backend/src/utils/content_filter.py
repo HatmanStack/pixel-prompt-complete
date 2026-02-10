@@ -11,21 +11,29 @@ import unicodedata
 # Leetspeak substitution map
 _LEET_MAP = str.maketrans('013457@$8', 'oieatyasb')
 
+# Pattern to detect deliberate character-separated evasion (e.g. "n.u.d.e", "n u d e")
+_EVASION_PATTERN = re.compile(r'(?:\w[\s\-_\.]+){2,}\w')
 
-def _normalize(text: str) -> str:
+
+def _normalize_base(text: str) -> str:
     """
-    Normalize text to defeat common filter evasion.
+    Base normalization: lowercase, unicode, leetspeak.
 
     1. Lowercase
     2. Unicode NFKD normalize + strip combining marks (accents, homoglyphs)
     3. Leetspeak substitution (0→o, 1→i, 3→e, etc.)
-    4. Collapse whitespace, hyphens, underscores, dots
     """
     text = text.lower()
     text = unicodedata.normalize('NFKD', text)
     text = ''.join(ch for ch in text if not unicodedata.combining(ch))
     text = text.translate(_LEET_MAP)
-    text = re.sub(r'[\s\-_\.]+', '', text)
+    return text
+
+
+def _normalize_words(text: str) -> str:
+    """Normalize preserving word boundaries (for word-boundary matching)."""
+    text = _normalize_base(text)
+    text = re.sub(r'[\s\-_\.]+', ' ', text).strip()
     return text
 
 
@@ -35,6 +43,10 @@ class ContentFilter:
 
     Uses keyword-based filtering with normalization to detect
     NSFW/inappropriate content even with evasion attempts.
+    Two-pass approach:
+    1. Word-boundary matching on space-preserved text (avoids false positives)
+    2. Evasion detection: collapse char-separated sequences (e.g. "n.u.d.e")
+       and check for keywords
     """
 
     def __init__(self):
@@ -48,8 +60,15 @@ class ContentFilter:
             # Harmful content
             'hate', 'racist', 'offensive', 'discriminatory',
         ]
-        # Pre-normalize keywords once at init
-        self.blocked_keywords = [_normalize(kw) for kw in raw_keywords]
+        # Pre-compile word-boundary patterns (space-preserved normalization)
+        self._word_patterns = [
+            re.compile(r'\b' + re.escape(_normalize_words(kw)) + r'\b')
+            for kw in raw_keywords
+        ]
+        # Pre-normalize keywords for evasion check
+        self._collapsed_keywords = set(
+            re.sub(r'\s+', '', _normalize_words(kw)) for kw in raw_keywords
+        )
 
     def check_prompt(self, prompt: str) -> bool:
         """
@@ -64,10 +83,18 @@ class ContentFilter:
         if not prompt:
             return False
 
-        normalized = _normalize(prompt)
-
-        for keyword in self.blocked_keywords:
-            if keyword in normalized:
+        # Pass 1: word-boundary matching (catches normal usage, avoids false positives)
+        normalized_words = _normalize_words(prompt)
+        for pattern in self._word_patterns:
+            if pattern.search(normalized_words):
                 return True
+
+        # Pass 2: evasion detection — find char-separated sequences, collapse them
+        base = _normalize_base(prompt)
+        for match in _EVASION_PATTERN.finditer(base):
+            collapsed = re.sub(r'[\s\-_\.]+', '', match.group())
+            for keyword in self._collapsed_keywords:
+                if keyword in collapsed:
+                    return True
 
         return False

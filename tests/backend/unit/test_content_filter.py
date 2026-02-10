@@ -107,28 +107,26 @@ class TestContentFilter:
         # Keyword at end
         assert content_filter.check_prompt("artistic portrait that is explicit") is True
 
-    def test_partial_word_match(self):
-        """Test that keywords match as substrings"""
+    def test_word_boundary_avoids_false_positives(self):
+        """Test that word-boundary matching avoids false positives."""
         content_filter = ContentFilter()
 
-        # 'nude' should match 'denuded', 'seminude', etc.
-        assert content_filter.check_prompt("a denuded landscape") is True
+        # 'nude' should NOT match 'denuded' (not a standalone word)
+        assert content_filter.check_prompt("a denuded landscape") is False
 
-        # This is expected behavior for simple keyword filtering
-        # More sophisticated filtering would use word boundaries
+        # 'gore' should NOT match 'gorgeous'
+        assert content_filter.check_prompt("a gorgeous sunset") is False
 
-    def test_safe_words_containing_blocked_substrings(self):
-        """Test edge cases where safe words contain blocked substrings"""
+        # 'hate' should NOT match 'hateful' (the word is 'hateful', not 'hate')
+        assert content_filter.check_prompt("whatever the fate") is False
+
+    def test_standalone_blocked_words_still_caught(self):
+        """Test that standalone blocked words are still caught."""
         content_filter = ContentFilter()
 
-        # These might be false positives with simple keyword matching
-        # Testing actual behavior
-        result = content_filter.check_prompt("a hateful of apples")  # Contains 'hate'
-        # This will be blocked because 'hate' is in 'hateful'
-        assert result is True
-
-        # For production use, would need word boundary detection
-        # Currently testing the actual implementation
+        assert content_filter.check_prompt("pure hate speech") is True
+        assert content_filter.check_prompt("show me nude art") is True
+        assert content_filter.check_prompt("add blood effects") is True
 
     def test_multiple_blocked_keywords_in_prompt(self):
         """Test prompts containing multiple blocked keywords"""
