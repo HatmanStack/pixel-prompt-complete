@@ -387,13 +387,6 @@ class SessionManager:
             code = e.response['Error']['Code']
             if code in ('PreconditionFailed', '412'):
                 return False
-            # For SDK versions that don't support IfMatch, fall back to version check
-            if code == 'ParamValidationError' or 'IfMatch' in str(e):
-                current = self.get_session(session_id)
-                if current and current.get('version', 1) != expected_version:
-                    return False
-                self._save_status(session_id, status)
-                return True
             raise
 
     def _compute_model_status(self, model_data: Dict) -> str:

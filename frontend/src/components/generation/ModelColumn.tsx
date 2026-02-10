@@ -3,7 +3,7 @@
  * Displays a single model's images vertically with all iterations
  */
 
-import type { FC } from 'react';
+import { memo, type FC } from 'react';
 import { IterationCard } from './IterationCard';
 import { IterationInput } from './IterationInput';
 import { OutpaintControls } from './OutpaintControls';
@@ -88,7 +88,7 @@ const DisabledState: FC<{ model: ModelName }> = ({ model }) => (
   </div>
 );
 
-export const ModelColumn: FC<ModelColumnProps> = ({
+export const ModelColumn: FC<ModelColumnProps> = memo(({
   model,
   column,
   isSelected,
@@ -161,6 +161,6 @@ export const ModelColumn: FC<ModelColumnProps> = ({
       <OutpaintControls model={model} />
     </div>
   );
-};
+});
 
 export default ModelColumn;

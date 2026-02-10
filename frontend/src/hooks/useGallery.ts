@@ -4,9 +4,16 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { listGalleries, getGallery } from '@/api/client';
+import { listSessions, getSessionDetail } from '@/api/client';
 import { base64ToBlobUrl } from '@/utils/imageHelpers';
-import type { GalleryPreview } from '@/types';
+
+interface GalleryItem {
+  id: string;
+  timestamp: string;
+  imageCount: number;
+  previewData?: string;
+  preview?: string;
+}
 
 interface GalleryImage {
   model: string;
@@ -21,13 +28,8 @@ interface SelectedGallery {
   total: number;
 }
 
-interface GalleryWithPreview extends GalleryPreview {
-  previewData?: string;
-  preview?: string;
-}
-
 interface UseGalleryReturn {
-  galleries: GalleryWithPreview[];
+  galleries: GalleryItem[];
   selectedGallery: SelectedGallery | null;
   loading: boolean;
   error: string | null;
@@ -43,7 +45,7 @@ interface UseGalleryReturn {
  * Custom hook for gallery management
  */
 function useGallery(): UseGalleryReturn {
-  const [galleries, setGalleries] = useState<GalleryWithPreview[]>([]);
+  const [galleries, setGalleries] = useState<GalleryItem[]>([]);
   const [selectedGallery, setSelectedGallery] = useState<SelectedGallery | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,7 +63,7 @@ function useGallery(): UseGalleryReturn {
     setError(null);
 
     try {
-      const response = await listGalleries();
+      const response = await listSessions();
 
       // Revoke old preview blob URLs to prevent memory leaks
       previewBlobUrlsRef.current.forEach((url) => {
@@ -73,7 +75,7 @@ function useGallery(): UseGalleryReturn {
 
       // Convert preview base64 data to blob URLs
       const galleriesWithPreviews = (
-        (response.galleries || []) as GalleryWithPreview[]
+        ((response as unknown as Record<string, unknown>).galleries || []) as GalleryItem[]
       ).map((gallery) => {
         if (gallery.previewData) {
           try {
@@ -123,10 +125,11 @@ function useGallery(): UseGalleryReturn {
       });
       imageBlobUrlsRef.current = [];
 
-      const response = await getGallery(galleryId);
+      const response = await getSessionDetail(galleryId);
+      const detail = response as unknown as { galleryId: string; images: GalleryImage[]; total: number };
 
       // Convert base64 images to blob URLs
-      const imagesWithBlobs = ((response.images || []) as GalleryImage[]).map((img) => {
+      const imagesWithBlobs = ((detail.images || []) as GalleryImage[]).map((img) => {
         if (img.output) {
           try {
             const blobUrl = base64ToBlobUrl(img.output);
@@ -145,9 +148,9 @@ function useGallery(): UseGalleryReturn {
       });
 
       setSelectedGallery({
-        id: response.id,
+        id: detail.galleryId,
         images: imagesWithBlobs,
-        total: response.images?.length || 0,
+        total: detail.images?.length || 0,
       });
     } catch (err) {
       console.error(`Error loading gallery ${galleryId}:`, err);

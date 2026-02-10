@@ -3,37 +3,25 @@ Rate Limiting module for Pixel Prompt Complete.
 
 Implements S3-based rate limiting with per-timeslice counter keys.
 Global: one counter per hour. Per-IP: one counter per day per hashed IP.
+Uses ETag-conditional writes for atomic increment (no TOCTOU race).
 """
 
 import hashlib
 import json
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any, List
 
 from botocore.exceptions import ClientError
 
 from utils.logger import StructuredLogger
 
-# Module-level cache for Lambda container reuse
-_rate_limit_cache: Dict[str, Any] = {
-    'global_key': None,
-    'global_count': 0,
-    'ip_counts': {},  # {cache_key: count}
-    'timestamp': 0.0,
-}
-CACHE_TTL_SECONDS = 5.0
+# Max retries for atomic increment on ETag conflict
+_ATOMIC_MAX_RETRIES = 3
 
 
 def reset_cache() -> None:
-    """Reset the module-level cache. Used for testing."""
-    global _rate_limit_cache
-    _rate_limit_cache = {
-        'global_key': None,
-        'global_count': 0,
-        'ip_counts': {},
-        'timestamp': 0.0,
-    }
+    """No-op kept for test compatibility."""
 
 
 class RateLimiter:
@@ -63,6 +51,7 @@ class RateLimiter:
         Check if request should be rate limited.
 
         Returns True if rate limited (reject), False if allowed.
+        Uses atomic increment to avoid TOCTOU races.
         """
         if ip_address in self.ip_whitelist:
             return False
@@ -72,66 +61,74 @@ class RateLimiter:
         ip_hash = hashlib.sha256(ip_address.encode()).hexdigest()[:16]
         ip_key = f"rate-limit/ip/{ip_hash}/{now.strftime('%Y-%m-%d')}.json"
 
-        # Read global count
-        global_count = self._read_counter(global_key)
-        if global_count >= self.global_limit:
+        # Atomic check-and-increment global counter
+        global_count = self._atomic_increment(global_key, self.global_limit)
+        if global_count is None:
             return True
 
-        # Read IP count
-        ip_count = self._read_counter(ip_key)
-        if ip_count >= self.ip_limit:
+        # Atomic check-and-increment IP counter
+        ip_count = self._atomic_increment(ip_key, self.ip_limit)
+        if ip_count is None:
             return True
-
-        # Increment both counters
-        self._write_counter(global_key, global_count + 1)
-        self._write_counter(ip_key, ip_count + 1)
 
         StructuredLogger.debug(
-            f"Rate limit check passed: global={global_count + 1}/{self.global_limit}, "
-            f"ip={ip_count + 1}/{self.ip_limit}"
+            f"Rate limit check passed: global={global_count}/{self.global_limit}, "
+            f"ip={ip_count}/{self.ip_limit}"
         )
 
         return False
 
-    def _read_counter(self, key: str) -> int:
-        """Read a counter value from S3, returning 0 if not found."""
-        global _rate_limit_cache
+    def _atomic_increment(self, key: str, limit: int) -> int | None:
+        """
+        Atomically read-check-increment a counter in S3.
 
-        cache_age = time.time() - _rate_limit_cache['timestamp']
+        Returns the new count on success, or None if the limit would be exceeded.
+        Uses ETag conditional writes to prevent concurrent overwrites.
+        """
+        for _attempt in range(_ATOMIC_MAX_RETRIES):
+            count, etag = self._read_counter(key)
 
-        # Check module-level cache
-        if cache_age < CACHE_TTL_SECONDS and key in _rate_limit_cache['ip_counts']:
-            return _rate_limit_cache['ip_counts'][key]
-        if cache_age < CACHE_TTL_SECONDS and key == _rate_limit_cache.get('global_key'):
-            return _rate_limit_cache['global_count']
+            if count >= limit:
+                return None
 
+            new_count = count + 1
+            if self._write_counter_conditional(key, new_count, etag):
+                return new_count
+
+            time.sleep(0.05 * (_attempt + 1))
+
+        # Final fallback: re-read and check limit only
+        count, _ = self._read_counter(key)
+        return None if count >= limit else count + 1
+
+    def _read_counter(self, key: str) -> tuple[int, str | None]:
+        """Read a counter value and ETag from S3. Returns (count, etag)."""
         try:
             response = self.s3.get_object(Bucket=self.bucket, Key=key)
             data = json.loads(response['Body'].read().decode('utf-8'))
-            count = data.get('count', 0)
+            return data.get('count', 0), response.get('ETag')
         except ClientError as e:
             if e.response['Error']['Code'] == 'NoSuchKey':
-                count = 0
-            else:
-                raise
+                return 0, None
+            raise
 
-        # Update cache
-        _rate_limit_cache['ip_counts'][key] = count
-        _rate_limit_cache['timestamp'] = time.time()
+    def _write_counter_conditional(self, key: str, count: int, expected_etag: str | None) -> bool:
+        """Write counter with ETag condition. Returns True on success."""
+        body = json.dumps({'count': count})
+        put_kwargs = {
+            'Bucket': self.bucket,
+            'Key': key,
+            'Body': body,
+            'ContentType': 'application/json',
+        }
+        if expected_etag:
+            put_kwargs['IfMatch'] = expected_etag
 
-        return count
-
-    def _write_counter(self, key: str, count: int) -> None:
-        """Write a counter value to S3 and update cache."""
-        global _rate_limit_cache
-
-        self.s3.put_object(
-            Bucket=self.bucket,
-            Key=key,
-            Body=json.dumps({'count': count}),
-            ContentType='application/json',
-        )
-
-        # Update cache
-        _rate_limit_cache['ip_counts'][key] = count
-        _rate_limit_cache['timestamp'] = time.time()
+        try:
+            self.s3.put_object(**put_kwargs)
+            return True
+        except ClientError as e:
+            code = e.response['Error']['Code']
+            if code in ('PreconditionFailed', '412'):
+                return False
+            raise

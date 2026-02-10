@@ -7,8 +7,6 @@ import { API_BASE_URL, API_ROUTES, REQUEST_TIMEOUT, RETRY_CONFIG } from './confi
 import { generateCorrelationId } from '../utils/correlation';
 import type {
   EnhanceResponse,
-  GalleryListResponse,
-  GalleryDetailResponse,
   ApiError,
   Session,
   SessionGenerateResponse,
@@ -234,24 +232,6 @@ export async function enhancePrompt(prompt: string): Promise<EnhanceResponse> {
   return apiFetch<EnhanceResponse>(API_ROUTES.ENHANCE, {
     method: 'POST',
     body: JSON.stringify({ prompt }),
-  });
-}
-
-/**
- * List all galleries
- */
-export async function listGalleries(): Promise<GalleryListResponse> {
-  return apiFetch<GalleryListResponse>(API_ROUTES.GALLERY_LIST, {
-    method: 'GET',
-  });
-}
-
-/**
- * Get gallery details and all images
- */
-export async function getGallery(galleryId: string): Promise<GalleryDetailResponse> {
-  return apiFetch<GalleryDetailResponse>(`${API_ROUTES.GALLERY_DETAIL}/${galleryId}`, {
-    method: 'GET',
   });
 }
 

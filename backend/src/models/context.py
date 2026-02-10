@@ -5,11 +5,14 @@ Maintains a rolling 3-iteration context window per model column.
 
 import json
 import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from botocore.exceptions import ClientError
+
+from jobs.manager import ConcurrencyError
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +126,7 @@ class ContextManager:
                         pass
             except self.s3.exceptions.NoSuchKey:
                 entries = []
-            except (json.JSONDecodeError, Exception):
+            except (json.JSONDecodeError, KeyError, TypeError):
                 entries = []
 
             entries.append(entry)
@@ -133,8 +136,11 @@ class ContextManager:
             if self._save_context_conditional(session_id, model, entries, etag):
                 return
 
-        # Last attempt without condition
-        self._save_context(session_id, model, entries)
+            time.sleep(0.05 * (_attempt + 1))
+
+        raise ConcurrencyError(
+            f"Failed to add context entry after {max_retries} retries for {session_id}/{model}"
+        )
 
     def clear_context(self, session_id: str, model: str) -> None:
         """
@@ -222,10 +228,6 @@ class ContextManager:
             code = e.response['Error']['Code']
             if code in ('PreconditionFailed', '412'):
                 return False
-            # If IfMatch not supported, just do unconditional write
-            if 'IfMatch' in str(e):
-                self._save_context(session_id, model, entries)
-                return True
             raise
 
     def get_context_for_iteration(

@@ -23,6 +23,7 @@ from config import (
     MAX_ITERATIONS,
     MODELS,
     cloudfront_domain,
+    generate_thread_workers,
     get_enabled_models,
     get_model,
     get_model_config_dict,
@@ -67,9 +68,7 @@ content_filter = ContentFilter()
 prompt_enhancer = PromptEnhancer()
 
 # Module-level thread pool for Lambda container reuse
-_executor = ThreadPoolExecutor(
-    max_workers=int(__import__('os').environ.get('GENERATE_THREAD_WORKERS', '4'))
-)
+_executor = ThreadPoolExecutor(max_workers=generate_thread_workers)
 
 
 def extract_correlation_id(event: LambdaEvent) -> str:

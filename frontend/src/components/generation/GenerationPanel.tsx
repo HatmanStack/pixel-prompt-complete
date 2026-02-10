@@ -16,6 +16,7 @@ import GenerateButton from './GenerateButton';
 import { ModelColumn } from './ModelColumn';
 import { MultiIterateInput } from './MultiIterateInput';
 import GalleryBrowser from '@/components/gallery/GalleryBrowser';
+import { ErrorBoundary } from '@/components/features/errors/ErrorBoundary';
 import { ImageModal } from '@/components/features/generation/ImageModal';
 import type {
   ModelName,
@@ -361,13 +362,15 @@ export const GenerationPanel: FC = () => {
           const column = currentSession?.models[model] ?? createEmptyColumn(model);
           return (
             <div key={model} className="snap-center">
-              <ModelColumn
-                model={model}
-                column={column}
-                isSelected={selectedModels.has(model)}
-                onToggleSelect={() => toggleModelSelection(model)}
-                onImageExpand={handleImageExpand}
-              />
+              <ErrorBoundary componentName={`ModelColumn-${model}`}>
+                <ModelColumn
+                  model={model}
+                  column={column}
+                  isSelected={selectedModels.has(model)}
+                  onToggleSelect={() => toggleModelSelection(model)}
+                  onImageExpand={handleImageExpand}
+                />
+              </ErrorBoundary>
             </div>
           );
         })}
@@ -378,7 +381,9 @@ export const GenerationPanel: FC = () => {
         <h2 id="gallery-section-heading" className="sr-only">
           Previous Generations
         </h2>
-        <GalleryBrowser onGallerySelect={handleGallerySelect} />
+        <ErrorBoundary componentName="GalleryBrowser">
+          <GalleryBrowser onGallerySelect={handleGallerySelect} />
+        </ErrorBoundary>
       </section>
 
       {/* Image Modal */}

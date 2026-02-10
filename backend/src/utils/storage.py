@@ -7,14 +7,17 @@ Handles saving generated images to S3 with metadata and gallery management.
 import base64
 import io
 import json
+import logging
 import re
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from botocore.exceptions import ClientError
 from PIL import Image
 
 from .retry import retry_with_backoff
+
+logger = logging.getLogger(__name__)
 
 
 class ImageStorage:
@@ -35,6 +38,33 @@ class ImageStorage:
         self.bucket = bucket_name
         self.cloudfront_domain = cloudfront_domain
 
+    def _store_image(
+        self,
+        base64_image: str,
+        key: str,
+        model_name: str,
+        prompt: str,
+        target: str,
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Common logic: build metadata dict, upload to S3."""
+        metadata: Dict[str, Any] = {
+            'output': base64_image,
+            'model': model_name,
+            'prompt': prompt,
+            'target': target,
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'NSFW': False,
+        }
+        if extra:
+            metadata.update(extra)
+
+        self._put_object_with_retry(
+            key=key,
+            body=json.dumps(metadata),
+            content_type='application/json',
+        )
+
     def save_image(
         self,
         base64_image: str,
@@ -42,69 +72,23 @@ class ImageStorage:
         prompt: str,
         target: str
     ) -> str:
-        """
-        Save generated image to S3 with metadata and thumbnail.
-
-        Args:
-            base64_image: Base64-encoded image data
-            model_name: Name of the AI model
-            prompt: Text prompt used
-            target: Target timestamp (groups images together)
-
-        Returns:
-            S3 key where image is stored
-        """
-        # Normalize model name for filename
+        """Save generated image to S3 with metadata and thumbnail."""
         normalized_model = self._normalize_model_name(model_name)
-
-        # Generate timestamp
         timestamp = datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')
-
-        # Build S3 key
         key = f"group-images/{target}/{normalized_model}-{timestamp}.json"
 
-        # Build metadata JSON
-        metadata = {
-            'output': base64_image,
-            'model': model_name,
-            'prompt': prompt,
-            'target': target,
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'NSFW': False  # Will be updated by content filter if needed
-        }
+        self._store_image(base64_image, key, model_name, prompt, target)
 
-        # Upload to S3 with retry logic
-        self._put_object_with_retry(
-            key=key,
-            body=json.dumps(metadata),
-            content_type='application/json'
-        )
-
-
-        # Generate and save thumbnail
+        # Generate and save thumbnail (non-critical)
         try:
             thumbnail_base64 = self._generate_thumbnail(base64_image)
             thumbnail_key = f"group-images/{target}/{normalized_model}-{timestamp}-thumb.json"
-
-            thumbnail_metadata = {
-                'output': thumbnail_base64,
-                'model': model_name,
-                'prompt': prompt,
-                'target': target,
-                'timestamp': datetime.now(timezone.utc).isoformat(),
-                'NSFW': False,
-                'thumbnail': True
-            }
-
-            self._put_object_with_retry(
-                key=thumbnail_key,
-                body=json.dumps(thumbnail_metadata),
-                content_type='application/json'
+            self._store_image(
+                thumbnail_base64, thumbnail_key, model_name, prompt, target,
+                extra={'thumbnail': True},
             )
-
-        except Exception:
-            # Continue even if thumbnail fails - not critical
-            pass
+        except Exception as e:
+            logger.debug("Thumbnail generation failed for %s: %s", key, e)
 
         return key
 
@@ -136,41 +120,15 @@ class ImageStorage:
         prompt: str,
         iteration: int = None,
     ) -> str:
-        """
-        Upload a generated image to S3 under sessions prefix with metadata.
-
-        Args:
-            base64_image: Base64-encoded image data
-            target: Target timestamp (groups images together)
-            model_name: Name of the AI model
-            prompt: Text prompt used
-            iteration: Iteration index (optional)
-
-        Returns:
-            S3 key where image is stored
-        """
+        """Upload a generated image to S3 under sessions prefix with metadata."""
         normalized_model = self._normalize_model_name(model_name)
         timestamp = datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')
 
         iter_suffix = f"-iter{iteration}" if iteration is not None else ""
         key = f"sessions/{target}/{normalized_model}-{timestamp}{iter_suffix}.json"
 
-        metadata = {
-            'output': base64_image,
-            'model': model_name,
-            'prompt': prompt,
-            'target': target,
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'NSFW': False,
-        }
-        if iteration is not None:
-            metadata['iteration'] = iteration
-
-        self._put_object_with_retry(
-            key=key,
-            body=json.dumps(metadata),
-            content_type='application/json',
-        )
+        extra = {'iteration': iteration} if iteration is not None else None
+        self._store_image(base64_image, key, model_name, prompt, target, extra=extra)
 
         return key
 

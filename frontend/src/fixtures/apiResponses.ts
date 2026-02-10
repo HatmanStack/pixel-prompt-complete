@@ -2,7 +2,7 @@
  * Mock API responses for testing
  */
 
-import type { EnhanceResponse, GalleryListResponse } from '@/types';
+import type { EnhanceResponse } from '@/types';
 
 interface MockResult {
   model: string;
@@ -90,7 +90,7 @@ export const mockEnhanceResponse: EnhanceResponse = {
     'A majestic orange tabby cat sitting regally on a velvet cushion in golden afternoon light',
 };
 
-export const mockGalleryListResponse: GalleryListResponse = {
+export const mockGalleryListResponse = {
   galleries: [
     {
       id: 'gallery-1',

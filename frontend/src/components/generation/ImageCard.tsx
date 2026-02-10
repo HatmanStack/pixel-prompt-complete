@@ -29,7 +29,6 @@ const ImageCard: FC<ImageCardProps> = ({
   const { success, error: errorToast } = useToast();
   const { playSound } = useSound();
   const [imageError, setImageError] = useState(false);
-  const [showActions, setShowActions] = useState(false);
 
   // Reset imageError when image prop changes
   useEffect(() => {
@@ -127,42 +126,40 @@ const ImageCard: FC<ImageCardProps> = ({
             onError={handleImageError}
             loading="lazy"
           />
-          {showActions && (
-            <div className="absolute top-2 right-2 flex gap-1 z-10 animate-in fade-in duration-150">
-              <button
-                className="
-                  w-8 h-8 flex items-center justify-center
-                  bg-black/70 text-white
-                  border border-white/20 rounded-md
-                  text-base cursor-pointer
-                  transition-all duration-150
-                  backdrop-blur-sm
-                  hover:bg-black/90 hover:scale-110
-                "
-                onClick={handleDownload}
-                aria-label="Download image"
-                title="Download"
-              >
-                ⬇
-              </button>
-              <button
-                className="
-                  w-8 h-8 flex items-center justify-center
-                  bg-black/70 text-white
-                  border border-white/20 rounded-md
-                  text-base cursor-pointer
-                  transition-all duration-150
-                  backdrop-blur-sm
-                  hover:bg-black/90 hover:scale-110
-                "
-                onClick={handleCopyUrl}
-                aria-label="Copy image URL"
-                title="Copy URL"
-              >
-                🔗
-              </button>
-            </div>
-          )}
+          <div className="absolute top-2 right-2 flex gap-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+            <button
+              className="
+                w-8 h-8 flex items-center justify-center
+                bg-black/70 text-white
+                border border-white/20 rounded-md
+                text-base cursor-pointer
+                transition-all duration-150
+                backdrop-blur-sm
+                hover:bg-black/90 hover:scale-110
+              "
+              onClick={handleDownload}
+              aria-label="Download image"
+              title="Download"
+            >
+              ⬇
+            </button>
+            <button
+              className="
+                w-8 h-8 flex items-center justify-center
+                bg-black/70 text-white
+                border border-white/20 rounded-md
+                text-base cursor-pointer
+                transition-all duration-150
+                backdrop-blur-sm
+                hover:bg-black/90 hover:scale-110
+              "
+              onClick={handleCopyUrl}
+              aria-label="Copy image URL"
+              title="Copy URL"
+            >
+              🔗
+            </button>
+          </div>
         </>
       );
     }
@@ -173,7 +170,7 @@ const ImageCard: FC<ImageCardProps> = ({
   return (
     <div
       className={`
-        flex flex-col
+        group flex flex-col
         bg-secondary border border-accent/30 rounded-lg
         overflow-hidden
         shadow-md
@@ -184,8 +181,6 @@ const ImageCard: FC<ImageCardProps> = ({
       `}
       onClick={handleClick}
       onKeyDown={handleKeyDown}
-      onMouseEnter={() => setShowActions(true)}
-      onMouseLeave={() => setShowActions(false)}
       role={isClickable ? 'button' : undefined}
       tabIndex={isClickable ? 0 : undefined}
       aria-label={isClickable ? `View ${model || 'image'}` : undefined}

@@ -107,23 +107,9 @@ export interface SessionGalleryListResponse {
   total: number;
 }
 
-// Legacy gallery list response (for backwards compatibility)
-export interface GalleryListResponse {
-  galleries: GalleryPreview[];
-  total: number;
-}
-
 // New session-based gallery detail response
 export interface SessionGalleryDetailResponse {
   session: Session;
-}
-
-// Legacy gallery detail response (for backwards compatibility)
-export interface GalleryDetailResponse {
-  id: string;
-  prompt: string;
-  timestamp: string;
-  images: ImageResult[];
 }
 
 // ====================
@@ -147,22 +133,3 @@ export interface ApiError {
   correlationId?: string;
 }
 
-// ====================
-// Gallery Types
-// ====================
-
-export interface ImageResult {
-  model: string;
-  provider: string;
-  url: string;
-  status: 'success' | 'error';
-  error?: string;
-}
-
-export interface GalleryPreview {
-  id: string;
-  timestamp: string;
-  prompt: string;
-  thumbnailUrl: string;
-  imageCount: number;
-}

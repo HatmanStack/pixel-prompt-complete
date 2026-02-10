@@ -3,7 +3,7 @@
  * Displays a single iteration with image, status, and metadata
  */
 
-import type { FC } from 'react';
+import { memo, type FC } from 'react';
 import { LoadingSkeleton } from '@/components/common/LoadingSkeleton';
 import type { ModelName, Iteration } from '@/types';
 import { MODEL_DISPLAY_NAMES } from '@/types';
@@ -100,7 +100,7 @@ function truncate(text: string, length: number): string {
   return text.slice(0, length - 3) + '...';
 }
 
-export const IterationCard: FC<IterationCardProps> = ({
+export const IterationCard: FC<IterationCardProps> = memo(({
   model,
   iteration,
   onExpand,
@@ -162,6 +162,6 @@ export const IterationCard: FC<IterationCardProps> = ({
       </div>
     </div>
   );
-};
+});
 
 export default IterationCard;

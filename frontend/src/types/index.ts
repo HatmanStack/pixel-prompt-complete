@@ -21,10 +21,6 @@ export type {
   SessionGalleryDetailResponse,
   SelectionState,
   ApiError,
-  ImageResult,
-  GalleryPreview,
-  GalleryListResponse,
-  GalleryDetailResponse,
 } from './api';
 
 // API constants

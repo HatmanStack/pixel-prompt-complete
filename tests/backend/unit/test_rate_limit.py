@@ -118,6 +118,67 @@ class TestRateLimiter:
         # IP 3 should have full capacity
         assert limiter.check_rate_limit('192.168.1.3') is False
 
+    def test_s3_ifmatch_put_without_etag(self, mock_s3):
+        """Test that put_object works without IfMatch parameter."""
+        s3_client, bucket_name = mock_s3
+        s3_client.put_object(
+            Bucket=bucket_name,
+            Key='test.json',
+            Body=json.dumps({'count': 1}),
+            ContentType='application/json',
+        )
+        resp = s3_client.get_object(Bucket=bucket_name, Key='test.json')
+        data = json.loads(resp['Body'].read().decode('utf-8'))
+        assert data['count'] == 1
+
+    def test_s3_ifmatch_put_with_etag(self, mock_s3):
+        """Test put_object with IfMatch ETag conditional write."""
+        s3_client, bucket_name = mock_s3
+        s3_client.put_object(
+            Bucket=bucket_name,
+            Key='test.json',
+            Body=json.dumps({'count': 1}),
+            ContentType='application/json',
+        )
+        resp = s3_client.get_object(Bucket=bucket_name, Key='test.json')
+        etag = resp.get('ETag')
+        assert etag is not None
+
+        # Conditional write with correct ETag should succeed
+        s3_client.put_object(
+            Bucket=bucket_name,
+            Key='test.json',
+            Body=json.dumps({'count': 2}),
+            ContentType='application/json',
+            IfMatch=etag,
+        )
+        resp2 = s3_client.get_object(Bucket=bucket_name, Key='test.json')
+        data = json.loads(resp2['Body'].read().decode('utf-8'))
+        assert data['count'] == 2
+
+    def test_s3_ifmatch_put_with_wrong_etag(self, mock_s3):
+        """Test put_object with wrong IfMatch ETag — should fail or be ignored."""
+        from botocore.exceptions import ClientError
+        s3_client, bucket_name = mock_s3
+        s3_client.put_object(
+            Bucket=bucket_name,
+            Key='test.json',
+            Body=json.dumps({'count': 1}),
+            ContentType='application/json',
+        )
+        # Depending on S3 mock, wrong ETag may raise PreconditionFailed or succeed
+        try:
+            s3_client.put_object(
+                Bucket=bucket_name,
+                Key='test.json',
+                Body=json.dumps({'count': 99}),
+                ContentType='application/json',
+                IfMatch='"wrongetag"',
+            )
+            # If moto doesn't enforce IfMatch, the write succeeds — that's expected
+        except ClientError as e:
+            assert e.response['Error']['Code'] in ('PreconditionFailed', '412')
+
     def test_counter_persistence(self, mock_s3):
         """Test that counters are persisted to S3"""
         s3_client, bucket_name = mock_s3

@@ -156,3 +156,47 @@ class TestContentFilter:
 
         for prompt in prompts:
             assert content_filter.check_prompt(prompt) is True, f"Keyword with punctuation not blocked: {repr(prompt)}"
+
+
+class TestContentFilterEvasion:
+    """Tests for filter evasion resistance."""
+
+    def test_leetspeak_evasion(self):
+        content_filter = ContentFilter()
+        assert content_filter.check_prompt("nud3") is True
+        assert content_filter.check_prompt("3xplicit") is True
+        assert content_filter.check_prompt("h@t3") is True
+        assert content_filter.check_prompt("n4k3d") is True
+        assert content_filter.check_prompt("vi0l3nt") is True
+
+    def test_spaced_evasion(self):
+        content_filter = ContentFilter()
+        assert content_filter.check_prompt("n u d e") is True
+        assert content_filter.check_prompt("n-u-d-e") is True
+        assert content_filter.check_prompt("n_u_d_e") is True
+        assert content_filter.check_prompt("n.u.d.e") is True
+        assert content_filter.check_prompt("e x p l i c i t") is True
+
+    def test_unicode_evasion(self):
+        content_filter = ContentFilter()
+        # Accented characters
+        assert content_filter.check_prompt("nud\u00e9") is True  # nudé
+        assert content_filter.check_prompt("gor\u00e9") is True  # goré
+
+    def test_combined_evasion(self):
+        content_filter = ContentFilter()
+        # Leetspeak + spacing
+        assert content_filter.check_prompt("n.u.d.3") is True
+        assert content_filter.check_prompt("3 x p l 1 c 1 t") is True
+
+    def test_clean_prompts_still_pass(self):
+        content_filter = ContentFilter()
+        safe = [
+            "a beautiful landscape with mountains",
+            "a cat sitting on a window sill",
+            "abstract art with bright colors",
+            "a futuristic robot in a garden",
+            "a painting of a sunset at the beach",
+        ]
+        for prompt in safe:
+            assert content_filter.check_prompt(prompt) is False, f"Clean prompt blocked: {prompt}"

@@ -127,7 +127,7 @@ describe('ImageCard', () => {
       />
     );
 
-    const card = screen.getByRole('button');
+    const card = screen.getByRole('button', { name: /View Test Model/i });
     fireEvent.keyDown(card, { key: 'Enter' });
 
     expect(mockOnExpand).toHaveBeenCalled();
@@ -143,7 +143,7 @@ describe('ImageCard', () => {
       />
     );
 
-    const card = screen.getByRole('button');
+    const card = screen.getByRole('button', { name: /View Test Model/i });
     fireEvent.keyDown(card, { key: ' ' });
 
     expect(mockOnExpand).toHaveBeenCalled();
@@ -182,7 +182,7 @@ describe('ImageCard', () => {
   it('handles missing model name gracefully', () => {
     render(<ImageCard status="completed" image="test.png" model="" />);
     // Should not crash, model name might be empty or undefined
-    const card = screen.getByRole('button');
+    const card = screen.getByRole('button', { name: /View/i });
     expect(card).toBeInTheDocument();
   });
 
@@ -190,7 +190,7 @@ describe('ImageCard', () => {
     const user = userEvent.setup();
     render(<ImageCard status="completed" image="test.png" model="Test Model" />);
 
-    const card = screen.getByRole('button');
+    const card = screen.getByRole('button', { name: /View Test Model/i });
     await user.click(card);
 
     // Should not throw error

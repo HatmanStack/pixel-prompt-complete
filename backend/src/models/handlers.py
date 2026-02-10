@@ -178,6 +178,17 @@ def sanitize_error_message(error: Union[Exception, str]) -> str:
     return error_str
 
 
+def _success_result(image: str, model_config: ModelConfig, provider: str) -> HandlerResult:
+    """Build standardized success response."""
+    return {'status': 'success', 'image': image, 'model': model_config.get('id', ''), 'provider': provider}
+
+
+def _error_result(error: Exception | str, model_config: ModelConfig, provider: str) -> HandlerResult:
+    """Build standardized error response."""
+    msg = sanitize_error_message(error) if isinstance(error, Exception) else error
+    return {'status': 'error', 'error': msg, 'model': model_config.get('id', ''), 'provider': provider}
+
+
 def handle_openai(model_config: ModelConfig, prompt: str, _params: GenerationParams) -> HandlerResult:
     """
     Handle image generation for OpenAI (DALL-E 2/3 and gpt-image-1).
@@ -235,29 +246,13 @@ def handle_openai(model_config: ModelConfig, prompt: str, _params: GenerationPar
             # Convert to base64
             image_base64 = base64.b64encode(img_response.content).decode('utf-8')
 
-        return {
-            'status': 'success',
-            'image': image_base64,
-            'model': model_id,
-            'provider': 'openai'
-        }
+        return _success_result(image_base64, model_config, 'openai')
 
     except requests.Timeout:
-        error_msg = f"Image download timeout after {image_download_timeout} seconds"
-        return {
-            'status': 'error',
-            'error': error_msg,
-            'model': model_config['id'],
-            'provider': 'openai'
-        }
+        return _error_result(f"Image download timeout after {image_download_timeout} seconds", model_config, 'openai')
 
     except Exception as e:
-        return {
-            'status': 'error',
-            'error': sanitize_error_message(e),
-            'model': model_config['id'],
-            'provider': 'openai'
-        }
+        return _error_result(e, model_config, 'openai')
 
 
 def handle_google_gemini(model_config: ModelConfig, prompt: str, _params: GenerationParams) -> HandlerResult:
@@ -286,21 +281,10 @@ def handle_google_gemini(model_config: ModelConfig, prompt: str, _params: Genera
 
         image_base64 = _extract_gemini_image(response)
 
-
-        return {
-            'status': 'success',
-            'image': image_base64,
-            'model': model_config['id'],
-            'provider': 'google_gemini'
-        }
+        return _success_result(image_base64, model_config, 'google_gemini')
 
     except Exception as e:
-        return {
-            'status': 'error',
-            'error': sanitize_error_message(e),
-            'model': model_config['id'],
-            'provider': 'google_gemini'
-        }
+        return _error_result(e, model_config, 'google_gemini')
 
 
 def handle_google_imagen(model_config: ModelConfig, prompt: str, _params: GenerationParams) -> HandlerResult:
@@ -338,21 +322,10 @@ def handle_google_imagen(model_config: ModelConfig, prompt: str, _params: Genera
         # Convert bytes directly to base64
         image_base64 = base64.b64encode(image_bytes).decode('utf-8')
 
-
-        return {
-            'status': 'success',
-            'image': image_base64,
-            'model': model_config['id'],
-            'provider': 'google_imagen'
-        }
+        return _success_result(image_base64, model_config, 'google_imagen')
 
     except Exception as e:
-        return {
-            'status': 'error',
-            'error': sanitize_error_message(e),
-            'model': model_config['id'],
-            'provider': 'google_imagen'
-        }
+        return _error_result(e, model_config, 'google_imagen')
 
 
 def handle_bedrock_nova(model_config: ModelConfig, prompt: str, params: GenerationParams) -> HandlerResult:
@@ -402,21 +375,10 @@ def handle_bedrock_nova(model_config: ModelConfig, prompt: str, params: Generati
         # Extract base64 image from response
         image_base64 = response_body['images'][0]
 
-
-        return {
-            'status': 'success',
-            'image': image_base64,
-            'model': model_config['id'],
-            'provider': 'bedrock_nova'
-        }
+        return _success_result(image_base64, model_config, 'bedrock_nova')
 
     except Exception as e:
-        return {
-            'status': 'error',
-            'error': sanitize_error_message(e),
-            'model': model_config['id'],
-            'provider': 'bedrock_nova'
-        }
+        return _error_result(e, model_config, 'bedrock_nova')
 
 
 def handle_bedrock_sd(model_config: ModelConfig, prompt: str, params: GenerationParams) -> HandlerResult:
@@ -465,21 +427,10 @@ def handle_bedrock_sd(model_config: ModelConfig, prompt: str, params: Generation
         # Extract base64 image from response
         image_base64 = response_body['images'][0]
 
-
-        return {
-            'status': 'success',
-            'image': image_base64,
-            'model': model_config['id'],
-            'provider': 'bedrock_sd'
-        }
+        return _success_result(image_base64, model_config, 'bedrock_sd')
 
     except Exception as e:
-        return {
-            'status': 'error',
-            'error': sanitize_error_message(e),
-            'model': model_config['id'],
-            'provider': 'bedrock_sd'
-        }
+        return _error_result(e, model_config, 'bedrock_sd')
 
 
 def handle_stability(model_config: ModelConfig, prompt: str, params: GenerationParams) -> HandlerResult:
@@ -525,30 +476,13 @@ def handle_stability(model_config: ModelConfig, prompt: str, params: GenerationP
         # Response is raw image bytes - convert to base64
         image_base64 = base64.b64encode(response.content).decode('utf-8')
 
-
-        return {
-            'status': 'success',
-            'image': image_base64,
-            'model': model_config['id'],
-            'provider': 'stability'
-        }
+        return _success_result(image_base64, model_config, 'stability')
 
     except requests.Timeout:
-        error_msg = "Stability AI request timeout after 60 seconds"
-        return {
-            'status': 'error',
-            'error': error_msg,
-            'model': model_config['id'],
-            'provider': 'stability'
-        }
+        return _error_result("Stability AI request timeout after 60 seconds", model_config, 'stability')
 
     except Exception as e:
-        return {
-            'status': 'error',
-            'error': sanitize_error_message(e),
-            'model': model_config['id'],
-            'provider': 'stability'
-        }
+        return _error_result(e, model_config, 'stability')
 
 
 def handle_bfl(model_config: ModelConfig, prompt: str, params: GenerationParams) -> HandlerResult:
@@ -614,13 +548,7 @@ def handle_bfl(model_config: ModelConfig, prompt: str, params: GenerationParams)
                 # Convert to base64
                 image_base64 = base64.b64encode(img_response.content).decode('utf-8')
 
-
-                return {
-                    'status': 'success',
-                    'image': image_base64,
-                    'model': model_config['id'],
-                    'provider': 'bfl'
-                }
+                return _success_result(image_base64, model_config, 'bfl')
 
             elif status == 'Error':
                 error_msg = result_data.get('error', 'Unknown error')
@@ -630,12 +558,7 @@ def handle_bfl(model_config: ModelConfig, prompt: str, params: GenerationParams)
         raise TimeoutError(f"BFL job timeout after {max_attempts * 3} seconds")
 
     except Exception as e:
-        return {
-            'status': 'error',
-            'error': sanitize_error_message(e),
-            'model': model_config['id'],
-            'provider': 'bfl'
-        }
+        return _error_result(e, model_config, 'bfl')
 
 
 def handle_recraft(model_config: ModelConfig, prompt: str, _params: GenerationParams) -> HandlerResult:
@@ -676,21 +599,10 @@ def handle_recraft(model_config: ModelConfig, prompt: str, _params: GenerationPa
         # Convert to base64
         image_base64 = base64.b64encode(img_response.content).decode('utf-8')
 
-
-        return {
-            'status': 'success',
-            'image': image_base64,
-            'model': model_config['id'],
-            'provider': 'recraft'
-        }
+        return _success_result(image_base64, model_config, 'recraft')
 
     except Exception as e:
-        return {
-            'status': 'error',
-            'error': sanitize_error_message(e),
-            'model': model_config['id'],
-            'provider': 'recraft'
-        }
+        return _error_result(e, model_config, 'recraft')
 
 
 def handle_generic(model_config: ModelConfig, prompt: str, _params: GenerationParams) -> HandlerResult:
@@ -743,22 +655,13 @@ def handle_generic(model_config: ModelConfig, prompt: str, _params: GenerationPa
         # Convert to base64
         image_base64 = base64.b64encode(img_response.content).decode('utf-8')
 
-
-        return {
-            'status': 'success',
-            'image': image_base64,
-            'model': model_config['id'],
-            'provider': 'generic'
-        }
+        return _success_result(image_base64, model_config, 'generic')
 
     except Exception as e:
-        error_msg = f"Generic handler failed (model may not be OpenAI-compatible): {sanitize_error_message(e)}"
-        return {
-            'status': 'error',
-            'error': error_msg,
-            'model': model_config['id'],
-            'provider': 'generic'
-        }
+        return _error_result(
+            f"Generic handler failed (model may not be OpenAI-compatible): {sanitize_error_message(e)}",
+            model_config, 'generic',
+        )
 
 
 def get_handler(provider: str) -> HandlerFunc:
@@ -832,20 +735,10 @@ def iterate_flux(model_config: ModelConfig, source_image: Union[str, bytes], pro
 
         image_base64 = _poll_bfl_job(job_id, headers)
 
-        return {
-            'status': 'success',
-            'image': image_base64,
-            'model': model_config.get('id', 'flux-pro-1.1'),
-            'provider': 'bfl',
-        }
+        return _success_result(image_base64, model_config, 'bfl')
 
     except Exception as e:
-        return {
-            'status': 'error',
-            'error': sanitize_error_message(e),
-            'model': model_config.get('id', 'flux'),
-            'provider': 'bfl',
-        }
+        return _error_result(e, model_config, 'bfl')
 
 
 def iterate_recraft(model_config: ModelConfig, source_image: Union[str, bytes], prompt: str, context: List[Dict[str, Any]]) -> HandlerResult:
@@ -870,20 +763,10 @@ def iterate_recraft(model_config: ModelConfig, source_image: Union[str, bytes], 
 
         image_base64 = _download_image_as_base64(image_url)
 
-        return {
-            'status': 'success',
-            'image': image_base64,
-            'model': model_config.get('id', 'recraftv3'),
-            'provider': 'recraft',
-        }
+        return _success_result(image_base64, model_config, 'recraft')
 
     except Exception as e:
-        return {
-            'status': 'error',
-            'error': sanitize_error_message(e),
-            'model': model_config.get('id', 'recraft'),
-            'provider': 'recraft',
-        }
+        return _error_result(e, model_config, 'recraft')
 
 
 def iterate_gemini(model_config: ModelConfig, source_image: Union[str, bytes], prompt: str, context: List[Dict[str, Any]]) -> HandlerResult:
@@ -906,20 +789,10 @@ def iterate_gemini(model_config: ModelConfig, source_image: Union[str, bytes], p
 
         image_base64 = _extract_gemini_image(response)
 
-        return {
-            'status': 'success',
-            'image': image_base64,
-            'model': model_config.get('id', 'gemini-2.0-flash-exp'),
-            'provider': 'google_gemini',
-        }
+        return _success_result(image_base64, model_config, 'google_gemini')
 
     except Exception as e:
-        return {
-            'status': 'error',
-            'error': sanitize_error_message(e),
-            'model': model_config.get('id', 'gemini'),
-            'provider': 'google_gemini',
-        }
+        return _error_result(e, model_config, 'google_gemini')
 
 
 def iterate_openai(model_config: ModelConfig, source_image: Union[str, bytes], prompt: str, context: List[Dict[str, Any]]) -> HandlerResult:
@@ -944,20 +817,10 @@ def iterate_openai(model_config: ModelConfig, source_image: Union[str, bytes], p
         else:
             image_base64 = _download_image_as_base64(response.data[0].url)
 
-        return {
-            'status': 'success',
-            'image': image_base64,
-            'model': model_config.get('id', 'gpt-image-1'),
-            'provider': 'openai',
-        }
+        return _success_result(image_base64, model_config, 'openai')
 
     except Exception as e:
-        return {
-            'status': 'error',
-            'error': sanitize_error_message(e),
-            'model': model_config.get('id', 'openai'),
-            'provider': 'openai',
-        }
+        return _error_result(e, model_config, 'openai')
 
 
 def get_iterate_handler(provider: str) -> IterateHandlerFunc:
@@ -1015,12 +878,7 @@ def outpaint_flux(model_config: ModelConfig, source_image: Union[str, bytes], pr
 
         if expansion['left'] == 0 and expansion['right'] == 0 and \
            expansion['top'] == 0 and expansion['bottom'] == 0:
-            return {
-                'status': 'success',
-                'image': _ensure_base64(source_image),
-                'model': model_config.get('id', 'flux-pro-1.1'),
-                'provider': 'bfl',
-            }
+            return _success_result(_ensure_base64(source_image), model_config, 'bfl')
 
         padded_image = pad_image_with_transparency(image_bytes, expansion)
         mask = create_expansion_mask(width, height, expansion, mask_format='base64')
@@ -1043,20 +901,10 @@ def outpaint_flux(model_config: ModelConfig, source_image: Union[str, bytes], pr
 
         image_base64 = _poll_bfl_job(job_id, headers)
 
-        return {
-            'status': 'success',
-            'image': image_base64,
-            'model': model_config.get('id', 'flux-pro-1.1'),
-            'provider': 'bfl',
-        }
+        return _success_result(image_base64, model_config, 'bfl')
 
     except Exception as e:
-        return {
-            'status': 'error',
-            'error': sanitize_error_message(e),
-            'model': model_config.get('id', 'flux'),
-            'provider': 'bfl',
-        }
+        return _error_result(e, model_config, 'bfl')
 
 
 def outpaint_recraft(model_config: ModelConfig, source_image: Union[str, bytes], preset: str, prompt: str) -> HandlerResult:
@@ -1091,20 +939,10 @@ def outpaint_recraft(model_config: ModelConfig, source_image: Union[str, bytes],
 
         image_base64 = _download_image_as_base64(image_url)
 
-        return {
-            'status': 'success',
-            'image': image_base64,
-            'model': model_config.get('id', 'recraftv3'),
-            'provider': 'recraft',
-        }
+        return _success_result(image_base64, model_config, 'recraft')
 
     except Exception as e:
-        return {
-            'status': 'error',
-            'error': sanitize_error_message(e),
-            'model': model_config.get('id', 'recraft'),
-            'provider': 'recraft',
-        }
+        return _error_result(e, model_config, 'recraft')
 
 
 def outpaint_gemini(model_config: ModelConfig, source_image: Union[str, bytes], preset: str, prompt: str) -> HandlerResult:
@@ -1131,20 +969,10 @@ def outpaint_gemini(model_config: ModelConfig, source_image: Union[str, bytes], 
 
         image_base64 = _extract_gemini_image(response)
 
-        return {
-            'status': 'success',
-            'image': image_base64,
-            'model': model_config.get('id', 'gemini-2.0-flash-exp'),
-            'provider': 'google_gemini',
-        }
+        return _success_result(image_base64, model_config, 'google_gemini')
 
     except Exception as e:
-        return {
-            'status': 'error',
-            'error': sanitize_error_message(e),
-            'model': model_config.get('id', 'gemini'),
-            'provider': 'google_gemini',
-        }
+        return _error_result(e, model_config, 'google_gemini')
 
 
 def outpaint_openai(model_config: ModelConfig, source_image: Union[str, bytes], preset: str, prompt: str) -> HandlerResult:
@@ -1180,20 +1008,10 @@ def outpaint_openai(model_config: ModelConfig, source_image: Union[str, bytes], 
         else:
             image_base64 = _download_image_as_base64(response.data[0].url)
 
-        return {
-            'status': 'success',
-            'image': image_base64,
-            'model': model_config.get('id', 'gpt-image-1'),
-            'provider': 'openai',
-        }
+        return _success_result(image_base64, model_config, 'openai')
 
     except Exception as e:
-        return {
-            'status': 'error',
-            'error': sanitize_error_message(e),
-            'model': model_config.get('id', 'openai'),
-            'provider': 'openai',
-        }
+        return _error_result(e, model_config, 'openai')
 
 
 def get_outpaint_handler(provider: str) -> OutpaintHandlerFunc:
