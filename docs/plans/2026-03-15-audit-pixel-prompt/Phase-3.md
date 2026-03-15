@@ -110,37 +110,39 @@ refactor(backend): extract shared result handling from generate, iterate, and ou
 
 **Implementation Steps:**
 
-The key goal is to eliminate ALL duplicated logic between `handle_iterate` and `handle_outpaint`. After Tasks 1-2, there should already be shared validation (`_parse_and_validate_request`) and shared result handling (`_handle_successful_result` / `_handle_failed_result`). The remaining duplicated code is the dispatch-and-result-handling flow: model validation, iteration counting, source image loading, handler dispatch, try/except around the handler call, and result branching. ALL of this must be extracted.
+The key goal is to eliminate ALL duplicated logic between `handle_iterate` and `handle_outpaint`. After Tasks 1-2, there should already be shared validation (`_parse_and_validate_request`) and shared result handling (`_handle_successful_result` / `_handle_failed_result`). The remaining duplicated code is the dispatch-and-result-handling flow: model validation, iteration counting, source image loading, handler dispatch, try/except around the handler call, and result branching. ALL of this must be extracted into `_handle_refinement`.
 
-- Create a unified helper function `_handle_refinement(event, correlation_id, handler_callable, context_prompt)` that:
+- Create a unified helper function `_handle_refinement(event, correlation_id, get_handler_fn, build_handler_args_fn, context_prompt_fn)` that:
   1. Calls the shared validation helper (from Task 1)
   2. Validates `sessionId` and `model` from body
   3. Validates `model_name` is in MODELS and enabled
   4. Checks iteration count against `MAX_ITERATIONS`
   5. Loads source image from latest iteration
   6. Adds new iteration to session
-  7. Calls `handler_callable(config, source_image, ...)` inside a `try/except`
+  7. Calls the handler (obtained from `get_handler_fn`) with args built by `build_handler_args_fn` inside a `try/except`
   8. On success: calls `_handle_successful_result(...)` (from Task 2)
   9. On failure: calls `_handle_failed_result(...)` (from Task 2)
   10. Returns the final API response
 
-- The `handler_callable` parameter is a callable that the thin wrapper provides. This avoids a type flag and keeps the dispatch clean.
+- The handler callable is built inside `_handle_refinement` using callback parameters provided by the thin wrapper. This keeps the entire try/except/result flow in one place.
 
 - `handle_iterate` becomes a thin wrapper (~10-15 lines) that:
-  1. Gets context from `ContextManager`
-  2. Resolves the handler via `get_iterate_handler(provider)`
-  3. Creates a lambda/partial that calls `iterate_handler(config, source_image, prompt, context)`
-  4. Calls `_handle_refinement(event, correlation_id, handler_callable, prompt)`
+  1. Passes `get_iterate_handler` as the handler resolver
+  2. Passes a callback that builds args `(config, source_image, prompt, context)` where context comes from `ContextManager`
+  3. Passes `prompt` as the context prompt
+  4. Delegates everything else to `_handle_refinement`
 
 - `handle_outpaint` becomes a thin wrapper (~10-15 lines) that:
-  1. Extracts preset from body
-  2. Resolves the handler via `get_outpaint_handler(provider)`
-  3. Creates a lambda/partial that calls `outpaint_handler(config, source_image, preset, prompt)`
-  4. Calls `_handle_refinement(event, correlation_id, handler_callable, f"outpaint:{preset}")`
+  1. Passes `get_outpaint_handler` as the handler resolver
+  2. Passes a callback that builds args `(config, source_image, preset, prompt)` where preset comes from body
+  3. Passes `f"outpaint:{preset}"` as the context prompt
+  4. Delegates everything else to `_handle_refinement`
 
-- **Critical:** Do NOT leave the `try/except` error handling and result branching duplicated in both wrappers. The entire dispatch-try-except-result flow must live inside `_handle_refinement`. The wrappers should only contain logic that is truly unique to their endpoint (context retrieval for iterate, preset extraction for outpaint).
+- **Critical:** Do NOT leave the `try/except` error handling and result branching duplicated in both wrappers. The entire dispatch-try-except-result flow must live inside `_handle_refinement`. The wrappers should only contain logic that is truly unique to their endpoint (context retrieval for iterate, preset extraction for outpaint). If a wrapper exceeds 15 lines, something that belongs in `_handle_refinement` has been left behind.
 
-- **Critical:** Do NOT leave `except json.JSONDecodeError` blocks in the wrappers -- JSON parsing is handled by `_parse_and_validate_request` (see Task 1 of this phase). See also the note about dead `JSONDecodeError` catches in Task 1 below.
+- **Critical:** Do NOT leave `except json.JSONDecodeError` blocks in the wrappers -- JSON parsing is handled by `_parse_and_validate_request` (see Task 1 of this phase, which also removes these dead catches).
+
+- **Verification target:** Each wrapper (`handle_iterate`, `handle_outpaint`) must be under 30 lines. If they exceed this, the most likely cause is that the try/except and result-branching logic was not moved into `_handle_refinement`. Go back and extract it.
 
 **Verification Checklist:**
 - [x] `handle_iterate` and `handle_outpaint` are significantly shorter (each <30 lines)

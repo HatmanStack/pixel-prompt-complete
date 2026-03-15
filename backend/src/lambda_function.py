@@ -352,8 +352,6 @@ def handle_generate(event: LambdaEvent, correlation_id: Optional[str] = None) ->
             'models': results
         })
 
-    except json.JSONDecodeError:
-        return response(400, error_responses.invalid_json())
     except Exception as e:
         StructuredLogger.error(
             f"Error in handle_generate: {e}",
@@ -416,12 +414,31 @@ def _load_source_image(
     return source_data['output'], None
 
 
-def handle_iterate(event: LambdaEvent, correlation_id: Optional[str] = None) -> ApiResponse:
-    """POST /iterate - Iterate on existing image with new prompt."""
-    validated, err = _parse_and_validate_request(event, require_prompt=True)
-    if err:
-        return err
+def _handle_refinement(
+    validated: ValidatedRequest,
+    correlation_id: str | None,
+    handler_name: str,
+    get_handler_fn,
+    build_handler_args_fn,
+    add_iteration_kwargs: dict[str, Any] | None = None,
+    result_prompt_fn=None,
+    context_prompt_fn=None,
+    extra_response_fields: dict[str, Any] | None = None,
+) -> ApiResponse:
+    """Unified dispatch-try-except-result flow for iterate and outpaint.
 
+    Args:
+        validated: Pre-validated request data.
+        correlation_id: Request correlation ID.
+        handler_name: Name for error logging (e.g. "handle_iterate").
+        get_handler_fn: Callable(provider) -> handler function.
+        build_handler_args_fn: Callable(config_dict, source_image, prompt, session_id,
+            model_name) -> tuple of handler args.
+        add_iteration_kwargs: Extra kwargs for session_manager.add_iteration().
+        result_prompt_fn: Optional callable(prompt) -> prompt string for result storage.
+        context_prompt_fn: Optional callable(prompt) -> context prompt string.
+        extra_response_fields: Extra fields to include in success response.
+    """
     try:
         refs, err = _validate_refinement_request(validated)
         if err:
@@ -440,22 +457,30 @@ def handle_iterate(event: LambdaEvent, correlation_id: Optional[str] = None) -> 
             warning = f'Only {remaining} iterations remaining for {model_name}'
 
         prompt = validated.prompt
-        context = context_manager.get_context_for_iteration(session_id, model_name)
-
         start_time = time.time()
-        iteration_index = session_manager.add_iteration(session_id, model_name, prompt)
+
+        iter_kwargs = add_iteration_kwargs or {}
+        iteration_index = session_manager.add_iteration(
+            session_id, model_name, prompt, **iter_kwargs,
+        )
 
         config_dict = get_model_config_dict(model_config)
-        iterate_handler = get_iterate_handler(model_config.provider)
-        result = iterate_handler(config_dict, source_image, prompt, context)
+        handler = get_handler_fn(model_config.provider)
+        handler_args = build_handler_args_fn(
+            config_dict, source_image, prompt, session_id, model_name,
+        )
+        result = handler(*handler_args)
 
         duration = time.time() - start_time
         target = datetime.now(timezone.utc).strftime('%Y-%m-%d-%H-%M-%S')
 
         if result['status'] == 'success':
+            store_prompt = result_prompt_fn(prompt) if result_prompt_fn else prompt
+            ctx_prompt = context_prompt_fn(prompt) if context_prompt_fn else None
             info = _handle_successful_result(
-                session_id, model_name, prompt, result,
+                session_id, model_name, store_prompt, result,
                 iteration_index, target, duration,
+                context_prompt=ctx_prompt,
             )
             resp = {
                 'status': 'completed',
@@ -467,6 +492,8 @@ def handle_iterate(event: LambdaEvent, correlation_id: Optional[str] = None) -> 
             }
             if warning:
                 resp['warning'] = warning
+            if extra_response_fields:
+                resp.update(extra_response_fields)
             return response(200, resp)
         else:
             error_msg = result.get('error', 'Unknown error')
@@ -475,15 +502,30 @@ def handle_iterate(event: LambdaEvent, correlation_id: Optional[str] = None) -> 
                 'status': 'error', 'error': error_msg, 'iteration': iteration_index,
             })
 
-    except json.JSONDecodeError:
-        return response(400, error_responses.invalid_json())
     except Exception as e:
         StructuredLogger.error(
-            f"Error in handle_iterate: {e}",
+            f"Error in {handler_name}: {e}",
             correlation_id=correlation_id,
             traceback=traceback.format_exc(),
         )
         return response(500, error_responses.internal_server_error())
+
+
+def handle_iterate(event: LambdaEvent, correlation_id: Optional[str] = None) -> ApiResponse:
+    """POST /iterate - Iterate on existing image with new prompt."""
+    validated, err = _parse_and_validate_request(event, require_prompt=True)
+    if err:
+        return err
+
+    def _build_args(config_dict, source_image, prompt, session_id, model_name):
+        context = context_manager.get_context_for_iteration(session_id, model_name)
+        return (config_dict, source_image, prompt, context)
+
+    return _handle_refinement(
+        validated, correlation_id, 'handle_iterate',
+        get_handler_fn=get_iterate_handler,
+        build_handler_args_fn=_build_args,
+    )
 
 
 def handle_outpaint(event: LambdaEvent, correlation_id: Optional[str] = None) -> ApiResponse:
@@ -494,69 +536,25 @@ def handle_outpaint(event: LambdaEvent, correlation_id: Optional[str] = None) ->
     if err:
         return err
 
-    try:
-        refs, err = _validate_refinement_request(validated)
-        if err:
-            return err
-        session_id, model_name, model_config = refs
+    preset = validated.body.get('preset')
+    if not preset:
+        return response(400, {'error': 'preset is required'})
+    valid_presets = ['16:9', '9:16', '1:1', '4:3', 'expand_all']
+    if preset not in valid_presets:
+        return response(400, {'error': f'Invalid preset. Valid: {valid_presets}'})
 
-        preset = validated.body.get('preset')
-        if not preset:
-            return response(400, {'error': 'preset is required'})
-        valid_presets = ['16:9', '9:16', '1:1', '4:3', 'expand_all']
-        if preset not in valid_presets:
-            return response(400, {'error': f'Invalid preset. Valid: {valid_presets}'})
+    def _build_args(config_dict, source_image, prompt, session_id, model_name):
+        return (config_dict, source_image, preset, prompt)
 
-        source_image, err = _load_source_image(session_id, model_name)
-        if err:
-            return err
-
-        prompt = validated.prompt
-        start_time = time.time()
-
-        iteration_index = session_manager.add_iteration(
-            session_id, model_name, prompt,
-            is_outpaint=True, outpaint_preset=preset,
-        )
-
-        config_dict = get_model_config_dict(model_config)
-        outpaint_handler = get_outpaint_handler(model_config.provider)
-        result = outpaint_handler(config_dict, source_image, preset, prompt)
-
-        duration = time.time() - start_time
-        target = datetime.now(timezone.utc).strftime('%Y-%m-%d-%H-%M-%S')
-
-        if result['status'] == 'success':
-            info = _handle_successful_result(
-                session_id, model_name, f"outpaint:{preset} - {prompt}", result,
-                iteration_index, target, duration,
-                context_prompt=f"outpaint:{preset}",
-            )
-            return response(200, {
-                'status': 'completed',
-                'imageKey': info['image_key'],
-                'imageUrl': info['image_url'],
-                'iteration': iteration_index,
-                'iterationCount': iteration_index + 1,
-                'preset': preset,
-                'duration': duration,
-            })
-        else:
-            error_msg = result.get('error', 'Unknown error')
-            _handle_failed_result(session_id, model_name, iteration_index, error_msg)
-            return response(500, {
-                'status': 'error', 'error': error_msg, 'iteration': iteration_index,
-            })
-
-    except json.JSONDecodeError:
-        return response(400, error_responses.invalid_json())
-    except Exception as e:
-        StructuredLogger.error(
-            f"Error in handle_outpaint: {e}",
-            correlation_id=correlation_id,
-            traceback=traceback.format_exc(),
-        )
-        return response(500, error_responses.internal_server_error())
+    return _handle_refinement(
+        validated, correlation_id, 'handle_outpaint',
+        get_handler_fn=get_outpaint_handler,
+        build_handler_args_fn=_build_args,
+        add_iteration_kwargs={'is_outpaint': True, 'outpaint_preset': preset},
+        result_prompt_fn=lambda p: f"outpaint:{preset} - {p}",
+        context_prompt_fn=lambda p: f"outpaint:{preset}",
+        extra_response_fields={'preset': preset},
+    )
 
 
 def handle_status(event: LambdaEvent, correlation_id: Optional[str] = None) -> ApiResponse:
