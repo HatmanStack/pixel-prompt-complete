@@ -47,7 +47,7 @@ sam local start-api
 
 ### CI (`.github/workflows/ci.yml`)
 
-Runs on push/PR to main/develop: frontend lint + typecheck → frontend tests → backend lint + tests. Backend CI sets `PYTHONPATH=$GITHUB_WORKSPACE/backend/src`.
+Runs on push/PR to main/develop: frontend format check + lint + typecheck → frontend tests → backend lint + tests → E2E tests (LocalStack) → status gate. Backend CI sets `PYTHONPATH=$GITHUB_WORKSPACE/backend/src`.
 
 ## Architecture
 
@@ -138,7 +138,7 @@ TypeScript React app using **Zustand** for state management (not Context API).
 - `useToastStore` — Toast notification queue
 
 **Key Hooks**:
-- `useSessionPolling` / `useJobPolling` — Poll /status/{sessionId} until complete
+- `useSessionPolling` — Poll /status/{sessionId} until complete
 - `useIteration` — Manage per-model iteration workflow
 - `useGallery` — Fetch gallery list
 - `useBreakpoint` — Responsive breakpoint detection
