@@ -46,10 +46,10 @@ Extract the shared validation/execution pipeline from `handle_generate`, `handle
 - For `handle_outpaint`, the prompt has a default value (`'continue the scene naturally'`) -- pass this to the helper or handle it after the call.
 
 **Verification Checklist:**
-- [ ] A shared validation helper exists and is used by all 3 POST handlers
-- [ ] Rate limiting, content filtering, and prompt validation logic appears only once
-- [ ] `PYTHONPATH=backend/src pytest tests/backend/unit/test_lambda_function.py -v` passes
-- [ ] `ruff check backend/src/lambda_function.py` passes
+- [x] A shared validation helper exists and is used by all 3 POST handlers
+- [x] Rate limiting, content filtering, and prompt validation logic appears only once
+- [x] `PYTHONPATH=backend/src pytest tests/backend/unit/test_lambda_function.py -v` passes
+- [x] `ruff check backend/src/lambda_function.py` passes
 
 **Testing Instructions:**
 - All existing tests should pass without modification since behavior is unchanged.
@@ -83,9 +83,9 @@ refactor(backend): extract shared request validation pipeline from POST handlers
 - For `handle_outpaint`, the prompt stored in context differs (`f"outpaint:{preset}"`) -- pass this as a parameter or let the caller specify the context prompt.
 
 **Verification Checklist:**
-- [ ] Image upload + iteration completion + context update appears only once (in the helper)
-- [ ] All 3 handlers use the shared helpers for success and failure paths
-- [ ] `PYTHONPATH=backend/src pytest tests/backend/unit/ -v` passes
+- [x] Image upload + iteration completion + context update appears only once (in the helper)
+- [x] All 3 handlers use the shared helpers for success and failure paths
+- [x] `PYTHONPATH=backend/src pytest tests/backend/unit/ -v` passes
 
 **Testing Instructions:**
 - All existing tests should pass without modification.
@@ -121,10 +121,10 @@ refactor(backend): extract shared result handling from generate, iterate, and ou
 - Alternative approach: instead of a shared function with a type flag, use a common base with two small overrides. Choose whichever is cleaner.
 
 **Verification Checklist:**
-- [ ] `handle_iterate` and `handle_outpaint` are significantly shorter (each <30 lines)
-- [ ] Shared validation/loading/dispatch logic appears only once
-- [ ] `PYTHONPATH=backend/src pytest tests/backend/unit/test_lambda_function.py -v` passes
-- [ ] `ruff check backend/src/lambda_function.py` passes
+- [x] `handle_iterate` and `handle_outpaint` are significantly shorter (each <30 lines)
+- [x] Shared validation/loading/dispatch logic appears only once
+- [x] `PYTHONPATH=backend/src pytest tests/backend/unit/test_lambda_function.py -v` passes
+- [x] `ruff check backend/src/lambda_function.py` passes
 
 **Testing Instructions:**
 - All existing iterate and outpaint tests must pass unchanged.
@@ -159,9 +159,9 @@ refactor(backend): unify handle_iterate and handle_outpaint shared logic
 - Ensure the path still gets a leading `/` added if missing.
 
 **Verification Checklist:**
-- [ ] No magic numbers (`path[6:]`, `path[9:]`) remain in stage stripping logic
-- [ ] Stage stripping works for `/Prod/`, `/Staging/`, and `/Dev/` prefixes
-- [ ] `PYTHONPATH=backend/src pytest tests/backend/unit/test_lambda_function.py -v` passes
+- [x] No magic numbers (`path[6:]`, `path[9:]`) remain in stage stripping logic
+- [x] Stage stripping works for `/Prod/`, `/Staging/`, and `/Dev/` prefixes
+- [x] `PYTHONPATH=backend/src pytest tests/backend/unit/test_lambda_function.py -v` passes
 
 **Testing Instructions:**
 - Write a test that sends events with different stage prefixes and verifies correct routing.
@@ -192,10 +192,10 @@ refactor(backend): replace magic number stage prefix stripping with proper prefi
 - The default remains `*` so this is a non-breaking change. Operators can restrict it by setting the env var.
 
 **Verification Checklist:**
-- [ ] `cors_allowed_origin` is defined in `config.py`
-- [ ] `response()` uses `cors_allowed_origin` instead of hardcoded `'*'`
-- [ ] `template.yaml` includes `CORS_ALLOWED_ORIGIN` environment variable
-- [ ] `PYTHONPATH=backend/src pytest tests/backend/unit/ -v` passes
+- [x] `cors_allowed_origin` is defined in `config.py`
+- [x] `response()` uses `cors_allowed_origin` instead of hardcoded `'*'`
+- [x] `template.yaml` includes `CORS_ALLOWED_ORIGIN` environment variable
+- [x] `PYTHONPATH=backend/src pytest tests/backend/unit/ -v` passes
 
 **Testing Instructions:**
 - Write a test that sets `CORS_ALLOWED_ORIGIN` env var and verifies the response header matches.
