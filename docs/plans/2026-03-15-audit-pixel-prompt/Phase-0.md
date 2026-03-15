@@ -74,8 +74,9 @@ cd /home/user/pixel-prompt-complete
 PYTHONPATH=backend/src ruff check backend/src/
 PYTHONPATH=backend/src pytest tests/backend/unit/ -v --tb=short
 
-# Frontend lint + typecheck + tests
+# Frontend format check + lint + typecheck + tests
 cd /home/user/pixel-prompt-complete/frontend
+npm run format:check
 npm run lint
 npm run typecheck
 npm test

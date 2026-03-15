@@ -106,9 +106,12 @@ chore(backend): remove dead functions from storage, error_responses, rate_limit,
 **Prerequisites:** None
 
 **Implementation Steps:**
+
+> **Note:** All line numbers in this task (and throughout this plan) are approximate references based on the file state before earlier tasks. Since Tasks 1 and 2 modify `config.py`, line numbers in that file will have shifted. **Always search by function/variable name rather than relying on exact line numbers.** The function and variable names are the authoritative identifiers.
+
 - In `handlers.py`, remove:
-  - `_bedrock_nova_client` and `_bedrock_sd_client` globals (lines 39-40)
-  - `_get_bedrock_nova_client()` and `_get_bedrock_sd_client()` functions (lines 64-83)
+  - `_bedrock_nova_client` and `_bedrock_sd_client` globals (approximately lines 39-40)
+  - `_get_bedrock_nova_client()` and `_get_bedrock_sd_client()` functions (approximately lines 64-83)
   - `handle_google_imagen()` function
   - `handle_bedrock_nova()` function
   - `handle_bedrock_sd()` function
@@ -117,7 +120,7 @@ chore(backend): remove dead functions from storage, error_responses, rate_limit,
   - Remove the corresponding entries from the handler dict in `get_handler()`: `'google_imagen'`, `'bedrock_nova'`, `'bedrock_sd'`, `'stability'`, `'generic'`
   - Remove the fallback to `handle_generic` in `get_handler()` -- instead raise `ValueError` for unknown providers
   - Remove the `import boto3` if no remaining code uses it
-- In `config.py`, remove `bedrock_nova_region` (line 51) and `bedrock_sd_region` (line 52) since they are only imported by the deleted handler code.
+- In `config.py`, remove `bedrock_nova_region` and `bedrock_sd_region` (search for these variable names; originally around lines 51-52 but may have shifted after Tasks 1-2) since they are only imported by the deleted handler code.
 - Update the `from config import` statement in `handlers.py` to remove `bedrock_nova_region` and `bedrock_sd_region`.
 - In `test_handlers.py`, remove any test cases for the deleted handlers.
 

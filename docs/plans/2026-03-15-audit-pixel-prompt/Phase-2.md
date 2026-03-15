@@ -99,10 +99,11 @@ fix(backend): add S3 pagination to list_gallery_images and replace silent error 
 **Prerequisites:** None
 
 **Implementation Steps:**
-- In `enhance.py`, import the cached client factories: `from models.handlers import _get_openai_client, _get_genai_client`.
-- In the `enhance()` method, replace `client = genai.Client(api_key=api_key)` (line 82) with `client = _get_genai_client(api_key)`.
-- Replace `client = OpenAI(**client_kwargs)` (line 110) with `client = _get_openai_client(api_key, **{k: v for k, v in client_kwargs.items() if k != 'api_key'})`.
-- Alternatively, if importing from `handlers.py` creates a circular import, move the client caching functions to a shared utility module (e.g., `backend/src/utils/clients.py`). Only do this if the import fails.
+- The shared cached client factories already exist in `backend/src/utils/clients.py` as `get_openai_client(api_key, **kwargs)` and `get_genai_client(api_key)`. These are **public functions** (no underscore prefix) specifically designed for cross-module use. This is the correct place to import from.
+- In `enhance.py`, import from the shared utility: `from utils.clients import get_openai_client, get_genai_client`.
+- In the `enhance()` method, replace `client = genai.Client(api_key=api_key)` (line 82) with `client = get_genai_client(api_key)`.
+- Replace `client = OpenAI(**client_kwargs)` (line 110) with `client = get_openai_client(api_key, **{k: v for k, v in client_kwargs.items() if k != 'api_key'})`.
+- **Important:** Do NOT import private functions (`_get_openai_client`, `_get_genai_client`) from `handlers.py`. Importing underscore-prefixed private functions across module boundaries is poor practice. Always use the public `utils/clients.py` factories, which are the canonical shared client constructors for the entire backend.
 
 **Verification Checklist:**
 - [x] `enhance.py` no longer calls `genai.Client()` or `OpenAI()` directly

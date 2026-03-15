@@ -35,7 +35,7 @@ Extract the shared validation/execution pipeline from `handle_generate`, `handle
 
 **Implementation Steps:**
 - Create a helper function (e.g., `_parse_and_validate_request(event, require_prompt=True)`) that performs:
-  1. Parse `event.get('body', '{}')` as JSON (raise on failure)
+  1. Parse `event.get('body', '{}')` as JSON (raise on failure via `json.JSONDecodeError`)
   2. Extract IP from `requestContext.http.sourceIp` or fall back to `body.ip`
   3. Check rate limit via `rate_limiter.check_rate_limit(ip)` -- return 429 response if limited
   4. Extract and validate prompt (if `require_prompt=True`)
@@ -44,6 +44,7 @@ Extract the shared validation/execution pipeline from `handle_generate`, `handle
 - Use a return pattern like `(None, error_response)` or `(validated_data, None)` so callers can check for errors. Alternatively, use a simple dataclass `ValidatedRequest` with the parsed fields.
 - Refactor `handle_generate`, `handle_iterate`, and `handle_outpaint` to call this helper first and return early on error.
 - For `handle_outpaint`, the prompt has a default value (`'continue the scene naturally'`) -- pass this to the helper or handle it after the call.
+- **Important:** After extracting JSON parsing into `_parse_and_validate_request`, remove the now-dead `except json.JSONDecodeError` blocks from `handle_generate`, `handle_iterate`, and `handle_outpaint`. Since JSON parsing is handled entirely within `_parse_and_validate_request`, these outer `try/except json.JSONDecodeError` catches become unreachable dead code. Removing them reduces handler line counts and avoids confusion.
 
 **Verification Checklist:**
 - [x] A shared validation helper exists and is used by all 3 POST handlers
@@ -108,17 +109,38 @@ refactor(backend): extract shared result handling from generate, iterate, and ou
 **Prerequisites:** Tasks 1 and 2
 
 **Implementation Steps:**
-- Create a helper (e.g., `_handle_refinement(event, correlation_id, refinement_type)`) where `refinement_type` is `'iterate'` or `'outpaint'`. This helper handles:
-  1. Call the shared validation helper (from Task 1)
-  2. Validate `sessionId` and `model` from body
-  3. Validate `model_name` is in MODELS and enabled
-  4. Check iteration count against `MAX_ITERATIONS`
-  5. Load source image from latest iteration
-  6. Add new iteration to session
-  7. Dispatch to appropriate handler (`get_iterate_handler` or `get_outpaint_handler`)
-  8. Handle result via shared helpers (from Task 2)
-- `handle_iterate` and `handle_outpaint` become thin wrappers that call `_handle_refinement` with the appropriate type, extracting their unique parameters (context for iterate, preset for outpaint).
-- Alternative approach: instead of a shared function with a type flag, use a common base with two small overrides. Choose whichever is cleaner.
+
+The key goal is to eliminate ALL duplicated logic between `handle_iterate` and `handle_outpaint`. After Tasks 1-2, there should already be shared validation (`_parse_and_validate_request`) and shared result handling (`_handle_successful_result` / `_handle_failed_result`). The remaining duplicated code is the dispatch-and-result-handling flow: model validation, iteration counting, source image loading, handler dispatch, try/except around the handler call, and result branching. ALL of this must be extracted.
+
+- Create a unified helper function `_handle_refinement(event, correlation_id, handler_callable, context_prompt)` that:
+  1. Calls the shared validation helper (from Task 1)
+  2. Validates `sessionId` and `model` from body
+  3. Validates `model_name` is in MODELS and enabled
+  4. Checks iteration count against `MAX_ITERATIONS`
+  5. Loads source image from latest iteration
+  6. Adds new iteration to session
+  7. Calls `handler_callable(config, source_image, ...)` inside a `try/except`
+  8. On success: calls `_handle_successful_result(...)` (from Task 2)
+  9. On failure: calls `_handle_failed_result(...)` (from Task 2)
+  10. Returns the final API response
+
+- The `handler_callable` parameter is a callable that the thin wrapper provides. This avoids a type flag and keeps the dispatch clean.
+
+- `handle_iterate` becomes a thin wrapper (~10-15 lines) that:
+  1. Gets context from `ContextManager`
+  2. Resolves the handler via `get_iterate_handler(provider)`
+  3. Creates a lambda/partial that calls `iterate_handler(config, source_image, prompt, context)`
+  4. Calls `_handle_refinement(event, correlation_id, handler_callable, prompt)`
+
+- `handle_outpaint` becomes a thin wrapper (~10-15 lines) that:
+  1. Extracts preset from body
+  2. Resolves the handler via `get_outpaint_handler(provider)`
+  3. Creates a lambda/partial that calls `outpaint_handler(config, source_image, preset, prompt)`
+  4. Calls `_handle_refinement(event, correlation_id, handler_callable, f"outpaint:{preset}")`
+
+- **Critical:** Do NOT leave the `try/except` error handling and result branching duplicated in both wrappers. The entire dispatch-try-except-result flow must live inside `_handle_refinement`. The wrappers should only contain logic that is truly unique to their endpoint (context retrieval for iterate, preset extraction for outpaint).
+
+- **Critical:** Do NOT leave `except json.JSONDecodeError` blocks in the wrappers -- JSON parsing is handled by `_parse_and_validate_request` (see Task 1 of this phase). See also the note about dead `JSONDecodeError` catches in Task 1 below.
 
 **Verification Checklist:**
 - [x] `handle_iterate` and `handle_outpaint` are significantly shorter (each <30 lines)
