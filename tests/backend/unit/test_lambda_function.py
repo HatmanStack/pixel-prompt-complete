@@ -348,6 +348,67 @@ class TestCorrelationId:
 # ============================================================
 
 
+# ============================================================
+# Body size limits
+# ============================================================
+
+
+class TestBodySizeLimits:
+    def test_generate_rejects_oversized_body(self, mocks):
+        """POST /generate rejects bodies > 1 MB."""
+        oversized = "x" * (1_048_577)  # 1 MB + 1
+        event = _make_event(body={"prompt": "test"})
+        event["body"] = oversized
+        resp = lambda_handler(event, None)
+        assert resp["statusCode"] == 413
+
+    def test_iterate_rejects_oversized_body(self, mocks):
+        """POST /iterate rejects bodies > 1 MB."""
+        oversized = "x" * (1_048_577)
+        event = _make_event(path="/iterate", body={"sessionId": "s", "model": "flux", "prompt": "x"})
+        event["body"] = oversized
+        resp = lambda_handler(event, None)
+        assert resp["statusCode"] == 413
+
+    def test_outpaint_rejects_oversized_body(self, mocks):
+        """POST /outpaint rejects bodies > 1 MB."""
+        oversized = "x" * (1_048_577)
+        event = _make_event(path="/outpaint", body={"sessionId": "s", "model": "flux", "preset": "16:9"})
+        event["body"] = oversized
+        resp = lambda_handler(event, None)
+        assert resp["statusCode"] == 413
+
+    def test_log_rejects_oversized_body(self, mocks):
+        """POST /log rejects bodies > 10 KB."""
+        oversized = "x" * (10_241)  # 10 KB + 1
+        event = _make_event(path="/log", body={"level": "ERROR", "message": "test"})
+        event["body"] = oversized
+        resp = lambda_handler(event, None)
+        assert resp["statusCode"] == 413
+
+    def test_log_sanitizes_metadata_keys(self, mocks):
+        """POST /log strips reserved keys from metadata."""
+        mocks["handle_log"].return_value = {"success": True}
+        resp = lambda_handler(_make_event(path="/log", body={
+            "level": "ERROR",
+            "message": "test",
+            "metadata": {
+                "component": "Test",
+                "timestamp": "evil-override",
+                "level": "FAKE",
+                "correlation_id": "injected"
+            }
+        }), None)
+        assert resp["statusCode"] == 200
+        # Verify handle_log was called with sanitized metadata
+        call_body = mocks["handle_log"].call_args[0][0]
+        meta = call_body.get("metadata", {})
+        assert "timestamp" not in meta
+        assert "level" not in meta
+        assert "correlation_id" not in meta
+        assert meta.get("component") == "Test"
+
+
 class TestGenerateForModelErrorHandling:
     """Tests for error sanitization and fail_iteration in generate_for_model."""
 

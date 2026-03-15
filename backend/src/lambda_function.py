@@ -51,6 +51,15 @@ LambdaEvent = Dict[str, Any]
 LambdaContext = Any  # AWS Lambda context object
 ApiResponse = Dict[str, Any]
 
+# Request body size limits
+MAX_BODY_SIZE = 1_048_576  # 1 MB for generation endpoints
+MAX_LOG_BODY_SIZE = 10_240  # 10 KB for log endpoint
+
+# Reserved metadata keys that must not be overwritten by client log payloads
+_RESERVED_LOG_METADATA_KEYS = frozenset({
+    'timestamp', 'level', 'correlation_id', 'message',
+})
+
 # Initialize components at module level (Lambda container reuse)
 s3_client = boto3.client('s3')
 
@@ -145,8 +154,12 @@ def handle_generate(event: LambdaEvent, correlation_id: Optional[str] = None) ->
     Returns:
         {"sessionId": "uuid", "models": {...}}
     """
+    raw_body = event.get('body', '')
+    if len(raw_body) > MAX_BODY_SIZE:
+        return response(413, {'error': 'Request body too large'})
+
     try:
-        body = json.loads(event.get('body', '{}'))
+        body = json.loads(raw_body or '{}')
         prompt = body.get('prompt', '')
 
         # Prefer real client IP from API Gateway, fall back to body.ip for local dev
@@ -291,8 +304,12 @@ def handle_iterate(event: LambdaEvent, correlation_id: Optional[str] = None) -> 
     Returns:
         {"status": "completed|error", "imageKey": "...", ...}
     """
+    raw_body = event.get('body', '')
+    if len(raw_body) > MAX_BODY_SIZE:
+        return response(413, {'error': 'Request body too large'})
+
     try:
-        body = json.loads(event.get('body', '{}'))
+        body = json.loads(raw_body or '{}')
         session_id = body.get('sessionId')
         model_name = body.get('model')
         prompt = body.get('prompt', '')
@@ -437,8 +454,12 @@ def handle_outpaint(event: LambdaEvent, correlation_id: Optional[str] = None) ->
     Returns:
         {"status": "completed|error", "imageKey": "...", ...}
     """
+    raw_body = event.get('body', '')
+    if len(raw_body) > MAX_BODY_SIZE:
+        return response(413, {'error': 'Request body too large'})
+
     try:
-        body = json.loads(event.get('body', '{}'))
+        body = json.loads(raw_body or '{}')
         session_id = body.get('sessionId')
         model_name = body.get('model')
         preset = body.get('preset')
@@ -687,12 +708,23 @@ def handle_gallery_list(event: LambdaEvent, correlation_id: Optional[str] = None
 
 def handle_log_endpoint(event: LambdaEvent) -> ApiResponse:
     """POST /log - Accept frontend error logs."""
+    raw_body = event.get('body', '')
+    if len(raw_body) > MAX_LOG_BODY_SIZE:
+        return response(413, {'error': 'Request body too large'})
+
     try:
-        body = json.loads(event.get('body', '{}'))
+        body = json.loads(raw_body or '{}')
         ip = event.get('requestContext', {}).get('http', {}).get('sourceIp', 'unknown')
 
         if rate_limiter.check_rate_limit(ip):
             return response(429, {'error': 'Rate limit exceeded'})
+
+        # Sanitize metadata: remove reserved keys that could overwrite structured log fields
+        if 'metadata' in body and isinstance(body['metadata'], dict):
+            body['metadata'] = {
+                k: v for k, v in body['metadata'].items()
+                if k not in _RESERVED_LOG_METADATA_KEYS
+            }
 
         headers = event.get('headers', {})
         correlation_id = headers.get('x-correlation-id') or headers.get('X-Correlation-ID')
