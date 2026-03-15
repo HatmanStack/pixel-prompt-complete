@@ -362,84 +362,90 @@ def handle_generate(event: LambdaEvent, correlation_id: Optional[str] = None) ->
         return response(500, error_responses.internal_server_error())
 
 
-def handle_iterate(event: LambdaEvent, correlation_id: Optional[str] = None) -> ApiResponse:
-    """
-    POST /iterate - Iterate on existing image with new prompt.
-
-    Request body:
-        {
-            "sessionId": "uuid",
-            "model": "flux|recraft|gemini|openai",
-            "prompt": "refinement instruction"
-        }
+def _validate_refinement_request(
+    validated: ValidatedRequest,
+) -> tuple[tuple[str, str, Any] | None, ApiResponse | None]:
+    """Validate common fields for iterate/outpaint: sessionId, model, model config.
 
     Returns:
-        {"status": "completed|error", "imageKey": "...", ...}
+        ((session_id, model_name, model_config), None) on success,
+        or (None, error_response) on failure.
     """
+    body = validated.body
+    session_id = body.get('sessionId')
+    model_name = body.get('model')
+
+    if not session_id:
+        return None, response(400, {'error': 'sessionId is required'})
+    if not model_name:
+        return None, response(400, {'error': 'model is required'})
+    if model_name not in MODELS:
+        return None, response(400, {'error': f'Invalid model: {model_name}'})
+
+    try:
+        model_config = get_model(model_name)
+    except ValueError as e:
+        return None, response(400, {'error': str(e)})
+
+    return (session_id, model_name, model_config), None
+
+
+def _load_source_image(
+    session_id: str, model_name: str,
+) -> tuple[str | None, ApiResponse | None]:
+    """Check iteration limit, load source image from latest iteration.
+
+    Returns:
+        (source_image_base64, None) on success, or (None, error_response) on failure.
+    """
+    iteration_count = session_manager.get_iteration_count(session_id, model_name)
+    if iteration_count >= MAX_ITERATIONS:
+        return None, response(400, {
+            'error': f'Iteration limit ({MAX_ITERATIONS}) reached for {model_name}',
+        })
+
+    source_image_key = session_manager.get_latest_image_key(session_id, model_name)
+    if not source_image_key:
+        return None, response(400, {'error': f'No source image for {model_name}'})
+
+    source_data = image_storage.get_image(source_image_key)
+    if not source_data or not source_data.get('output'):
+        return None, response(500, {'error': 'Failed to load source image'})
+
+    return source_data['output'], None
+
+
+def handle_iterate(event: LambdaEvent, correlation_id: Optional[str] = None) -> ApiResponse:
+    """POST /iterate - Iterate on existing image with new prompt."""
     validated, err = _parse_and_validate_request(event, require_prompt=True)
     if err:
         return err
 
     try:
-        body = validated.body
-        session_id = body.get('sessionId')
-        model_name = body.get('model')
-        prompt = validated.prompt
+        refs, err = _validate_refinement_request(validated)
+        if err:
+            return err
+        session_id, model_name, model_config = refs
 
-        # Validate
-        if not session_id:
-            return response(400, {'error': 'sessionId is required'})
-        if not model_name:
-            return response(400, {'error': 'model is required'})
+        source_image, err = _load_source_image(session_id, model_name)
+        if err:
+            return err
 
-        if model_name not in MODELS:
-            return response(400, {'error': f'Invalid model: {model_name}'})
-
-        # Get model config
-        try:
-            model_config = get_model(model_name)
-        except ValueError as e:
-            return response(400, {'error': str(e)})
-
-        # Check iteration count
+        # Iteration warning at threshold
         iteration_count = session_manager.get_iteration_count(session_id, model_name)
-
-        # Warning at threshold
         warning = None
         if iteration_count >= ITERATION_WARNING_THRESHOLD:
             remaining = MAX_ITERATIONS - iteration_count
             warning = f'Only {remaining} iterations remaining for {model_name}'
 
-        if iteration_count >= MAX_ITERATIONS:
-            return response(400, {
-                'error': f'Iteration limit ({MAX_ITERATIONS}) reached for {model_name}'
-            })
-
-        # Get previous image
-        source_image_key = session_manager.get_latest_image_key(session_id, model_name)
-        if not source_image_key:
-            return response(400, {'error': f'No source image for {model_name}'})
-
-        # Load source image
-        source_data = image_storage.get_image(source_image_key)
-        if not source_data or not source_data.get('output'):
-            return response(500, {'error': 'Failed to load source image'})
-
-        source_image = source_data['output']  # base64
-
-        # Get context
+        prompt = validated.prompt
         context = context_manager.get_context_for_iteration(session_id, model_name)
 
         start_time = time.time()
-
-        # Add iteration
         iteration_index = session_manager.add_iteration(session_id, model_name, prompt)
 
-        # Get iterate handler
-        iterate_handler = get_iterate_handler(model_config.provider)
         config_dict = get_model_config_dict(model_config)
-
-        # Execute iteration
+        iterate_handler = get_iterate_handler(model_config.provider)
         result = iterate_handler(config_dict, source_image, prompt, context)
 
         duration = time.time() - start_time
@@ -465,9 +471,7 @@ def handle_iterate(event: LambdaEvent, correlation_id: Optional[str] = None) -> 
             error_msg = result.get('error', 'Unknown error')
             _handle_failed_result(session_id, model_name, iteration_index, error_msg)
             return response(500, {
-                'status': 'error',
-                'error': error_msg,
-                'iteration': iteration_index,
+                'status': 'error', 'error': error_msg, 'iteration': iteration_index,
             })
 
     except json.JSONDecodeError:
@@ -482,20 +486,7 @@ def handle_iterate(event: LambdaEvent, correlation_id: Optional[str] = None) -> 
 
 
 def handle_outpaint(event: LambdaEvent, correlation_id: Optional[str] = None) -> ApiResponse:
-    """
-    POST /outpaint - Expand image to new aspect ratio.
-
-    Request body:
-        {
-            "sessionId": "uuid",
-            "model": "flux|recraft|gemini|openai",
-            "preset": "16:9|9:16|1:1|4:3|expand_all",
-            "prompt": "description for expanded areas"
-        }
-
-    Returns:
-        {"status": "completed|error", "imageKey": "...", ...}
-    """
+    """POST /outpaint - Expand image to new aspect ratio."""
     validated, err = _parse_and_validate_request(
         event, require_prompt=False, default_prompt='continue the scene naturally',
     )
@@ -503,64 +494,32 @@ def handle_outpaint(event: LambdaEvent, correlation_id: Optional[str] = None) ->
         return err
 
     try:
-        body = validated.body
-        session_id = body.get('sessionId')
-        model_name = body.get('model')
-        preset = body.get('preset')
-        prompt = validated.prompt
+        refs, err = _validate_refinement_request(validated)
+        if err:
+            return err
+        session_id, model_name, model_config = refs
 
-        # Validate
-        if not session_id:
-            return response(400, {'error': 'sessionId is required'})
-        if not model_name:
-            return response(400, {'error': 'model is required'})
+        preset = validated.body.get('preset')
         if not preset:
             return response(400, {'error': 'preset is required'})
-
         valid_presets = ['16:9', '9:16', '1:1', '4:3', 'expand_all']
         if preset not in valid_presets:
             return response(400, {'error': f'Invalid preset. Valid: {valid_presets}'})
 
-        if model_name not in MODELS:
-            return response(400, {'error': f'Invalid model: {model_name}'})
+        source_image, err = _load_source_image(session_id, model_name)
+        if err:
+            return err
 
-        # Get model config
-        try:
-            model_config = get_model(model_name)
-        except ValueError as e:
-            return response(400, {'error': str(e)})
-
-        # Check iteration count (outpaint counts as iteration)
-        iteration_count = session_manager.get_iteration_count(session_id, model_name)
-        if iteration_count >= MAX_ITERATIONS:
-            return response(400, {
-                'error': f'Iteration limit ({MAX_ITERATIONS}) reached for {model_name}'
-            })
-
-        # Get source image
-        source_image_key = session_manager.get_latest_image_key(session_id, model_name)
-        if not source_image_key:
-            return response(400, {'error': f'No source image for {model_name}'})
-
-        source_data = image_storage.get_image(source_image_key)
-        if not source_data or not source_data.get('output'):
-            return response(500, {'error': 'Failed to load source image'})
-
-        source_image = source_data['output']  # base64
-
+        prompt = validated.prompt
         start_time = time.time()
 
-        # Add iteration (outpaint)
         iteration_index = session_manager.add_iteration(
             session_id, model_name, prompt,
-            is_outpaint=True, outpaint_preset=preset
+            is_outpaint=True, outpaint_preset=preset,
         )
 
-        # Get outpaint handler
-        outpaint_handler = get_outpaint_handler(model_config.provider)
         config_dict = get_model_config_dict(model_config)
-
-        # Execute outpaint
+        outpaint_handler = get_outpaint_handler(model_config.provider)
         result = outpaint_handler(config_dict, source_image, preset, prompt)
 
         duration = time.time() - start_time
@@ -585,9 +544,7 @@ def handle_outpaint(event: LambdaEvent, correlation_id: Optional[str] = None) ->
             error_msg = result.get('error', 'Unknown error')
             _handle_failed_result(session_id, model_name, iteration_index, error_msg)
             return response(500, {
-                'status': 'error',
-                'error': error_msg,
-                'iteration': iteration_index,
+                'status': 'error', 'error': error_msg, 'iteration': iteration_index,
             })
 
     except json.JSONDecodeError:
