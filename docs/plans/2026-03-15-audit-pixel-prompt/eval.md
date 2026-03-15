@@ -252,3 +252,58 @@ Merged and deduplicated across all 3 evaluators, prioritized by lowest score fir
 ### Priority 5: Onboarding (9/10) — LOW complexity
 - Add troubleshooting section to README (flagged by Day 2)
 - Fix CONTRIBUTING.md `uv pip install` reference (flagged by Day 2)
+
+---
+
+## Re-Evaluation Cycle 1
+
+### Updated Scorecard
+
+| # | Lens | Pillar | Before | After | Target | Status |
+|---|------|--------|--------|-------|--------|--------|
+| 1 | Hire | Problem-Solution Fit | 8/10 | 8/10 | 9 | NEEDS WORK |
+| 2 | Hire | Architecture | 7/10 | 8/10 | 9 | NEEDS WORK |
+| 3 | Hire | Code Quality | 7/10 | 8/10 | 9 | NEEDS WORK |
+| 4 | Hire | Creativity | 7/10 | 7/10 | 9 | NEEDS WORK |
+| 5 | Stress | Pragmatism | 7/10 | 8/10 | 9 | NEEDS WORK |
+| 6 | Stress | Defensiveness | 7/10 | 8/10 | 9 | NEEDS WORK |
+| 7 | Stress | Performance | 6/10 | 7/10 | 9 | NEEDS WORK |
+| 8 | Stress | Type Rigor | 8/10 | 8/10 | 9 | NEEDS WORK |
+| 9 | Day 2 | Test Value | 8/10 | 9/10 | 9 | PASS |
+| 10 | Day 2 | Reproducibility | 8/10 | 9/10 | 9 | PASS |
+| 11 | Day 2 | Git Hygiene | 7/10 | 8/10 | 9 | NEEDS WORK |
+| 12 | Day 2 | Onboarding | 9/10 | 9/10 | 9 | PASS |
+
+**Pillars at target (>=9):** 3/12 (up from 1/12)
+**Pillars still needing work:** 9/12
+**Pillars improved:** 8/12
+
+### Remediation Summary
+
+**Successful remediations:**
+- Architecture (7→8): Extracted shared request pipeline, _handle_refinement unification
+- Code Quality (7→8): Sanitized error messages, added input validation, TypedDict returns
+- Pragmatism (7→8): S3 pagination, cached SDK clients in enhance.py
+- Defensiveness (7→8): Replaced silent error swallowing, added body size limits, fail_iteration safety net
+- Performance (6→7): S3 pagination (critical fix), but still needs ThreadPoolExecutor separation
+- Test Value (8→9): Migrated test_context_manager to moto, fixed placeholder assertions
+- Reproducibility (8→9): Added requirements-lock.txt and backend .env.example
+- Git Hygiene (7→8): Recent commits show improved conventional commit discipline
+
+**Unchanged pillars:**
+- Problem-Solution Fit (8): No auth added, IAM prefix mismatch not fixed (out of scope)
+- Creativity (7): Context-building still uses simple concatenation
+- Type Rigor (8): TypedDicts added but mypy/pyright not added to CI
+- Onboarding (9): Already at target
+
+### Remaining Remediation Targets
+
+- **Problem-Solution Fit (8→9):** Fix IAM policy for `group-images/*`, add API authentication
+- **Architecture (8→9):** Split lambda_function.py into handler modules
+- **Code Quality (8→9):** Add session_id validation in _validate_refinement_request, ensure fail_iteration in _handle_refinement exception path
+- **Creativity (7→9):** Improve context-building with structured format, provider-specific formatting
+- **Pragmatism (8→9):** Separate ThreadPoolExecutor for gallery vs generation
+- **Defensiveness (8→9):** Add fail_iteration in _handle_refinement exception path
+- **Performance (7→9):** Separate gallery ThreadPoolExecutor, cap gallery detail parallel reads
+- **Type Rigor (8→9):** Add mypy/pyright to backend CI
+- **Git Hygiene (8→9):** Legacy commit noise cannot be fixed retroactively (process improvement)
