@@ -14,7 +14,7 @@ by redacting any keys that might appear in exception messages returned to client
 import base64
 import re
 import time
-from typing import Any, Callable, Dict, List, Union
+from typing import Any, Callable, Dict, List, Literal, NotRequired, TypedDict, Union
 
 import requests
 from google.genai import types
@@ -90,10 +90,26 @@ def _download_image_as_base64(url: str, timeout: int = 30) -> str:
     return base64.b64encode(img_response.content).decode('utf-8')
 
 
+# Typed return dicts for handler functions
+class HandlerSuccess(TypedDict):
+    status: Literal['success']
+    image: str
+    model: NotRequired[str]
+    provider: NotRequired[str]
+
+
+class HandlerError(TypedDict):
+    status: Literal['error']
+    error: str
+    model: NotRequired[str]
+    provider: NotRequired[str]
+
+
+HandlerResult = HandlerSuccess | HandlerError
+
 # Type aliases for handler contracts
 ModelConfig = Dict[str, Any]
 GenerationParams = Dict[str, Any]
-HandlerResult = Dict[str, Any]
 HandlerFunc = Callable[[ModelConfig, str, GenerationParams], HandlerResult]
 IterateHandlerFunc = Callable[[ModelConfig, bytes, str, List[Dict[str, Any]]], HandlerResult]
 OutpaintHandlerFunc = Callable[[ModelConfig, bytes, str, str], HandlerResult]
