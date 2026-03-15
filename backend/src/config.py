@@ -73,7 +73,7 @@ MODELS: Dict[str, ModelConfig] = {
         provider='bfl',
         enabled=os.environ.get('FLUX_ENABLED', 'true').lower() == 'true',
         api_key=os.environ.get('FLUX_API_KEY', ''),
-        model_id=os.environ.get('FLUX_MODEL_ID', 'flux-pro-1.1'),
+        model_id=os.environ.get('FLUX_MODEL_ID', 'flux-2-pro'),
         display_name='Flux'
     ),
     'recraft': ModelConfig(
@@ -89,7 +89,7 @@ MODELS: Dict[str, ModelConfig] = {
         provider='google_gemini',
         enabled=os.environ.get('GEMINI_ENABLED', 'true').lower() == 'true',
         api_key=os.environ.get('GEMINI_API_KEY', ''),
-        model_id=os.environ.get('GEMINI_MODEL_ID', 'gemini-2.0-flash-exp'),
+        model_id=os.environ.get('GEMINI_MODEL_ID', 'gemini-2.5-flash-image'),
         display_name='Gemini'
     ),
     'openai': ModelConfig(

@@ -165,9 +165,9 @@ Four fixed models run in parallel for every generation:
 
 | Name | Provider | Default Model ID | Enable Env Var |
 |------|----------|-------------------|----------------|
-| Flux | BFL | flux-pro-1.1 | `FLUX_ENABLED` |
+| Flux | BFL | flux-2-pro | `FLUX_ENABLED` |
 | Recraft | Recraft | recraftv3 | `RECRAFT_ENABLED` |
-| Gemini | Google | gemini-2.0-flash-exp | `GEMINI_ENABLED` |
+| Gemini | Google | gemini-2.5-flash-image | `GEMINI_ENABLED` |
 | OpenAI | OpenAI | gpt-image-1 | `OPENAI_ENABLED` |
 
 Each model requires its own API key env var (e.g., `FLUX_API_KEY`). Models can be individually disabled.
