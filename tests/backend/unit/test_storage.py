@@ -12,34 +12,6 @@ from .fixtures.api_responses import SAMPLE_IMAGE_BASE64
 class TestImageStorage:
     """Tests for ImageStorage class"""
 
-    def test_upload_image_to_s3(self, mock_s3):
-        """Test uploading image to S3"""
-        s3_client, bucket_name = mock_s3
-
-        storage = ImageStorage(s3_client, bucket_name, 'https://cdn.example.com')
-
-        # Upload test image
-        image_data = SAMPLE_IMAGE_BASE64
-        metadata = {
-            'prompt': 'test prompt',
-            'model': 'Test Model'}
-
-        key = storage.save_image(
-            base64_image=image_data,
-            model_name='TestModel',
-            prompt=metadata['prompt'],
-            target='2025-11-16-10-30-00'
-        )
-
-        # Verify key format
-        assert key is not None
-        assert 'group-images/' in key
-        assert 'testmodel' in key  # Model name is normalized to lowercase
-
-        # Verify image was uploaded
-        response = s3_client.get_object(Bucket=bucket_name, Key=key)
-        assert response is not None
-
     def test_get_cloudfront_url(self, mock_s3):
         """Test CloudFront URL generation"""
         s3_client, bucket_name = mock_s3

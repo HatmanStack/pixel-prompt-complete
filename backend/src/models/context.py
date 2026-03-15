@@ -142,53 +142,6 @@ class ContextManager:
             f"Failed to add context entry after {max_retries} retries for {session_id}/{model}"
         )
 
-    def clear_context(self, session_id: str, model: str) -> None:
-        """
-        Clear context for a model column.
-
-        Args:
-            session_id: Session identifier
-            model: Model name
-        """
-        key = self._get_context_key(session_id, model)
-
-        try:
-            self.s3.delete_object(Bucket=self.bucket, Key=key)
-        except Exception as e:
-            logger.warning(f"Error clearing context for {session_id}/{model}: {e}")
-
-    def _save_context(self, session_id: str, model: str, entries: List[ContextEntry]) -> None:
-        """
-        Save context entries to S3.
-
-        Args:
-            session_id: Session identifier
-            model: Model name
-            entries: List of ContextEntry objects
-        """
-        key = self._get_context_key(session_id, model)
-
-        data = {
-            'model': model,
-            'sessionId': session_id,
-            'window': [
-                {
-                    'iteration': e.iteration,
-                    'prompt': e.prompt,
-                    'imageKey': e.image_key,
-                    'timestamp': e.timestamp
-                }
-                for e in entries
-            ]
-        }
-
-        self.s3.put_object(
-            Bucket=self.bucket,
-            Key=key,
-            Body=json.dumps(data),
-            ContentType='application/json'
-        )
-
     def _save_context_conditional(
         self,
         session_id: str,

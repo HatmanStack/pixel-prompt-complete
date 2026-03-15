@@ -96,14 +96,6 @@ class TestContextManager:
         assert 0 not in iterations
         assert 3 in iterations
 
-    def test_clear_context(self, context_manager, mock_s3_client):
-        """clear_context() should delete context file from S3."""
-        context_manager.clear_context('session-123', 'flux')
-
-        mock_s3_client.delete_object.assert_called_once()
-        call_args = mock_s3_client.delete_object.call_args
-        assert call_args.kwargs['Key'] == 'sessions/session-123/context/flux.json'
-
     def test_get_context_for_iteration(self, context_manager, mock_s3_client):
         """get_context_for_iteration() should return handler-compatible format."""
         context_data = {

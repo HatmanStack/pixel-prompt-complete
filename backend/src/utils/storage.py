@@ -65,33 +65,6 @@ class ImageStorage:
             content_type='application/json',
         )
 
-    def save_image(
-        self,
-        base64_image: str,
-        model_name: str,
-        prompt: str,
-        target: str
-    ) -> str:
-        """Save generated image to S3 with metadata and thumbnail."""
-        normalized_model = self._normalize_model_name(model_name)
-        timestamp = datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')
-        key = f"group-images/{target}/{normalized_model}-{timestamp}.json"
-
-        self._store_image(base64_image, key, model_name, prompt, target)
-
-        # Generate and save thumbnail (non-critical)
-        try:
-            thumbnail_base64 = self._generate_thumbnail(base64_image)
-            thumbnail_key = f"group-images/{target}/{normalized_model}-{timestamp}-thumb.json"
-            self._store_image(
-                thumbnail_base64, thumbnail_key, model_name, prompt, target,
-                extra={'thumbnail': True},
-            )
-        except Exception as e:
-            logger.debug("Thumbnail generation failed for %s: %s", key, e)
-
-        return key
-
     @retry_with_backoff(max_retries=3, base_delay=1.0, max_delay=4.0)
     def _put_object_with_retry(self, key: str, body: str, content_type: str):
         """

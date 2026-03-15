@@ -20,10 +20,6 @@ from utils.logger import StructuredLogger
 _ATOMIC_MAX_RETRIES = 3
 
 
-def reset_cache() -> None:
-    """No-op kept for test compatibility."""
-
-
 class RateLimiter:
     """
     S3-based rate limiting using per-timeslice counter keys.

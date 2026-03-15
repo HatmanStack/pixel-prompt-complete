@@ -6,9 +6,6 @@ import pytest
 from moto import mock_aws
 import boto3
 
-from utils.rate_limit import reset_cache as reset_rate_limit_cache
-
-
 def _reset_handler_singletons():
     """Clear module-level client caches in handlers to ensure test isolation."""
     import models.handlers as h
@@ -29,9 +26,6 @@ def _reset_singletons():
 @pytest.fixture
 def mock_s3():
     """Mock S3 client for testing storage operations"""
-    # Reset rate limit cache before each test for isolation
-    reset_rate_limit_cache()
-
     with mock_aws():
         # Create mock S3 client
         s3 = boto3.client('s3', region_name='us-east-1')
@@ -41,9 +35,6 @@ def mock_s3():
         s3.create_bucket(Bucket=bucket_name)
 
         yield s3, bucket_name
-
-    # Reset cache after test as well
-    reset_rate_limit_cache()
 
 
 @pytest.fixture
