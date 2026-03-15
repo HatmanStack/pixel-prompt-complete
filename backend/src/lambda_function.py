@@ -143,6 +143,55 @@ def _parse_and_validate_request(
     return ValidatedRequest(body=body, ip=ip, prompt=prompt), None
 
 
+def _handle_successful_result(
+    session_id: str,
+    model_name: str,
+    prompt: str,
+    result: dict[str, Any],
+    iteration_index: int,
+    target: str,
+    duration: float,
+    context_prompt: str | None = None,
+) -> dict[str, Any]:
+    """Handle a successful handler result: upload, complete iteration, add context.
+
+    Args:
+        context_prompt: Prompt string to store in context. Defaults to ``prompt``.
+
+    Returns:
+        Dict with image_key and image_url.
+    """
+    image_key = image_storage.upload_image(
+        result['image'],
+        target,
+        model_name,
+        prompt,
+        iteration=iteration_index,
+    )
+
+    session_manager.complete_iteration(
+        session_id, model_name, iteration_index, image_key, duration,
+    )
+
+    entry = create_context_entry(iteration_index, context_prompt or prompt, image_key)
+    context_manager.add_entry(session_id, model_name, entry)
+
+    return {
+        'image_key': image_key,
+        'image_url': image_storage.get_cloudfront_url(image_key),
+    }
+
+
+def _handle_failed_result(
+    session_id: str,
+    model_name: str,
+    iteration_index: int,
+    error_msg: str,
+) -> None:
+    """Handle a failed handler result: mark iteration as failed."""
+    session_manager.fail_iteration(session_id, model_name, iteration_index, error_msg)
+
+
 def extract_correlation_id(event: LambdaEvent) -> str:
     """Extract correlation ID from event headers or generate new one."""
     headers = event.get('headers', {}) or {}
@@ -245,12 +294,10 @@ def handle_generate(event: LambdaEvent, correlation_id: Optional[str] = None) ->
             iteration_index = None
 
             try:
-                # Add iteration 0
                 iteration_index = session_manager.add_iteration(
                     session_id, model_name, prompt
                 )
 
-                # Get handler and generate
                 handler = get_handler(model_config.provider)
                 config_dict = get_model_config_dict(model_config)
                 result = handler(config_dict, prompt, {})
@@ -258,46 +305,31 @@ def handle_generate(event: LambdaEvent, correlation_id: Optional[str] = None) ->
                 duration = time.time() - start_time
 
                 if result['status'] == 'success':
-                    # Upload image
-                    image_key = image_storage.upload_image(
-                        result['image'],
-                        target,
-                        model_name,
-                        prompt,
-                        iteration=iteration_index
+                    info = _handle_successful_result(
+                        session_id, model_name, prompt, result,
+                        iteration_index, target, duration,
                     )
-
-                    # Complete iteration
-                    session_manager.complete_iteration(
-                        session_id, model_name, iteration_index, image_key, duration
-                    )
-
-                    # Add to context
-                    entry = create_context_entry(iteration_index, prompt, image_key)
-                    context_manager.add_entry(session_id, model_name, entry)
-
                     return model_name, {
                         'status': 'completed',
-                        'imageKey': image_key,
-                        'imageUrl': image_storage.get_cloudfront_url(image_key),
+                        'imageKey': info['image_key'],
+                        'imageUrl': info['image_url'],
                         'iteration': iteration_index,
-                        'duration': duration
+                        'duration': duration,
                     }
                 else:
-                    session_manager.fail_iteration(
-                        session_id, model_name, iteration_index, result.get('error', 'Unknown error')
-                    )
+                    error_msg = result.get('error', 'Unknown error')
+                    _handle_failed_result(session_id, model_name, iteration_index, error_msg)
                     return model_name, {
                         'status': 'error',
-                        'error': result.get('error', 'Unknown error'),
-                        'iteration': iteration_index
+                        'error': error_msg,
+                        'iteration': iteration_index,
                     }
 
             except Exception as e:
                 sanitized = sanitize_error_message(e)
                 if iteration_index is not None:
                     try:
-                        session_manager.fail_iteration(
+                        _handle_failed_result(
                             session_id, model_name, iteration_index, sanitized
                         )
                     except Exception:
@@ -414,44 +446,28 @@ def handle_iterate(event: LambdaEvent, correlation_id: Optional[str] = None) -> 
         target = datetime.now(timezone.utc).strftime('%Y-%m-%d-%H-%M-%S')
 
         if result['status'] == 'success':
-            # Upload new image
-            image_key = image_storage.upload_image(
-                result['image'],
-                target,
-                model_name,
-                prompt,
-                iteration=iteration_index
+            info = _handle_successful_result(
+                session_id, model_name, prompt, result,
+                iteration_index, target, duration,
             )
-
-            # Complete iteration
-            session_manager.complete_iteration(
-                session_id, model_name, iteration_index, image_key, duration
-            )
-
-            # Add to context
-            entry = create_context_entry(iteration_index, prompt, image_key)
-            context_manager.add_entry(session_id, model_name, entry)
-
             resp = {
                 'status': 'completed',
-                'imageKey': image_key,
-                'imageUrl': image_storage.get_cloudfront_url(image_key),
+                'imageKey': info['image_key'],
+                'imageUrl': info['image_url'],
                 'iteration': iteration_index,
                 'iterationCount': iteration_index + 1,
-                'duration': duration
+                'duration': duration,
             }
             if warning:
                 resp['warning'] = warning
-
             return response(200, resp)
         else:
-            session_manager.fail_iteration(
-                session_id, model_name, iteration_index, result.get('error', 'Unknown error')
-            )
+            error_msg = result.get('error', 'Unknown error')
+            _handle_failed_result(session_id, model_name, iteration_index, error_msg)
             return response(500, {
                 'status': 'error',
-                'error': result.get('error', 'Unknown error'),
-                'iteration': iteration_index
+                'error': error_msg,
+                'iteration': iteration_index,
             })
 
     except json.JSONDecodeError:
@@ -551,41 +567,27 @@ def handle_outpaint(event: LambdaEvent, correlation_id: Optional[str] = None) ->
         target = datetime.now(timezone.utc).strftime('%Y-%m-%d-%H-%M-%S')
 
         if result['status'] == 'success':
-            # Upload new image
-            image_key = image_storage.upload_image(
-                result['image'],
-                target,
-                model_name,
-                f"outpaint:{preset} - {prompt}",
-                iteration=iteration_index
+            info = _handle_successful_result(
+                session_id, model_name, f"outpaint:{preset} - {prompt}", result,
+                iteration_index, target, duration,
+                context_prompt=f"outpaint:{preset}",
             )
-
-            # Complete iteration
-            session_manager.complete_iteration(
-                session_id, model_name, iteration_index, image_key, duration
-            )
-
-            # Add to context
-            entry = create_context_entry(iteration_index, f"outpaint:{preset}", image_key)
-            context_manager.add_entry(session_id, model_name, entry)
-
             return response(200, {
                 'status': 'completed',
-                'imageKey': image_key,
-                'imageUrl': image_storage.get_cloudfront_url(image_key),
+                'imageKey': info['image_key'],
+                'imageUrl': info['image_url'],
                 'iteration': iteration_index,
                 'iterationCount': iteration_index + 1,
                 'preset': preset,
-                'duration': duration
+                'duration': duration,
             })
         else:
-            session_manager.fail_iteration(
-                session_id, model_name, iteration_index, result.get('error', 'Unknown error')
-            )
+            error_msg = result.get('error', 'Unknown error')
+            _handle_failed_result(session_id, model_name, iteration_index, error_msg)
             return response(500, {
                 'status': 'error',
-                'error': result.get('error', 'Unknown error'),
-                'iteration': iteration_index
+                'error': error_msg,
+                'iteration': iteration_index,
             })
 
     except json.JSONDecodeError:
