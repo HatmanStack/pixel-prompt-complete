@@ -558,6 +558,10 @@ def handle_status(event: LambdaEvent, correlation_id: Optional[str] = None) -> A
         path = event.get('rawPath', event.get('path', ''))
         session_id = path.split('/')[-1]
 
+        # Validate session_id format (alphanumeric + hyphens, max 64 chars)
+        if not session_id or not re.match(r'^[a-zA-Z0-9\-]{1,64}$', session_id):
+            return response(400, {'error': 'Invalid session ID format'})
+
         session = session_manager.get_session(session_id)
         if not session:
             return response(404, {'error': f'Session {session_id} not found'})

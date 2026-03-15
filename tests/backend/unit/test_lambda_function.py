@@ -254,6 +254,31 @@ class TestErrorCases:
         resp = lambda_handler(_make_event(method="GET", path="/status/missing"), None)
         assert resp["statusCode"] == 404
 
+    def test_status_invalid_session_id_path_traversal(self, mocks):
+        resp = lambda_handler(_make_event(method="GET", path="/status/..%2F..%2Fetc%2Fpasswd"), None)
+        assert resp["statusCode"] == 400
+        assert "Invalid session ID" in _body(resp)["error"]
+
+    def test_status_invalid_session_id_dots(self, mocks):
+        resp = lambda_handler(_make_event(method="GET", path="/status/../something"), None)
+        # Last segment is "something" which is valid, but let's test with dots in the ID
+        resp = lambda_handler(_make_event(method="GET", path="/status/.."), None)
+        assert resp["statusCode"] == 400
+
+    def test_status_invalid_session_id_too_long(self, mocks):
+        long_id = "a" * 65
+        resp = lambda_handler(_make_event(method="GET", path=f"/status/{long_id}"), None)
+        assert resp["statusCode"] == 400
+
+    def test_status_invalid_session_id_special_chars(self, mocks):
+        resp = lambda_handler(_make_event(method="GET", path="/status/<script>alert(1)</script>"), None)
+        assert resp["statusCode"] == 400
+
+    def test_status_valid_uuid_session_id(self, mocks):
+        mocks["session_manager"].get_session.return_value = {"sessionId": "abc-123-def", "models": {}}
+        resp = lambda_handler(_make_event(method="GET", path="/status/abc-123-def"), None)
+        assert resp["statusCode"] == 200
+
 
 # ============================================================
 # Stage prefix stripping
