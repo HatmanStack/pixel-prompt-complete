@@ -12,13 +12,10 @@ by redacting any keys that might appear in exception messages returned to client
 """
 
 import base64
-import json
 import re
 import time
-import warnings
 from typing import Any, Callable, Dict, List, Union
 
-import boto3
 import requests
 from google import genai
 from google.genai import types
@@ -26,8 +23,6 @@ from openai import OpenAI
 
 from config import (
     api_client_timeout,
-    bedrock_nova_region,
-    bedrock_sd_region,
     bfl_max_poll_attempts,
     bfl_poll_interval,
     image_download_timeout,
@@ -36,8 +31,6 @@ from config import (
 # Module-level client singletons for Lambda container reuse
 _openai_clients: Dict[str, OpenAI] = {}
 _genai_clients: Dict[str, genai.Client] = {}
-_bedrock_nova_client = None
-_bedrock_sd_client = None
 
 
 def _get_openai_client(api_key: str, **kwargs) -> OpenAI:
@@ -59,28 +52,6 @@ def _get_genai_client(api_key: str) -> genai.Client:
     if cache_key not in _genai_clients:
         _genai_clients[cache_key] = genai.Client(api_key=api_key or None)
     return _genai_clients[cache_key]
-
-
-def _get_bedrock_nova_client():
-    """Get or create a cached Bedrock Nova client."""
-    global _bedrock_nova_client
-    if _bedrock_nova_client is None:
-        _bedrock_nova_client = boto3.client(
-            service_name='bedrock-runtime',
-            region_name=bedrock_nova_region,
-        )
-    return _bedrock_nova_client
-
-
-def _get_bedrock_sd_client():
-    """Get or create a cached Bedrock SD client."""
-    global _bedrock_sd_client
-    if _bedrock_sd_client is None:
-        _bedrock_sd_client = boto3.client(
-            service_name='bedrock-runtime',
-            region_name=bedrock_sd_region,
-        )
-    return _bedrock_sd_client
 
 
 # Common handler helpers
@@ -288,204 +259,6 @@ def handle_google_gemini(model_config: ModelConfig, prompt: str, _params: Genera
         return _error_result(e, model_config, 'google_gemini')
 
 
-def handle_google_imagen(model_config: ModelConfig, prompt: str, _params: GenerationParams) -> HandlerResult:
-    """
-    Handle image generation for Google Imagen 3.0.
-
-    Args:
-        model_config: Model configuration dict
-        prompt: Text prompt for image generation
-        _params: Generation parameters (unused - Imagen uses default settings)
-
-    Returns:
-        Standardized response dict
-    """
-    try:
-
-        client = _get_genai_client(model_config.get('api_key', ''))
-
-        # Generate image
-        response = client.models.generate_images(
-            model='imagen-3.0-generate-002',
-            prompt=prompt,
-            config=types.GenerateImagesConfig(
-                number_of_images=1
-            )
-        )
-
-        # Validate response structure
-        if not response.generated_images or len(response.generated_images) == 0:
-            raise ValueError("Imagen returned empty generated_images array")
-
-        # Extract image bytes from generated_images
-        image_bytes = response.generated_images[0].image.image_bytes
-
-        # Convert bytes directly to base64
-        image_base64 = base64.b64encode(image_bytes).decode('utf-8')
-
-        return _success_result(image_base64, model_config, 'google_imagen')
-
-    except Exception as e:
-        return _error_result(e, model_config, 'google_imagen')
-
-
-def handle_bedrock_nova(model_config: ModelConfig, prompt: str, params: GenerationParams) -> HandlerResult:
-    """
-    Handle image generation for AWS Bedrock Nova Canvas.
-
-    Args:
-        model_config: Model configuration dict
-        prompt: Text prompt for image generation
-        params: Generation parameters
-
-    Returns:
-        Standardized response dict
-    """
-    try:
-
-        bedrock = _get_bedrock_nova_client()
-
-        # Build request body for Nova Canvas
-        request_body = {
-            "taskType": "TEXT_IMAGE",
-            "textToImageParams": {
-                "text": prompt
-            },
-            "imageGenerationConfig": {
-                "numberOfImages": 1,
-                "height": 1024,
-                "width": 1024,
-                "cfgScale": params.get('guidance', 8.0),
-                "seed": 0
-            }
-        }
-
-        # Invoke model
-        response = bedrock.invoke_model(
-            modelId=model_config['id'],
-            body=json.dumps(request_body)
-        )
-
-        # Parse response
-        response_body = json.loads(response['body'].read())
-
-        # Validate response structure
-        if 'images' not in response_body or len(response_body['images']) == 0:
-            raise ValueError("Bedrock Nova returned empty images array")
-
-        # Extract base64 image from response
-        image_base64 = response_body['images'][0]
-
-        return _success_result(image_base64, model_config, 'bedrock_nova')
-
-    except Exception as e:
-        return _error_result(e, model_config, 'bedrock_nova')
-
-
-def handle_bedrock_sd(model_config: ModelConfig, prompt: str, params: GenerationParams) -> HandlerResult:
-    """
-    Handle image generation for AWS Bedrock Stable Diffusion.
-
-    Args:
-        model_config: Model configuration dict
-        prompt: Text prompt for image generation
-        params: Generation parameters
-
-    Returns:
-        Standardized response dict
-    """
-    try:
-
-        bedrock = _get_bedrock_sd_client()
-
-        # Build request body for Stable Diffusion
-        request_body = {
-            "prompt": prompt,
-            "mode": "text-to-image",
-            "aspect_ratio": "1:1",
-            "output_format": "png",
-            "seed": 0
-        }
-
-        # Add negative prompt if provided
-        negative_prompt = params.get('negative_prompt', '')
-        if negative_prompt:
-            request_body['negative_prompt'] = negative_prompt
-
-        # Invoke model
-        response = bedrock.invoke_model(
-            modelId=model_config['id'],
-            body=json.dumps(request_body)
-        )
-
-        # Parse response
-        response_body = json.loads(response['body'].read())
-
-        # Validate response structure
-        if 'images' not in response_body or len(response_body['images']) == 0:
-            raise ValueError("Bedrock SD returned empty images array")
-
-        # Extract base64 image from response
-        image_base64 = response_body['images'][0]
-
-        return _success_result(image_base64, model_config, 'bedrock_sd')
-
-    except Exception as e:
-        return _error_result(e, model_config, 'bedrock_sd')
-
-
-def handle_stability(model_config: ModelConfig, prompt: str, params: GenerationParams) -> HandlerResult:
-    """
-    Handle image generation for Stability AI.
-
-    Args:
-        model_config: Model configuration dict
-        prompt: Text prompt for image generation
-        params: Generation parameters
-
-    Returns:
-        Standardized response dict
-    """
-    try:
-
-        # Stability AI API endpoint
-        url = "https://api.stability.ai/v2beta/stable-image/generate/sd3"
-
-        # Headers
-        headers = {
-            "authorization": f"Bearer {model_config.get('api_key') or None}",
-            "accept": "image/*"
-        }
-
-        # Build multipart form data
-        files = {
-            'prompt': (None, prompt),
-            'model': (None, 'sd3-large-turbo'),
-            'output_format': (None, 'png'),
-            'aspect_ratio': (None, '1:1')
-        }
-
-        # Add negative prompt if provided
-        negative_prompt = params.get('negative_prompt', '')
-        if negative_prompt:
-            files['negative_prompt'] = (None, negative_prompt)
-
-        # Make request
-        response = requests.post(url, headers=headers, files=files, timeout=60)
-        response.raise_for_status()
-
-        # Response is raw image bytes - convert to base64
-        image_base64 = base64.b64encode(response.content).decode('utf-8')
-
-        return _success_result(image_base64, model_config, 'stability')
-
-    except requests.Timeout:
-        return _error_result("Stability AI request timeout after 60 seconds", model_config, 'stability')
-
-    except Exception as e:
-        return _error_result(e, model_config, 'stability')
-
-
 def handle_bfl(model_config: ModelConfig, prompt: str, params: GenerationParams) -> HandlerResult:
     """
     Handle image generation for Black Forest Labs (Flux).
@@ -606,90 +379,29 @@ def handle_recraft(model_config: ModelConfig, prompt: str, _params: GenerationPa
         return _error_result(e, model_config, 'recraft')
 
 
-def handle_generic(model_config: ModelConfig, prompt: str, _params: GenerationParams) -> HandlerResult:
-    """
-    Generic fallback handler for unknown providers.
-
-    Attempts to call as OpenAI-compatible API.
-
-    Args:
-        model_config: Model configuration dict
-        prompt: Text prompt for image generation
-        _params: Generation parameters (unused - generic handler uses defaults)
-
-    Returns:
-        Standardized response dict
-    """
-    try:
-
-        # Try as OpenAI-compatible API
-        # Use the model name as-is
-        client_kwargs = {
-            'api_key': model_config.get('api_key') or None,
-            'timeout': 120.0
-        }
-
-        # Support custom base_url for OpenAI-compatible providers
-        if 'base_url' in model_config:
-            client_kwargs['base_url'] = model_config['base_url']
-
-        client = OpenAI(**client_kwargs)
-
-        response = client.images.generate(
-            model=model_config['id'],
-            prompt=prompt,
-            size="1024x1024",
-            n=1
-        )
-
-        # Validate response structure
-        if not response.data or len(response.data) == 0:
-            raise ValueError("Generic handler returned empty data array")
-
-        # Extract image URL
-        image_url = response.data[0].url
-
-        # Download image
-        img_response = requests.get(image_url, timeout=30)
-        img_response.raise_for_status()
-
-        # Convert to base64
-        image_base64 = base64.b64encode(img_response.content).decode('utf-8')
-
-        return _success_result(image_base64, model_config, 'generic')
-
-    except Exception as e:
-        return _error_result(
-            f"Generic handler failed (model may not be OpenAI-compatible): {sanitize_error_message(e)}",
-            model_config, 'generic',
-        )
-
-
 def get_handler(provider: str) -> HandlerFunc:
     """
     Get the appropriate handler function for a provider.
 
     Args:
-        provider: Provider identifier (e.g., 'openai', 'google_gemini')
+        provider: Provider identifier (e.g., 'openai', 'google_gemini', 'bfl', 'recraft')
 
     Returns:
         Handler function for the provider
+
+    Raises:
+        ValueError: If provider is not recognized
     """
     handlers = {
         'openai': handle_openai,
         'google_gemini': handle_google_gemini,
-        'google_imagen': handle_google_imagen,
-        'bedrock_nova': handle_bedrock_nova,
-        'bedrock_sd': handle_bedrock_sd,
-        'stability': handle_stability,
         'bfl': handle_bfl,
         'recraft': handle_recraft,
-        'generic': handle_generic
     }
 
-    handler = handlers.get(provider, handle_generic)
-    if provider not in handlers:
-        warnings.warn(f"Unknown provider '{provider}', falling back to generic handler")
+    handler = handlers.get(provider)
+    if not handler:
+        raise ValueError(f"Unknown provider: {provider}")
 
     return handler
 

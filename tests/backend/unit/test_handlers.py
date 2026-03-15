@@ -8,13 +8,8 @@ from unittest.mock import Mock, patch, MagicMock
 from models.handlers import (
     handle_openai,
     handle_google_gemini,
-    handle_google_imagen,
-    handle_bedrock_nova,
-    handle_bedrock_sd,
-    handle_stability,
     handle_bfl,
     handle_recraft,
-    handle_generic
 )
 from .fixtures.api_responses import (
     SAMPLE_IMAGE_CONTENT,
@@ -151,85 +146,8 @@ class TestGoogleHandlers:
             assert 'Gemini API Error' in result['error']
 
 
-class TestBedrockHandlers:
-    """Tests for AWS Bedrock handlers"""
-
-    def test_bedrock_nova_success(self, sample_prompt, sample_params):
-        """Test successful Nova Canvas generation"""
-        nova_config = {
-            'index': 1,
-            'provider': 'bedrock_nova',
-            'id': 'amazon.nova-canvas-v1:0'
-        }
-
-        with patch('models.handlers.boto3.client') as mock_boto3:
-            mock_client = Mock()
-            mock_boto3.return_value = mock_client
-
-            # Setup mock response - Nova returns images array
-            response_body = f'{{"images": ["{SAMPLE_IMAGE_BASE64}"]}}'
-            mock_stream = Mock()
-            mock_stream.read.return_value = response_body.encode()
-            mock_client.invoke_model.return_value = {'body': mock_stream}
-
-            result = handle_bedrock_nova(nova_config, sample_prompt, sample_params)
-
-            assert result['status'] == 'success'
-            assert 'image' in result
-            assert result['provider'] == 'bedrock_nova'
-
-    def test_bedrock_sd_success(self, sample_prompt, sample_params):
-        """Test successful Bedrock Stable Diffusion generation"""
-        sd_config = {
-            'index': 1,
-            'provider': 'bedrock_sd',
-            'id': 'stability.sd3-large-v1:0'
-        }
-
-        with patch('models.handlers.boto3.client') as mock_boto3:
-            mock_client = Mock()
-            mock_boto3.return_value = mock_client
-
-            # Setup mock response - SD now returns images array
-            response_body = f'{{"images": ["{SAMPLE_IMAGE_BASE64}"]}}'
-            mock_stream = Mock()
-            mock_stream.read.return_value = response_body.encode()
-            mock_client.invoke_model.return_value = {'body': mock_stream}
-
-            result = handle_bedrock_sd(sd_config, sample_prompt, sample_params)
-
-            assert result['status'] == 'success'
-            assert 'image' in result
-            assert result['provider'] == 'bedrock_sd'
-
-
 class TestOtherHandlers:
-    """Tests for other provider handlers"""
-
-    @responses.activate
-    def test_stability_ai_success(self, sample_prompt, sample_params):
-        """Test Stability AI handler - returns raw image bytes"""
-        stability_config = {
-            'index': 1,
-            'provider': 'stability',
-            'id': 'sd3-large-turbo',
-            'api_key': 'test-stability-key'
-        }
-
-        # Stability v2beta returns raw image bytes, not JSON
-        responses.add(
-            responses.POST,
-            "https://api.stability.ai/v2beta/stable-image/generate/sd3",
-            body=SAMPLE_IMAGE_CONTENT,
-            status=200,
-            content_type="image/png"
-        )
-
-        result = handle_stability(stability_config, sample_prompt, sample_params)
-
-        assert result['status'] == 'success'
-        assert 'image' in result
-        assert result['provider'] == 'stability'
+    """Tests for BFL and Recraft handlers"""
 
     @responses.activate
     def test_black_forest_success(self, sample_prompt, sample_params):
@@ -311,36 +229,3 @@ class TestOtherHandlers:
             assert 'image' in result
             assert result['provider'] == 'recraft'
 
-    @responses.activate
-    def test_generic_openai_success(self, sample_prompt, sample_params):
-        """Test generic OpenAI-compatible handler"""
-        generic_config = {
-            'index': 1,
-            'provider': 'generic',
-            'id': 'custom-model',
-            'api_key': 'test-generic-key',
-            'base_url': 'https://api.example.com'
-        }
-
-        # Mock the image download
-        responses.add(
-            responses.GET,
-            "https://example.com/image.png",
-            body=SAMPLE_IMAGE_CONTENT,
-            status=200
-        )
-
-        with patch('models.handlers.OpenAI') as mock_openai:
-            mock_client = Mock()
-            mock_openai.return_value = mock_client
-
-            # Setup mock response
-            mock_response = Mock()
-            mock_response.data = [Mock(url="https://example.com/image.png")]
-            mock_client.images.generate.return_value = mock_response
-
-            result = handle_generic(generic_config, sample_prompt, sample_params)
-
-            assert result['status'] == 'success'
-            assert 'image' in result
-            assert result['provider'] == 'generic'

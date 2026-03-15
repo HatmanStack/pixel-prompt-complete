@@ -47,10 +47,6 @@ class ModelConfig:
 # AWS configuration from Lambda execution environment
 aws_region = os.environ.get('AWS_REGION', 'us-west-2')
 
-# Bedrock-specific regions (some models require specific regions)
-bedrock_nova_region = os.environ.get('BEDROCK_NOVA_REGION', 'us-east-1')
-bedrock_sd_region = os.environ.get('BEDROCK_SD_REGION', 'us-west-2')
-
 # S3 and CloudFront
 s3_bucket = os.environ.get('S3_BUCKET')
 cloudfront_domain = os.environ.get('CLOUDFRONT_DOMAIN')

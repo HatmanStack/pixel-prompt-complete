@@ -11,8 +11,6 @@ def _reset_handler_singletons():
     import models.handlers as h
     h._openai_clients.clear()
     h._genai_clients.clear()
-    h._bedrock_nova_client = None
-    h._bedrock_sd_client = None
 
 
 @pytest.fixture(autouse=True)
