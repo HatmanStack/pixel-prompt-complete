@@ -102,6 +102,9 @@ MODELS: Dict[str, ModelConfig] = {
     ),
 }
 
+# CORS
+cors_allowed_origin = os.environ.get('CORS_ALLOWED_ORIGIN', '*')
+
 # Iteration limits
 MAX_ITERATIONS = 7
 ITERATION_WARNING_THRESHOLD = 5

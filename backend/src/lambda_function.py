@@ -24,6 +24,7 @@ from config import (
     MAX_ITERATIONS,
     MODELS,
     cloudfront_domain,
+    cors_allowed_origin,
     generate_thread_workers,
     get_enabled_models,
     get_model,
@@ -782,7 +783,7 @@ def response(status_code: int, body: Dict[str, Any]) -> ApiResponse:
         'statusCode': status_code,
         'headers': {
             'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Origin': cors_allowed_origin,
             'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
             'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With, X-Correlation-ID'
         },

@@ -224,6 +224,8 @@ Resources:
           GLOBAL_LIMIT: !Ref GlobalRateLimit
           IP_LIMIT: !Ref IPRateLimit
           IP_INCLUDE: !Ref IPWhitelist
+          # CORS
+          CORS_ALLOWED_ORIGIN: '*'
           # S3 and CloudFront
           S3_BUCKET: !Ref PixelPromptBucket
           CLOUDFRONT_DOMAIN: !GetAtt CloudFrontDistribution.DomainName

@@ -351,6 +351,17 @@ class TestCorsHeaders:
         resp = lambda_handler(_make_event(body={"prompt": "hi"}), None)
         self._check_cors(resp)
 
+    def test_cors_origin_configurable(self, mocks):
+        """CORS origin should be configurable via CORS_ALLOWED_ORIGIN env var."""
+        import lambda_function
+        original = lambda_function.cors_allowed_origin
+        try:
+            lambda_function.cors_allowed_origin = "https://example.com"
+            resp = lambda_handler(_make_event(method="GET", path="/nope"), None)
+            assert resp["headers"]["Access-Control-Allow-Origin"] == "https://example.com"
+        finally:
+            lambda_function.cors_allowed_origin = original
+
 
 # ============================================================
 # Correlation ID
