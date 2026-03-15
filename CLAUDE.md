@@ -56,9 +56,8 @@ Runs on push/PR to main/develop: frontend lint + typecheck → frontend tests �
 ```
 backend/src/
 ├── lambda_function.py       # Main handler - routes all API endpoints
-├── config.py                # 4 fixed ModelConfig dataclasses + env var loading
+├── config.py                # 4 frozen ModelConfig dataclasses + env var loading
 ├── models/
-│   ├── registry.py          # ModelRegistry (legacy, still present)
 │   ├── handlers.py          # 3 handler types per provider: generate, iterate, outpaint
 │   └── context.py           # ContextManager: rolling 3-iteration window per model in S3
 ├── jobs/
@@ -67,6 +66,7 @@ backend/src/
 │   ├── enhance.py           # PromptEnhancer: LLM-based prompt improvement
 │   └── log.py               # Client-side logging endpoint
 └── utils/
+    ├── clients.py           # Cached API client factories (OpenAI, Gemini)
     ├── storage.py           # ImageStorage: S3 upload, CloudFront URLs, gallery listing
     ├── rate_limit.py        # RateLimiter: Global hourly + per-IP daily, S3-backed
     ├── content_filter.py    # ContentFilter: keyword-based pre-filtering
