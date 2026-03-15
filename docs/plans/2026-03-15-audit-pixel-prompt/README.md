@@ -24,19 +24,25 @@ is tagged with the implementer role responsible for it.
 
 | Phase | Tag | Goal | Token Estimate |
 |-------|-----|------|----------------|
-| 0 | — | Foundation: shared conventions, testing strategy, ADRs | ~2,000 |
+| 0 | -- | Foundation: shared conventions, testing strategy, ADRs | ~2,000 |
 | 1 | [HYGIENIST] | Dead code removal, unused dependency cleanup, stale reference purge | ~15,000 |
 | 2 | [IMPLEMENTER] | Performance fixes (S3 pagination), error handling, input validation, client caching | ~30,000 |
-| 3 | [IMPLEMENTER] | Architecture: extract shared pipeline, split lambda_function.py, freeze configs | ~35,000 |
-| 4 | [FORTIFIER] | Type rigor, CI enhancements, test quality improvements | ~20,000 |
+| 3 | [IMPLEMENTER] | Architecture: extract shared pipeline, split lambda_function.py | ~35,000 |
+| 4 | [FORTIFIER] | Type rigor, frozen configs, CI enhancements, test quality improvements | ~20,000 |
 | 5 | [DOC-ENGINEER] | Fix all documentation drift, gaps, stale references, and broken links | ~15,000 |
 
 ## Navigation
 
-- [Phase-0.md](Phase-0.md) — Foundation (applies to all phases)
-- [Phase-1.md](Phase-1.md) — [HYGIENIST] Dead code and cleanup
-- [Phase-2.md](Phase-2.md) — [IMPLEMENTER] Error handling, performance, validation
-- [Phase-3.md](Phase-3.md) — [IMPLEMENTER] Architecture refactoring
-- [Phase-4.md](Phase-4.md) — [FORTIFIER] Type safety, CI, test quality
-- [Phase-5.md](Phase-5.md) — [DOC-ENGINEER] Documentation fixes
-- [feedback.md](feedback.md) — Review feedback channel
+- [Phase-0.md](Phase-0.md) -- Foundation (applies to all phases)
+- [Phase-1.md](Phase-1.md) -- [HYGIENIST] Dead code and cleanup
+- [Phase-2.md](Phase-2.md) -- [IMPLEMENTER] Error handling, performance, validation
+- [Phase-3.md](Phase-3.md) -- [IMPLEMENTER] Architecture refactoring
+- [Phase-4.md](Phase-4.md) -- [FORTIFIER] Type safety, CI, test quality
+- [Phase-5.md](Phase-5.md) -- [DOC-ENGINEER] Documentation fixes
+- [feedback.md](feedback.md) -- Review feedback channel
+
+## Audit Source Documents
+
+- [health-audit.md](health-audit.md) -- Tech debt findings (2 critical, 7 high, 10 medium, 7 low)
+- [eval.md](eval.md) -- 12-pillar evaluation scores (1/12 at target)
+- [doc-audit.md](doc-audit.md) -- Documentation drift findings (6 drift, 5 gaps, 2 stale, 1 broken link)
