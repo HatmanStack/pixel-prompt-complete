@@ -34,7 +34,12 @@ from config import (
 )
 from jobs.manager import SessionManager
 from models.context import ContextManager, create_context_entry
-from models.handlers import get_handler, get_iterate_handler, get_outpaint_handler
+from models.handlers import (
+    get_handler,
+    get_iterate_handler,
+    get_outpaint_handler,
+    sanitize_error_message,
+)
 from utils import error_responses
 from utils.content_filter import ContentFilter
 from utils.logger import StructuredLogger
@@ -184,6 +189,7 @@ def handle_generate(event: LambdaEvent, correlation_id: Optional[str] = None) ->
         def generate_for_model(model_config):
             model_name = model_config.name
             start_time = time.time()
+            iteration_index = None
 
             try:
                 # Add iteration 0
@@ -235,7 +241,15 @@ def handle_generate(event: LambdaEvent, correlation_id: Optional[str] = None) ->
                     }
 
             except Exception as e:
-                return model_name, {'status': 'error', 'error': str(e)}
+                sanitized = sanitize_error_message(e)
+                if iteration_index is not None:
+                    try:
+                        session_manager.fail_iteration(
+                            session_id, model_name, iteration_index, sanitized
+                        )
+                    except Exception:
+                        pass  # Best-effort; don't mask the original error
+                return model_name, {'status': 'error', 'error': sanitized}
 
         # Execute in parallel using module-level executor
         futures = {

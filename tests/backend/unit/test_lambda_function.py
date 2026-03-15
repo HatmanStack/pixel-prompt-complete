@@ -341,3 +341,65 @@ class TestCorrelationId:
         mocks["session_manager"].get_session.return_value = {"sessionId": "s", "models": {}}
         resp = lambda_handler(_make_event(method="GET", path="/status/s"), None)
         assert resp["statusCode"] == 200
+
+
+# ============================================================
+# generate_for_model error handling
+# ============================================================
+
+
+class TestGenerateForModelErrorHandling:
+    """Tests for error sanitization and fail_iteration in generate_for_model."""
+
+    @patch("lambda_function.as_completed")
+    def test_handler_exception_sanitizes_error_and_calls_fail_iteration(self, mock_as_completed, mocks):
+        """When a handler raises, error should be sanitized and fail_iteration called."""
+        from concurrent.futures import ThreadPoolExecutor
+
+        fake_model = MagicMock(provider="bfl")
+        fake_model.name = "flux"
+        mocks["get_enabled_models"].return_value = [fake_model]
+        mocks["session_manager"].create_session.return_value = "sess-err"
+        mocks["session_manager"].add_iteration.return_value = 0
+        mocks["get_model_config_dict"].return_value = {"id": "flux-2-pro"}
+
+        # Handler that raises with an API key in the message
+        def failing_handler(config, prompt, params):
+            raise RuntimeError("Auth failed for key sk-abcdefghijklmnopqrstuvwxyz1234567890")
+
+        mocks["get_handler"].return_value = failing_handler
+
+        # Use a real executor so generate_for_model actually runs
+        real_executor = ThreadPoolExecutor(max_workers=1)
+        mocks["_executor"].submit.side_effect = real_executor.submit
+
+        # Capture the futures from submit
+        futures = []
+        original_submit = real_executor.submit
+
+        def capture_submit(*args, **kwargs):
+            f = original_submit(*args, **kwargs)
+            futures.append(f)
+            return f
+
+        mocks["_executor"].submit.side_effect = capture_submit
+        mock_as_completed.side_effect = lambda futs: futs
+
+        resp = lambda_handler(_make_event(body={"prompt": "test"}), None)
+        real_executor.shutdown(wait=True)
+
+        assert resp["statusCode"] == 200
+        result_body = _body(resp)
+
+        # Verify fail_iteration was called
+        mocks["session_manager"].fail_iteration.assert_called_once()
+        fail_args = mocks["session_manager"].fail_iteration.call_args
+
+        # Verify error message was sanitized (API key should be redacted)
+        error_msg = fail_args[0][3]  # 4th positional arg is the error message
+        assert "sk-abcdefghijklmnopqrstuvwxyz" not in error_msg
+
+        # Verify the model result in response also has sanitized error
+        assert "flux" in result_body["models"]
+        assert result_body["models"]["flux"]["status"] == "error"
+        assert "sk-abcdefghijklmnopqrstuvwxyz" not in result_body["models"]["flux"]["error"]
