@@ -39,8 +39,9 @@ export const API_ROUTES = {
   GALLERY_DETAIL: '/gallery',
 } as const;
 
-// Request timeout in milliseconds
-export const REQUEST_TIMEOUT = 30000; // 30 seconds
+// Request timeout in milliseconds — image generation can take 120+ seconds
+// for some providers (e.g., BFL polling), so allow 180s of headroom.
+export const REQUEST_TIMEOUT = 180000; // 180 seconds
 
 // Retry configuration
 export const RETRY_CONFIG = {
