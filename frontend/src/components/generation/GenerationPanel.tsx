@@ -3,7 +3,7 @@
  * Main panel with 4-column layout for session-based image generation
  */
 
-import { useEffect, useState, type FC } from 'react';
+import { useCallback, useEffect, useState, type FC } from 'react';
 import { useAppStore } from '@/stores/useAppStore';
 import { useSessionPolling } from '@/hooks/useSessionPolling';
 import { generateSession } from '@/api/client';
@@ -168,7 +168,7 @@ export const GenerationPanel: FC = () => {
     }
   }, [currentSession, isGenerating, playSound]);
 
-  const handleGenerate = async () => {
+  const handleGenerate = useCallback(async () => {
     if (!prompt.trim()) {
       setErrorMessage('Please enter a prompt');
       return;
@@ -225,7 +225,7 @@ export const GenerationPanel: FC = () => {
         showError(msg);
       }
     }
-  };
+  }, [prompt, resetSession, setIsGenerating, playSound, setCurrentSession, showError]);
 
   // Handle image expansion
   const handleImageExpand = (model: ModelName, iteration: Iteration) => {
@@ -275,8 +275,7 @@ export const GenerationPanel: FC = () => {
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prompt, isGenerating, expandedImage]);
+  }, [prompt, isGenerating, expandedImage, handleGenerate]);
 
   return (
     <article className="w-full flex flex-col gap-8 md:gap-6" aria-label="Image Generation">
