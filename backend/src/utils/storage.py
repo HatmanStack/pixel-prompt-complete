@@ -148,32 +148,42 @@ class ImageStorage:
 
         Returns:
             List of gallery folder names (target timestamps)
+
+        Raises:
+            ClientError: If the S3 operation fails (e.g., IAM, throttling)
         """
         try:
-            # List objects with prefix and delimiter to get folders
-            response = self.s3.list_objects_v2(
-                Bucket=self.bucket,
-                Prefix='group-images/',
-                Delimiter='/'
-            )
-
-            # Extract folder names from CommonPrefixes
             galleries = []
-            if 'CommonPrefixes' in response:
-                for prefix in response['CommonPrefixes']:
-                    # Extract folder name from prefix
-                    # e.g., "group-images/2025-11-15-14-30-45/" -> "2025-11-15-14-30-45"
-                    folder = prefix['Prefix'].split('/')[-2]
-                    galleries.append(folder)
+            kwargs = {
+                'Bucket': self.bucket,
+                'Prefix': 'group-images/',
+                'Delimiter': '/',
+            }
+
+            while True:
+                response = self.s3.list_objects_v2(**kwargs)
+
+                # Extract folder names from CommonPrefixes
+                if 'CommonPrefixes' in response:
+                    for prefix in response['CommonPrefixes']:
+                        # e.g., "group-images/2025-11-15-14-30-45/" -> "2025-11-15-14-30-45"
+                        folder = prefix['Prefix'].split('/')[-2]
+                        galleries.append(folder)
+
+                # Continue paginating if there are more results
+                if response.get('IsTruncated'):
+                    kwargs['ContinuationToken'] = response['NextContinuationToken']
+                else:
+                    break
 
             # Sort by timestamp (newest first)
             galleries.sort(reverse=True)
 
-
             return galleries
 
-        except Exception:
-            return []
+        except ClientError as e:
+            logger.error("Failed to list galleries from S3: %s", e)
+            raise
 
     def list_gallery_images(self, gallery_folder: str) -> List[str]:
         """
@@ -184,29 +194,39 @@ class ImageStorage:
 
         Returns:
             List of S3 keys for images in the gallery
+
+        Raises:
+            ClientError: If the S3 operation fails (e.g., IAM, throttling)
         """
         try:
             prefix = f"group-images/{gallery_folder}/"
-
-            # List all objects in the folder
-            response = self.s3.list_objects_v2(
-                Bucket=self.bucket,
-                Prefix=prefix
-            )
-
             images = []
-            if 'Contents' in response:
-                for obj in response['Contents']:
-                    key = obj['Key']
-                    # Only include .json files (not folders)
-                    if key.endswith('.json'):
-                        images.append(key)
+            kwargs = {
+                'Bucket': self.bucket,
+                'Prefix': prefix,
+            }
 
+            while True:
+                response = self.s3.list_objects_v2(**kwargs)
+
+                if 'Contents' in response:
+                    for obj in response['Contents']:
+                        key = obj['Key']
+                        # Only include .json files (not folders)
+                        if key.endswith('.json'):
+                            images.append(key)
+
+                # Continue paginating if there are more results
+                if response.get('IsTruncated'):
+                    kwargs['ContinuationToken'] = response['NextContinuationToken']
+                else:
+                    break
 
             return images
 
-        except Exception:
-            return []
+        except ClientError as e:
+            logger.error("Failed to list gallery images from S3: %s", e)
+            raise
 
     def get_cloudfront_url(self, s3_key: str) -> str:
         """
