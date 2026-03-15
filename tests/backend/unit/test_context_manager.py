@@ -93,9 +93,9 @@ class TestContextManager:
     def test_get_context_for_iteration(self, context_manager):
         """get_context_for_iteration() should return handler-compatible dicts."""
         entry = create_context_entry(0, 'test prompt', 'key-0')
-        context_manager.add_entry('session-123', 'flux', entry)
+        context_manager.add_entry('session-iter', 'flux', entry)
 
-        result = context_manager.get_context_for_iteration('session-123', 'flux')
+        result = context_manager.get_context_for_iteration('session-iter', 'flux')
 
         assert isinstance(result, list)
         assert len(result) == 1
