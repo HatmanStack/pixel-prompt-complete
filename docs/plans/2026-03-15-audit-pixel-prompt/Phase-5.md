@@ -42,10 +42,10 @@ Fix all documentation drift, gaps, stale references, and broken links identified
 - Remove or update the comment about the `models/` directory to reflect that it contains only `__init__.py`, `handlers.py`, and `context.py`.
 
 **Verification Checklist:**
-- [ ] `registry.py` is not mentioned in CLAUDE.md module tree
-- [ ] `types.py` is not mentioned in CLAUDE.md module tree
-- [ ] Every file listed in the tree exists on disk
-- [ ] Every Python file in `backend/src/` (excluding `__init__.py`) is listed in the tree
+- [x] `registry.py` is not mentioned in CLAUDE.md module tree
+- [x] `types.py` is not mentioned in CLAUDE.md module tree
+- [x] Every file listed in the tree exists on disk
+- [x] Every Python file in `backend/src/` (excluding `__init__.py`) is listed in the tree
 
 **Testing Instructions:**
 - Manual verification: compare tree listing in CLAUDE.md with `find backend/src -name "*.py" -not -name "__init__.py" | sort`
@@ -77,11 +77,11 @@ docs: fix CLAUDE.md backend module structure to match actual codebase
 - In `CLAUDE.md`, verify the table already matches (it should per the audit). Update if needed.
 
 **Verification Checklist:**
-- [ ] `config.py` Flux default matches `template.yaml` Flux default
-- [ ] `config.py` Gemini default matches `template.yaml` Gemini default
-- [ ] CLAUDE.md model table matches `template.yaml`
-- [ ] README.md model table matches `template.yaml`
-- [ ] All four sources agree on all model default IDs
+- [x] `config.py` Flux default matches `template.yaml` Flux default
+- [x] `config.py` Gemini default matches `template.yaml` Gemini default
+- [x] CLAUDE.md model table matches `template.yaml`
+- [x] README.md model table matches `template.yaml`
+- [x] All four sources agree on all model default IDs
 
 **Testing Instructions:**
 - `PYTHONPATH=backend/src pytest tests/backend/unit/test_config.py -v` (ensure tests don't hardcode old defaults)
@@ -113,9 +113,9 @@ docs: align model default IDs across config.py, template.yaml, CLAUDE.md, and RE
   - Example: "Runs on push/PR to main/develop: frontend format check + lint + typecheck -> frontend tests -> backend lint + tests -> E2E tests (LocalStack) -> status gate."
 
 **Verification Checklist:**
-- [ ] `useJobPolling` does not appear in CLAUDE.md
-- [ ] CI description mentions format:check, E2E tests, and status gate
-- [ ] Listed hooks match actual files in `frontend/src/hooks/`
+- [x] `useJobPolling` does not appear in CLAUDE.md
+- [x] CI description mentions format:check, E2E tests, and status gate
+- [x] Listed hooks match actual files in `frontend/src/hooks/`
 
 **Testing Instructions:**
 - Manual verification: compare hooks listed with `ls frontend/src/hooks/`
@@ -146,10 +146,10 @@ docs: fix CLAUDE.md hooks listing and CI description
   - Verify subdirectory listing matches actual `ls frontend/tests/__tests__/`
 
 **Verification Checklist:**
-- [ ] No reference to `events/generate.json` in CLAUDE.md
-- [ ] `samconfig.toml` reference notes it is generated, not committed
-- [ ] `tests/backend/e2e/` is documented in test structure
-- [ ] Frontend test subdirectory listing matches actual directories
+- [x] No reference to `events/generate.json` in CLAUDE.md
+- [x] `samconfig.toml` reference notes it is generated, not committed
+- [x] `tests/backend/e2e/` is documented in test structure
+- [x] Frontend test subdirectory listing matches actual directories
 
 **Testing Instructions:**
 - Manual verification against filesystem
@@ -185,10 +185,10 @@ docs: fix stale commands and update test structure in CLAUDE.md
 - Include default values where applicable.
 
 **Verification Checklist:**
-- [ ] All env vars from `config.py` are documented in CLAUDE.md
-- [ ] All `VITE_*` env vars are documented
-- [ ] Default values are noted
-- [ ] New `CORS_ALLOWED_ORIGIN` from Phase 3 is included
+- [x] All env vars from `config.py` are documented in CLAUDE.md
+- [x] All `VITE_*` env vars are documented
+- [x] Default values are noted
+- [x] New `CORS_ALLOWED_ORIGIN` from Phase 3 is included
 
 **Testing Instructions:**
 - Manual verification: `grep -r "os.environ.get\|import.meta.env" backend/src/config.py frontend/src/api/config.ts frontend/src/vite-env.d.ts` and ensure all are documented.
@@ -216,9 +216,9 @@ docs: add comprehensive environment variable reference to CLAUDE.md
 - In `README.md` around line 185: The `[Apache 2.0](LICENSE)` link points to a non-existent `LICENSE` file. Either create a LICENSE file with the Apache 2.0 text, or remove the link and replace with just the license name. Prefer creating the file if the project is indeed Apache 2.0 licensed.
 
 **Verification Checklist:**
-- [ ] `CONTRIBUTING.md` backend install command works with actual project structure
-- [ ] `CONTRIBUTING.md` does not reference root-level `npm install`
-- [ ] README.md LICENSE link is valid (either file exists or link is removed)
+- [x] `CONTRIBUTING.md` backend install command works with actual project structure
+- [x] `CONTRIBUTING.md` does not reference root-level `npm install`
+- [x] README.md LICENSE link is valid (either file exists or link is removed)
 
 **Testing Instructions:**
 - Follow CONTRIBUTING.md setup steps in a fresh checkout to verify accuracy.
