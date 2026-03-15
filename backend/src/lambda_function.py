@@ -11,6 +11,7 @@ import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
+from dataclasses import dataclass
 from typing import Any, Dict, Optional
 from uuid import uuid4
 
@@ -85,6 +86,63 @@ prompt_enhancer = PromptEnhancer()
 _executor = ThreadPoolExecutor(max_workers=generate_thread_workers)
 
 
+@dataclass
+class ValidatedRequest:
+    """Result of successful request validation."""
+    body: dict[str, Any]
+    ip: str
+    prompt: str
+
+
+def _parse_and_validate_request(
+    event: LambdaEvent,
+    require_prompt: bool = True,
+    default_prompt: str = '',
+    max_body_size: int = MAX_BODY_SIZE,
+) -> tuple[ValidatedRequest | None, ApiResponse | None]:
+    """Shared request validation for POST handlers.
+
+    Performs: body size check, JSON parsing, IP extraction, rate limiting,
+    prompt validation, and content filtering.
+
+    Returns:
+        (ValidatedRequest, None) on success, or (None, error_response) on failure.
+    """
+    raw_body = event.get('body', '')
+    if len(raw_body) > max_body_size:
+        return None, response(413, {'error': 'Request body too large'})
+
+    try:
+        body = json.loads(raw_body or '{}')
+    except json.JSONDecodeError:
+        return None, response(400, error_responses.invalid_json())
+
+    # Prefer real client IP from API Gateway, fall back to body.ip for local dev
+    ip = (
+        event.get('requestContext', {}).get('http', {}).get('sourceIp')
+        or body.get('ip', 'unknown')
+    )
+
+    # Rate limit
+    if rate_limiter.check_rate_limit(ip):
+        return None, response(429, error_responses.rate_limit_exceeded(retry_after=3600))
+
+    # Extract prompt
+    prompt = body.get('prompt', default_prompt)
+
+    if require_prompt:
+        if not prompt:
+            return None, response(400, error_responses.prompt_required())
+        if len(prompt) > 1000:
+            return None, response(400, error_responses.prompt_too_long(max_length=1000))
+
+    # Content filter
+    if prompt and content_filter.check_prompt(prompt):
+        return None, response(400, error_responses.inappropriate_content())
+
+    return ValidatedRequest(body=body, ip=ip, prompt=prompt), None
+
+
 def extract_correlation_id(event: LambdaEvent) -> str:
     """Extract correlation ID from event headers or generate new one."""
     headers = event.get('headers', {}) or {}
@@ -154,30 +212,12 @@ def handle_generate(event: LambdaEvent, correlation_id: Optional[str] = None) ->
     Returns:
         {"sessionId": "uuid", "models": {...}}
     """
-    raw_body = event.get('body', '')
-    if len(raw_body) > MAX_BODY_SIZE:
-        return response(413, {'error': 'Request body too large'})
+    validated, err = _parse_and_validate_request(event, require_prompt=True)
+    if err:
+        return err
 
     try:
-        body = json.loads(raw_body or '{}')
-        prompt = body.get('prompt', '')
-
-        # Prefer real client IP from API Gateway, fall back to body.ip for local dev
-        ip = event.get('requestContext', {}).get('http', {}).get('sourceIp') or body.get('ip', 'unknown')
-
-        # Validate
-        if not prompt:
-            return response(400, error_responses.prompt_required())
-        if len(prompt) > 1000:
-            return response(400, error_responses.prompt_too_long(max_length=1000))
-
-        # Rate limit
-        if rate_limiter.check_rate_limit(ip):
-            return response(429, error_responses.rate_limit_exceeded(retry_after=3600))
-
-        # Content filter
-        if content_filter.check_prompt(prompt):
-            return response(400, error_responses.inappropriate_content())
+        prompt = validated.prompt
 
         # Get enabled models
         enabled_models = get_enabled_models()
@@ -304,38 +344,24 @@ def handle_iterate(event: LambdaEvent, correlation_id: Optional[str] = None) -> 
     Returns:
         {"status": "completed|error", "imageKey": "...", ...}
     """
-    raw_body = event.get('body', '')
-    if len(raw_body) > MAX_BODY_SIZE:
-        return response(413, {'error': 'Request body too large'})
+    validated, err = _parse_and_validate_request(event, require_prompt=True)
+    if err:
+        return err
 
     try:
-        body = json.loads(raw_body or '{}')
+        body = validated.body
         session_id = body.get('sessionId')
         model_name = body.get('model')
-        prompt = body.get('prompt', '')
-
-        # Extract IP for rate limiting
-        # Prefer real client IP from API Gateway, fall back to body.ip for local dev
-        ip = event.get('requestContext', {}).get('http', {}).get('sourceIp') or body.get('ip', 'unknown')
-
-        # Rate limit check
-        if rate_limiter.check_rate_limit(ip):
-            return response(429, error_responses.rate_limit_exceeded(retry_after=3600))
+        prompt = validated.prompt
 
         # Validate
         if not session_id:
             return response(400, {'error': 'sessionId is required'})
         if not model_name:
             return response(400, {'error': 'model is required'})
-        if not prompt:
-            return response(400, error_responses.prompt_required())
 
         if model_name not in MODELS:
             return response(400, {'error': f'Invalid model: {model_name}'})
-
-        # Content filter
-        if content_filter.check_prompt(prompt):
-            return response(400, error_responses.inappropriate_content())
 
         # Get model config
         try:
