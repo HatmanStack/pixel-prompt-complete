@@ -204,11 +204,11 @@ def lambda_handler(event: LambdaEvent, context: LambdaContext) -> ApiResponse:
     correlation_id = extract_correlation_id(event)
 
     path = event.get('rawPath', event.get('path', ''))
-    # Remove stage prefix (len('/Prod/') = 6, len('/Staging/') = 9)
-    if path.startswith('/Prod/'):
-        path = path[6:]
-    elif path.startswith('/Staging/'):
-        path = path[9:]
+    # Remove known stage prefixes (e.g. /Prod/generate -> /generate)
+    for stage_prefix in ('/Prod/', '/Staging/', '/Dev/'):
+        if path.startswith(stage_prefix):
+            path = path[len(stage_prefix):]
+            break
     # Ensure path starts with /
     if path and not path.startswith('/'):
         path = '/' + path

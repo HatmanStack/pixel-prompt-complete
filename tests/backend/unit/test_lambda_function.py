@@ -312,6 +312,16 @@ class TestStagePrefixStripping:
         resp = lambda_handler(_make_event(method="GET", path="/Staging/status/abc"), None)
         assert resp["statusCode"] == 200
 
+    def test_dev_prefix(self, mocks):
+        mocks["session_manager"].get_session.return_value = {"sessionId": "abc", "models": {}}
+        resp = lambda_handler(_make_event(method="GET", path="/Dev/status/abc"), None)
+        assert resp["statusCode"] == 200
+
+    def test_no_prefix(self, mocks):
+        mocks["session_manager"].get_session.return_value = {"sessionId": "abc", "models": {}}
+        resp = lambda_handler(_make_event(method="GET", path="/status/abc"), None)
+        assert resp["statusCode"] == 200
+
 
 # ============================================================
 # CORS headers on all responses
