@@ -41,10 +41,10 @@ Fix the two CRITICAL findings (unpaginated S3 listings with silent error swallow
 - Keep the method's return type as `List[str]`.
 
 **Verification Checklist:**
-- [ ] `list_galleries()` uses a pagination loop with `ContinuationToken`
-- [ ] No bare `except Exception` remains in the method
-- [ ] `ClientError` is caught specifically with logging
-- [ ] `PYTHONPATH=backend/src pytest tests/backend/unit/test_storage.py -v` passes
+- [x] `list_galleries()` uses a pagination loop with `ContinuationToken`
+- [x] No bare `except Exception` remains in the method
+- [x] `ClientError` is caught specifically with logging
+- [x] `PYTHONPATH=backend/src pytest tests/backend/unit/test_storage.py -v` passes
 
 **Testing Instructions:**
 - Write a test in `tests/backend/unit/test_storage.py` that creates >1000 gallery prefixes in moto S3 and verifies `list_galleries()` returns all of them. Use the existing `mock_s3` fixture from `conftest.py`.
@@ -73,9 +73,9 @@ fix(backend): add S3 pagination to list_galleries and replace silent error swall
 - The method filters for `.json` files -- maintain this filter within the pagination loop.
 
 **Verification Checklist:**
-- [ ] `list_gallery_images()` uses a pagination loop
-- [ ] No bare `except Exception` remains in the method
-- [ ] `PYTHONPATH=backend/src pytest tests/backend/unit/test_storage.py -v` passes
+- [x] `list_gallery_images()` uses a pagination loop
+- [x] No bare `except Exception` remains in the method
+- [x] `PYTHONPATH=backend/src pytest tests/backend/unit/test_storage.py -v` passes
 
 **Testing Instructions:**
 - Write a test that creates >1000 objects in a gallery folder and verifies all are returned.
@@ -105,9 +105,9 @@ fix(backend): add S3 pagination to list_gallery_images and replace silent error 
 - Alternatively, if importing from `handlers.py` creates a circular import, move the client caching functions to a shared utility module (e.g., `backend/src/utils/clients.py`). Only do this if the import fails.
 
 **Verification Checklist:**
-- [ ] `enhance.py` no longer calls `genai.Client()` or `OpenAI()` directly
-- [ ] `PYTHONPATH=backend/src pytest tests/backend/unit/test_enhance.py -v` passes
-- [ ] `ruff check backend/src/api/enhance.py` passes
+- [x] `enhance.py` no longer calls `genai.Client()` or `OpenAI()` directly
+- [x] `PYTHONPATH=backend/src pytest tests/backend/unit/test_enhance.py -v` passes
+- [x] `ruff check backend/src/api/enhance.py` passes
 
 **Testing Instructions:**
 - Run existing enhance tests to verify no regressions.
@@ -136,9 +136,9 @@ fix(backend): reuse cached SDK clients in PromptEnhancer
 - Look at how `handle_gallery_detail` (around line 704) validates its input and follow the same pattern.
 
 **Verification Checklist:**
-- [ ] `handle_status` validates `session_id` format before using it
-- [ ] Invalid session IDs return a 400 error response
-- [ ] `PYTHONPATH=backend/src pytest tests/backend/unit/test_lambda_function.py -v` passes
+- [x] `handle_status` validates `session_id` format before using it
+- [x] Invalid session IDs return a 400 error response
+- [x] `PYTHONPATH=backend/src pytest tests/backend/unit/test_lambda_function.py -v` passes
 
 **Testing Instructions:**
 - Write tests in `test_lambda_function.py` for `handle_status` with valid and invalid session IDs.
@@ -168,9 +168,9 @@ fix(backend): add session_id validation in handle_status endpoint
 - Structure as a try/except/finally or try/except with explicit `fail_iteration` call.
 
 **Verification Checklist:**
-- [ ] `generate_for_model` applies `sanitize_error_message()` to exception strings
-- [ ] `generate_for_model` calls `fail_iteration()` on unhandled exceptions
-- [ ] `PYTHONPATH=backend/src pytest tests/backend/unit/test_lambda_function.py -v` passes
+- [x] `generate_for_model` applies `sanitize_error_message()` to exception strings
+- [x] `generate_for_model` calls `fail_iteration()` on unhandled exceptions
+- [x] `PYTHONPATH=backend/src pytest tests/backend/unit/test_lambda_function.py -v` passes
 
 **Testing Instructions:**
 - Write a test that simulates a handler exception and verifies the error message is sanitized.
@@ -199,9 +199,9 @@ fix(backend): sanitize error messages and ensure fail_iteration on handler excep
 - Use `error_response()` from `utils.error_responses` for the 413 response.
 
 **Verification Checklist:**
-- [ ] POST handlers reject bodies exceeding size limits with 413 status
-- [ ] `handle_log_endpoint` sanitizes metadata keys
-- [ ] `PYTHONPATH=backend/src pytest tests/backend/unit/ -v` passes
+- [x] POST handlers reject bodies exceeding size limits with 413 status
+- [x] `handle_log_endpoint` sanitizes metadata keys
+- [x] `PYTHONPATH=backend/src pytest tests/backend/unit/ -v` passes
 
 **Testing Instructions:**
 - Write tests for oversized body rejection.
@@ -230,9 +230,9 @@ fix(backend): add request body size limits and sanitize log metadata
 - Update the comment to explain the rationale: image generation can take up to 120+ seconds for some providers.
 
 **Verification Checklist:**
-- [ ] `REQUEST_TIMEOUT` is set to `180000`
-- [ ] Comment explains the rationale
-- [ ] `cd frontend && npm run typecheck` passes
+- [x] `REQUEST_TIMEOUT` is set to `180000`
+- [x] Comment explains the rationale
+- [x] `cd frontend && npm run typecheck` passes
 
 **Testing Instructions:**
 - `cd frontend && npm test`
