@@ -101,6 +101,88 @@ Configured via `config.py` dataclasses with enable/disable flags. **Not dynamic*
 
 Prompt enhancement uses separate config: `PROMPT_MODEL_PROVIDER`, `PROMPT_MODEL_ID`, `PROMPT_MODEL_API_KEY`.
 
+### Environment Variables
+
+**AWS** (set by SAM deployment):
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `AWS_REGION` | No | `us-west-2` | AWS region for S3/CloudFront |
+| `S3_BUCKET` | Yes | — | S3 bucket for sessions and gallery |
+| `CLOUDFRONT_DOMAIN` | Yes | — | CloudFront distribution domain for CDN URLs |
+
+**Model API Keys** (required for each enabled model):
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `FLUX_API_KEY` | Yes* | `""` | Black Forest Labs API key |
+| `RECRAFT_API_KEY` | Yes* | `""` | Recraft API key |
+| `GEMINI_API_KEY` | Yes* | `""` | Google Gemini API key |
+| `OPENAI_API_KEY` | Yes* | `""` | OpenAI API key |
+
+*Required only if the corresponding model is enabled.
+
+**Model Enable/Disable**:
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `FLUX_ENABLED` | No | `true` | Enable Flux model |
+| `RECRAFT_ENABLED` | No | `true` | Enable Recraft model |
+| `GEMINI_ENABLED` | No | `true` | Enable Gemini model |
+| `OPENAI_ENABLED` | No | `true` | Enable OpenAI model |
+
+**Model ID Overrides**:
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `FLUX_MODEL_ID` | No | `flux-2-pro` | Flux model identifier |
+| `RECRAFT_MODEL_ID` | No | `recraftv3` | Recraft model identifier |
+| `GEMINI_MODEL_ID` | No | `gemini-2.5-flash-image` | Gemini model identifier |
+| `OPENAI_MODEL_ID` | No | `gpt-image-1` | OpenAI model identifier |
+
+**Prompt Enhancement**:
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `PROMPT_MODEL_PROVIDER` | No | `openai` | Provider for prompt enhancement (`openai` or `google_gemini`) |
+| `PROMPT_MODEL_ID` | No | `gpt-4o` | Model ID for prompt enhancement |
+| `PROMPT_MODEL_API_KEY` | Yes | `""` | API key for prompt enhancement model |
+
+**Rate Limiting**:
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `GLOBAL_LIMIT` | No | `1000` | Global hourly request limit |
+| `IP_LIMIT` | No | `50` | Per-IP daily request limit |
+| `IP_INCLUDE` | No | `""` | Comma-separated IPs exempt from rate limiting |
+
+**CORS**:
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `CORS_ALLOWED_ORIGIN` | No | `*` | Allowed CORS origin (set to frontend domain in production) |
+
+**Operational Timeouts**:
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `API_CLIENT_TIMEOUT` | No | `120.0` | Timeout for AI provider API calls (seconds, float) |
+| `IMAGE_DOWNLOAD_TIMEOUT` | No | `30` | Timeout for downloading generated images (seconds) |
+| `GENERATE_THREAD_WORKERS` | No | `4` | Number of parallel generation threads |
+| `BFL_MAX_POLL_ATTEMPTS` | No | `40` | Max polling attempts for BFL async jobs |
+| `BFL_POLL_INTERVAL` | No | `3` | Seconds between BFL poll requests |
+
+**Frontend** (Vite, set in `.env` or `.env.local`):
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `VITE_API_ENDPOINT` | Yes (prod) | — | API Gateway endpoint URL |
+| `VITE_CLOUDFRONT_DOMAIN` | No | — | CloudFront distribution domain |
+| `VITE_S3_BUCKET` | No | — | S3 bucket name |
+| `VITE_ENVIRONMENT` | No | — | Environment name |
+
+See `backend/.env.example` for a copyable template of backend variables.
+
 ### Handler System
 
 `handlers.py` has **three handler types** per provider, registered in factory functions:
