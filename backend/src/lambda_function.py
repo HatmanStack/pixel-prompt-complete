@@ -10,8 +10,8 @@ import re
 import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from uuid import uuid4
 
@@ -480,24 +480,18 @@ def handle_outpaint(event: LambdaEvent, correlation_id: Optional[str] = None) ->
     Returns:
         {"status": "completed|error", "imageKey": "...", ...}
     """
-    raw_body = event.get('body', '')
-    if len(raw_body) > MAX_BODY_SIZE:
-        return response(413, {'error': 'Request body too large'})
+    validated, err = _parse_and_validate_request(
+        event, require_prompt=False, default_prompt='continue the scene naturally',
+    )
+    if err:
+        return err
 
     try:
-        body = json.loads(raw_body or '{}')
+        body = validated.body
         session_id = body.get('sessionId')
         model_name = body.get('model')
         preset = body.get('preset')
-        prompt = body.get('prompt', 'continue the scene naturally')
-
-        # Extract IP for rate limiting
-        # Prefer real client IP from API Gateway, fall back to body.ip for local dev
-        ip = event.get('requestContext', {}).get('http', {}).get('sourceIp') or body.get('ip', 'unknown')
-
-        # Rate limit check
-        if rate_limiter.check_rate_limit(ip):
-            return response(429, error_responses.rate_limit_exceeded(retry_after=3600))
+        prompt = validated.prompt
 
         # Validate
         if not session_id:
@@ -513,10 +507,6 @@ def handle_outpaint(event: LambdaEvent, correlation_id: Optional[str] = None) ->
 
         if model_name not in MODELS:
             return response(400, {'error': f'Invalid model: {model_name}'})
-
-        # Content filter
-        if content_filter.check_prompt(prompt):
-            return response(400, error_responses.inappropriate_content())
 
         # Get model config
         try:

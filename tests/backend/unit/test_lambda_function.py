@@ -231,6 +231,22 @@ class TestErrorCases:
         resp = lambda_handler(_make_event(body={"prompt": "bad"}), None)
         assert resp["statusCode"] == 400
 
+    def test_content_filter_outpaint(self, mocks):
+        mocks["content_filter"].check_prompt.return_value = True
+        resp = lambda_handler(
+            _make_event(path="/outpaint", body={"sessionId": "s", "model": "flux", "preset": "16:9", "prompt": "bad"}),
+            None,
+        )
+        assert resp["statusCode"] == 400
+
+    def test_rate_limit_outpaint(self, mocks):
+        mocks["rate_limiter"].check_rate_limit.return_value = True
+        resp = lambda_handler(
+            _make_event(path="/outpaint", body={"sessionId": "s", "model": "flux", "preset": "16:9"}),
+            None,
+        )
+        assert resp["statusCode"] == 429
+
     def test_empty_prompt_400(self, mocks):
         resp = lambda_handler(_make_event(body={"prompt": ""}), None)
         assert resp["statusCode"] == 400
