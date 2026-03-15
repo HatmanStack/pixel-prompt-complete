@@ -193,7 +193,7 @@ describe('ImageCard', () => {
     const card = screen.getByRole('button', { name: /View Test Model/i });
     await user.click(card);
 
-    // Should not throw error
-    expect(true).toBe(true);
+    // Component should still be in the document after click without onExpand
+    expect(card).toBeInTheDocument();
   });
 });

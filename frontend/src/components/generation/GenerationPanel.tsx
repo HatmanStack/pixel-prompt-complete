@@ -278,13 +278,6 @@ export const GenerationPanel: FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prompt, isGenerating, expandedImage]);
 
-  // Legacy gallery handler - no-op, kept for GalleryBrowser prop compatibility
-  const handleGallerySelect = (
-    _gallery: { id: string; images: { model: string; url?: string }[] } | null,
-  ) => {
-    // No-op: gallery selection handled internally by GalleryBrowser
-  };
-
   return (
     <article className="w-full flex flex-col gap-8 md:gap-6" aria-label="Image Generation">
       {/* Input Section */}
@@ -359,7 +352,7 @@ export const GenerationPanel: FC = () => {
           Previous Generations
         </h2>
         <ErrorBoundary componentName="GalleryBrowser">
-          <GalleryBrowser onGallerySelect={handleGallerySelect} />
+          <GalleryBrowser />
         </ErrorBoundary>
       </section>
 
