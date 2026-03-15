@@ -1,41 +1,33 @@
 """
 Unit tests for the ContextManager class.
+
+Uses moto mock_s3 fixture for real S3 behavior instead of MagicMock.
+Tests assert on observable behavior (data in S3) not call_args.
 """
 
 import json
 import pytest
-from unittest.mock import MagicMock, patch
-from datetime import datetime
+
+from models.context import ContextManager, create_context_entry
 
 
 class TestContextManager:
-    """Tests for ContextManager functionality."""
+    """Tests for ContextManager functionality using moto-backed S3."""
 
     @pytest.fixture
-    def mock_s3_client(self):
-        """Create a mock S3 client."""
-        mock = MagicMock()
-        mock.exceptions = MagicMock()
-        mock.exceptions.NoSuchKey = type('NoSuchKey', (Exception,), {})
-        return mock
+    def context_manager(self, mock_s3):
+        """Create a ContextManager backed by moto S3."""
+        s3, bucket = mock_s3
+        return ContextManager(s3, bucket)
 
-    @pytest.fixture
-    def context_manager(self, mock_s3_client):
-        """Create a ContextManager with mock S3."""
-        from models.context import ContextManager
-        return ContextManager(mock_s3_client, 'test-bucket')
-
-    def test_get_context_returns_empty_for_new_session(self, context_manager, mock_s3_client):
+    def test_get_context_returns_empty_for_new_session(self, context_manager):
         """get_context() should return empty list for new session."""
-        # Simulate NoSuchKey error
-        mock_s3_client.get_object.side_effect = mock_s3_client.exceptions.NoSuchKey()
-
         result = context_manager.get_context('session-123', 'flux')
-
         assert result == []
 
-    def test_get_context_returns_entries(self, context_manager, mock_s3_client):
+    def test_get_context_returns_entries(self, context_manager, mock_s3):
         """get_context() should return parsed entries from S3."""
+        s3, bucket = mock_s3
         context_data = {
             'window': [
                 {
@@ -52,10 +44,12 @@ class TestContextManager:
                 }
             ]
         }
-
-        mock_s3_client.get_object.return_value = {
-            'Body': MagicMock(read=lambda: json.dumps(context_data).encode('utf-8'))
-        }
+        s3.put_object(
+            Bucket=bucket,
+            Key='sessions/session-123/context/flux.json',
+            Body=json.dumps(context_data),
+            ContentType='application/json',
+        )
 
         result = context_manager.get_context('session-123', 'flux')
 
@@ -64,54 +58,42 @@ class TestContextManager:
         assert result[0].prompt == 'test prompt 1'
         assert result[1].iteration == 1
 
-    def test_add_entry_maintains_window_size(self, context_manager, mock_s3_client):
-        """add_entry() should maintain max 3 entries in window."""
-        # Existing context with 3 entries
-        existing_data = {
-            'window': [
-                {'iteration': i, 'prompt': f'prompt {i}', 'imageKey': f'key-{i}', 'timestamp': '2024-01-01T00:00:00Z'}
-                for i in range(3)
-            ]
-        }
+    def test_add_entry_creates_context_for_new_session(self, context_manager, mock_s3):
+        """add_entry() should create context file when none exists."""
+        s3, bucket = mock_s3
+        entry = create_context_entry(0, 'first prompt', 'key-0')
 
-        mock_s3_client.get_object.return_value = {
-            'Body': MagicMock(read=lambda: json.dumps(existing_data).encode('utf-8'))
-        }
+        context_manager.add_entry('session-new', 'flux', entry)
 
-        from models.context import create_context_entry
-        new_entry = create_context_entry(3, 'new prompt', 'new-key')
+        # Verify data stored in S3
+        obj = s3.get_object(
+            Bucket=bucket,
+            Key='sessions/session-new/context/flux.json',
+        )
+        data = json.loads(obj['Body'].read().decode('utf-8'))
+        assert len(data['window']) == 1
+        assert data['window'][0]['prompt'] == 'first prompt'
+        assert data['window'][0]['iteration'] == 0
 
-        context_manager.add_entry('session-123', 'flux', new_entry)
+    def test_add_entry_maintains_window_size(self, context_manager, mock_s3):
+        """add_entry() should maintain max 3 entries in window (FIFO eviction)."""
+        # Add 4 entries; only the last 3 should remain
+        for i in range(4):
+            entry = create_context_entry(i, f'prompt {i}', f'key-{i}')
+            context_manager.add_entry('session-123', 'flux', entry)
 
-        # Verify put_object was called
-        mock_s3_client.put_object.assert_called_once()
-        call_args = mock_s3_client.put_object.call_args
+        result = context_manager.get_context('session-123', 'flux')
 
-        # Parse saved data
-        saved_data = json.loads(call_args.kwargs['Body'])
-        assert len(saved_data['window']) == 3  # Max window size
-
-        # Oldest entry (iteration 0) should be removed
-        iterations = [e['iteration'] for e in saved_data['window']]
+        assert len(result) == 3
+        # Oldest entry (iteration 0) should have been evicted
+        iterations = [e.iteration for e in result]
         assert 0 not in iterations
-        assert 3 in iterations
+        assert iterations == [1, 2, 3]
 
-    def test_get_context_for_iteration(self, context_manager, mock_s3_client):
-        """get_context_for_iteration() should return handler-compatible format."""
-        context_data = {
-            'window': [
-                {
-                    'iteration': 0,
-                    'prompt': 'test prompt',
-                    'imageKey': 'key-0',
-                    'timestamp': '2024-01-01T00:00:00Z'
-                }
-            ]
-        }
-
-        mock_s3_client.get_object.return_value = {
-            'Body': MagicMock(read=lambda: json.dumps(context_data).encode('utf-8'))
-        }
+    def test_get_context_for_iteration(self, context_manager):
+        """get_context_for_iteration() should return handler-compatible dicts."""
+        entry = create_context_entry(0, 'test prompt', 'key-0')
+        context_manager.add_entry('session-123', 'flux', entry)
 
         result = context_manager.get_context_for_iteration('session-123', 'flux')
 
@@ -119,16 +101,37 @@ class TestContextManager:
         assert len(result) == 1
         assert result[0]['prompt'] == 'test prompt'
         assert result[0]['imageKey'] == 'key-0'
+        assert 'iteration' in result[0]
+        assert 'timestamp' in result[0]
 
-    def test_handles_corrupted_json(self, context_manager, mock_s3_client):
+    def test_handles_corrupted_json(self, context_manager, mock_s3):
         """get_context() should handle corrupted JSON gracefully."""
-        mock_s3_client.get_object.return_value = {
-            'Body': MagicMock(read=lambda: b'not valid json')
-        }
+        s3, bucket = mock_s3
+        s3.put_object(
+            Bucket=bucket,
+            Key='sessions/session-123/context/flux.json',
+            Body=b'not valid json',
+            ContentType='application/json',
+        )
 
         result = context_manager.get_context('session-123', 'flux')
-
         assert result == []
+
+    def test_separate_context_per_model(self, context_manager):
+        """Each model should have independent context."""
+        entry_flux = create_context_entry(0, 'flux prompt', 'flux-key')
+        entry_gemini = create_context_entry(0, 'gemini prompt', 'gemini-key')
+
+        context_manager.add_entry('session-123', 'flux', entry_flux)
+        context_manager.add_entry('session-123', 'gemini', entry_gemini)
+
+        flux_ctx = context_manager.get_context('session-123', 'flux')
+        gemini_ctx = context_manager.get_context('session-123', 'gemini')
+
+        assert len(flux_ctx) == 1
+        assert flux_ctx[0].prompt == 'flux prompt'
+        assert len(gemini_ctx) == 1
+        assert gemini_ctx[0].prompt == 'gemini prompt'
 
 
 class TestCreateContextEntry:
@@ -136,8 +139,6 @@ class TestCreateContextEntry:
 
     def test_creates_entry_with_timestamp(self):
         """create_context_entry() should create entry with current timestamp."""
-        from models.context import create_context_entry
-
         entry = create_context_entry(2, 'test prompt', 'test-key')
 
         assert entry.iteration == 2
