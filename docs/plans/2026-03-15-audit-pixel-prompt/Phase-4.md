@@ -39,9 +39,9 @@ Add defensive guardrails to prevent regressions: freeze `ModelConfig` dataclasse
 - Run all tests to verify nothing depends on mutating configs.
 
 **Verification Checklist:**
-- [ ] `@dataclass(frozen=True)` is on `ModelConfig`
-- [ ] `grep -r "model_config\.\w\+ =" backend/src/` shows no post-construction mutations (except in `__init__`)
-- [ ] `PYTHONPATH=backend/src pytest tests/backend/unit/ -v` passes
+- [x] `@dataclass(frozen=True)` is on `ModelConfig`
+- [x] `grep -r "model_config\.\w\+ =" backend/src/` shows no post-construction mutations (except in `__init__`)
+- [x] `PYTHONPATH=backend/src pytest tests/backend/unit/ -v` passes
 
 **Testing Instructions:**
 - Run all backend tests. If any test mutates a `ModelConfig`, fix the test to create a new instance instead.
@@ -88,11 +88,11 @@ fix(backend): freeze ModelConfig dataclass to prevent accidental mutation
 - This is a type annotation change only -- no runtime behavior changes.
 
 **Verification Checklist:**
-- [ ] `HandlerResult` TypedDict is defined in `handlers.py`
-- [ ] Handler function signatures use `HandlerResult` return type
-- [ ] No `Dict[str, Any]` remains in handler type aliases
-- [ ] `PYTHONPATH=backend/src pytest tests/backend/unit/test_handlers.py -v` passes
-- [ ] `ruff check backend/src/models/handlers.py` passes
+- [x] `HandlerResult` TypedDict is defined in `handlers.py`
+- [x] Handler function signatures use `HandlerResult` return type
+- [x] No `Dict[str, Any]` remains in handler type aliases
+- [x] `PYTHONPATH=backend/src pytest tests/backend/unit/test_handlers.py -v` passes
+- [x] `ruff check backend/src/models/handlers.py` passes
 
 **Testing Instructions:**
 - Run handler tests to verify no regressions.
@@ -123,10 +123,10 @@ refactor(backend): add TypedDict return types for handler functions
 - The key concern is stale closures in keyboard shortcut handlers -- make sure the handler always has access to current values of `prompt`, `isGenerating`, etc.
 
 **Verification Checklist:**
-- [ ] No `eslint-disable-next-line react-hooks/exhaustive-deps` remains in the file
-- [ ] `cd frontend && npm run lint` passes (the exhaustive-deps rule no longer fires)
-- [ ] `cd frontend && npm run typecheck` passes
-- [ ] `cd frontend && npm test` passes
+- [x] No `eslint-disable-next-line react-hooks/exhaustive-deps` remains in the file
+- [x] `cd frontend && npm run lint` passes (the exhaustive-deps rule no longer fires)
+- [x] `cd frontend && npm run typecheck` passes
+- [x] `cd frontend && npm test` passes
 
 **Testing Instructions:**
 - `cd frontend && npm run lint`
@@ -157,9 +157,9 @@ fix(frontend): resolve useEffect exhaustive-deps violation in GenerationPanel
 - Test the core flows: `get_context` (empty), `add_entry`, `add_entry` beyond window size (FIFO eviction), `get_context_for_iteration`, concurrent `add_entry` (ETag conflict retry).
 
 **Verification Checklist:**
-- [ ] `test_context_manager.py` uses `mock_s3` fixture, not `MagicMock` for S3
-- [ ] Tests assert on observable S3 state, not mock call counts
-- [ ] `PYTHONPATH=backend/src pytest tests/backend/unit/test_context_manager.py -v` passes
+- [x] `test_context_manager.py` uses `mock_s3` fixture, not `MagicMock` for S3
+- [x] Tests assert on observable S3 state, not mock call counts
+- [x] `PYTHONPATH=backend/src pytest tests/backend/unit/test_context_manager.py -v` passes
 
 **Testing Instructions:**
 - `PYTHONPATH=backend/src pytest tests/backend/unit/test_context_manager.py -v`
@@ -199,9 +199,9 @@ test(backend): migrate test_context_manager from MagicMock to moto S3
 - Include comments explaining each variable and its default value.
 
 **Verification Checklist:**
-- [ ] `backend/requirements-lock.txt` exists with pinned versions (e.g., `boto3==1.x.x`)
-- [ ] `backend/.env.example` lists all env vars from `config.py`
-- [ ] `pip install -r backend/requirements-lock.txt` succeeds
+- [x] `backend/requirements-lock.txt` exists with pinned versions (e.g., `boto3==1.x.x`)
+- [x] `backend/.env.example` lists all env vars from `config.py`
+- [x] `pip install -r backend/requirements-lock.txt` succeeds
 
 **Testing Instructions:**
 - Verify lockfile works: `pip install -r backend/requirements-lock.txt` in a fresh venv.
