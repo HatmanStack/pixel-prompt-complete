@@ -7,10 +7,10 @@ from moto import mock_aws
 import boto3
 
 def _reset_handler_singletons():
-    """Clear module-level client caches in handlers to ensure test isolation."""
-    import models.handlers as h
-    h._openai_clients.clear()
-    h._genai_clients.clear()
+    """Clear module-level client caches to ensure test isolation."""
+    import utils.clients as c
+    c._openai_clients.clear()
+    c._genai_clients.clear()
 
 
 @pytest.fixture(autouse=True)
