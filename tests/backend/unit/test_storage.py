@@ -151,3 +151,83 @@ class TestImageStorage:
 
         # Should return None or handle gracefully
         assert result is None or isinstance(result, dict)
+
+    def test_list_galleries_pagination(self, mock_s3):
+        """Test that list_galleries paginates through >1000 gallery prefixes."""
+        s3_client, bucket_name = mock_s3
+
+        # Create 1050 gallery folders (need >1000 to trigger pagination)
+        for i in range(1050):
+            folder_name = f"2025-01-01-{i:06d}"
+            s3_client.put_object(
+                Bucket=bucket_name,
+                Key=f'group-images/{folder_name}/image.json',
+                Body=json.dumps({'test': 'data'})
+            )
+
+        storage = ImageStorage(s3_client, bucket_name, 'https://cdn.example.com')
+        galleries = storage.list_galleries()
+
+        assert len(galleries) == 1050
+
+    def test_list_galleries_client_error_logged_and_reraised(self, mock_s3):
+        """Test that ClientError is logged and re-raised, not swallowed."""
+        s3_client, bucket_name = mock_s3
+        storage = ImageStorage(s3_client, bucket_name, 'https://cdn.example.com')
+
+        # Use a non-existent bucket to trigger ClientError
+        storage.bucket = 'non-existent-bucket-xyz'
+
+        with pytest.raises(ClientError):
+            storage.list_galleries()
+
+    def test_list_gallery_images_pagination(self, mock_s3):
+        """Test that list_gallery_images paginates through >1000 objects."""
+        s3_client, bucket_name = mock_s3
+        gallery_id = '2025-11-16-10-00-00'
+
+        # Create 1050 image objects
+        for i in range(1050):
+            s3_client.put_object(
+                Bucket=bucket_name,
+                Key=f'group-images/{gallery_id}/image-{i:06d}.json',
+                Body=json.dumps({'model': f'Model {i}'})
+            )
+
+        storage = ImageStorage(s3_client, bucket_name, 'https://cdn.example.com')
+        images = storage.list_gallery_images(gallery_id)
+
+        assert len(images) == 1050
+
+    def test_list_gallery_images_client_error_logged_and_reraised(self, mock_s3):
+        """Test that ClientError is logged and re-raised, not swallowed."""
+        s3_client, bucket_name = mock_s3
+        storage = ImageStorage(s3_client, bucket_name, 'https://cdn.example.com')
+
+        # Use a non-existent bucket to trigger ClientError
+        storage.bucket = 'non-existent-bucket-xyz'
+
+        with pytest.raises(ClientError):
+            storage.list_gallery_images('some-gallery')
+
+    def test_list_gallery_images_filters_json_only(self, mock_s3):
+        """Test that list_gallery_images only returns .json files."""
+        s3_client, bucket_name = mock_s3
+        gallery_id = '2025-11-16-10-00-00'
+
+        s3_client.put_object(
+            Bucket=bucket_name,
+            Key=f'group-images/{gallery_id}/image.json',
+            Body=json.dumps({'model': 'test'})
+        )
+        s3_client.put_object(
+            Bucket=bucket_name,
+            Key=f'group-images/{gallery_id}/image.png',
+            Body=b'binary data'
+        )
+
+        storage = ImageStorage(s3_client, bucket_name, 'https://cdn.example.com')
+        images = storage.list_gallery_images(gallery_id)
+
+        assert len(images) == 1
+        assert images[0].endswith('.json')
