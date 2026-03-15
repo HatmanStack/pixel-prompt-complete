@@ -33,7 +33,7 @@ def _safe_float(env_var: str, default: float) -> float:
         return default
 
 
-@dataclass
+@dataclass(frozen=True)
 class ModelConfig:
     """Configuration for a single image generation model."""
     name: str           # Internal name: 'flux', 'recraft', 'gemini', 'openai'
