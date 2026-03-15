@@ -139,13 +139,6 @@ def get_model(name: str) -> ModelConfig:
     return model
 
 
-def is_model_enabled(name: str) -> bool:
-    """Check if a model is enabled."""
-    if name not in MODELS:
-        return False
-    return MODELS[name].enabled
-
-
 def get_model_config_dict(model: ModelConfig) -> Dict:
     """
     Convert ModelConfig to dict format expected by handlers.
@@ -162,14 +155,9 @@ def get_model_config_dict(model: ModelConfig) -> Dict:
     return config
 
 
-# Model order for UI display (fixed order)
-MODEL_ORDER = ['flux', 'recraft', 'gemini', 'openai']
-
 # Operational Timeouts (seconds) - configurable via environment
 api_client_timeout = _safe_float('API_CLIENT_TIMEOUT', 120.0)
 image_download_timeout = _safe_int('IMAGE_DOWNLOAD_TIMEOUT', 30)
-handler_timeout = _safe_int('HANDLER_TIMEOUT', 180)
-max_thread_workers = _safe_int('MAX_THREAD_WORKERS', 10)
 generate_thread_workers = _safe_int('GENERATE_THREAD_WORKERS', 4)
 
 # BFL polling configuration
