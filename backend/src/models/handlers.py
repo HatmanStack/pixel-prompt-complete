@@ -17,21 +17,15 @@ import time
 from typing import Any, Callable, Dict, List, Union
 
 import requests
-from google import genai
 from google.genai import types
-from openai import OpenAI
 
 from config import (
     bfl_max_poll_attempts,
     bfl_poll_interval,
     image_download_timeout,
 )
-from utils.clients import (
-    _genai_clients,
-    _openai_clients,
-    get_genai_client as _get_genai_client,
-    get_openai_client as _get_openai_client,
-)
+from utils.clients import get_genai_client as _get_genai_client
+from utils.clients import get_openai_client as _get_openai_client
 
 
 # Common handler helpers

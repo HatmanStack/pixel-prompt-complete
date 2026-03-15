@@ -252,7 +252,7 @@ class TestIterateGemini:
 
     def test_successful_iteration(self, gemini_config, sample_context):
         """Test successful image iteration with Gemini."""
-        with patch('models.handlers.genai.Client') as mock_client_class, \
+        with patch('utils.clients.genai.Client') as mock_client_class, \
              patch('models.handlers.types') as mock_types:
             mock_client = Mock()
             mock_client_class.return_value = mock_client
@@ -288,7 +288,7 @@ class TestIterateGemini:
 
     def test_handles_api_error(self, gemini_config, sample_context):
         """Test error handling when Gemini API fails."""
-        with patch('models.handlers.genai.Client') as mock_client_class, \
+        with patch('utils.clients.genai.Client') as mock_client_class, \
              patch('models.handlers.types') as mock_types:
             mock_client = Mock()
             mock_client_class.return_value = mock_client
@@ -313,7 +313,7 @@ class TestIterateGemini:
 
     def test_handles_empty_candidates(self, gemini_config, sample_context):
         """Test error handling when Gemini returns empty candidates."""
-        with patch('models.handlers.genai.Client') as mock_client_class, \
+        with patch('utils.clients.genai.Client') as mock_client_class, \
              patch('models.handlers.types') as mock_types:
             mock_client = Mock()
             mock_client_class.return_value = mock_client
@@ -339,7 +339,7 @@ class TestIterateGemini:
 
     def test_handles_no_image_in_response(self, gemini_config, sample_context):
         """Test error handling when Gemini returns no image data."""
-        with patch('models.handlers.genai.Client') as mock_client_class, \
+        with patch('utils.clients.genai.Client') as mock_client_class, \
              patch('models.handlers.types') as mock_types:
             mock_client = Mock()
             mock_client_class.return_value = mock_client
@@ -390,7 +390,7 @@ class TestIterateOpenAI:
 
     def test_successful_iteration(self, openai_config, sample_context):
         """Test successful image iteration with OpenAI."""
-        with patch('models.handlers.OpenAI') as mock_openai:
+        with patch('utils.clients.OpenAI') as mock_openai:
             mock_client = Mock()
             mock_openai.return_value = mock_client
 
@@ -421,7 +421,7 @@ class TestIterateOpenAI:
             status=200
         )
 
-        with patch('models.handlers.OpenAI') as mock_openai:
+        with patch('utils.clients.OpenAI') as mock_openai:
             mock_client = Mock()
             mock_openai.return_value = mock_client
 
@@ -445,7 +445,7 @@ class TestIterateOpenAI:
 
     def test_handles_api_error(self, openai_config, sample_context):
         """Test error handling when OpenAI API fails."""
-        with patch('models.handlers.OpenAI') as mock_openai:
+        with patch('utils.clients.OpenAI') as mock_openai:
             mock_client = Mock()
             mock_openai.return_value = mock_client
             mock_client.images.edit.side_effect = Exception("OpenAI API Error")
@@ -463,7 +463,7 @@ class TestIterateOpenAI:
 
     def test_handles_empty_response(self, openai_config, sample_context):
         """Test error handling when OpenAI returns empty data."""
-        with patch('models.handlers.OpenAI') as mock_openai:
+        with patch('utils.clients.OpenAI') as mock_openai:
             mock_client = Mock()
             mock_openai.return_value = mock_client
 
@@ -483,7 +483,7 @@ class TestIterateOpenAI:
 
     def test_accepts_base64_string_and_bytes(self, openai_config, sample_context):
         """Test handler accepts both base64 string and bytes for source_image."""
-        with patch('models.handlers.OpenAI') as mock_openai:
+        with patch('utils.clients.OpenAI') as mock_openai:
             mock_client = Mock()
             mock_openai.return_value = mock_client
 

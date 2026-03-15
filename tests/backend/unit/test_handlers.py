@@ -31,7 +31,7 @@ class TestOpenAIHandler:
             status=200
         )
 
-        with patch('models.handlers.OpenAI') as mock_openai:
+        with patch('utils.clients.OpenAI') as mock_openai:
             # Setup mock client
             mock_client = Mock()
             mock_openai.return_value = mock_client
@@ -60,7 +60,7 @@ class TestOpenAIHandler:
 
     def test_error_handling(self, mock_model_config, sample_prompt, sample_params):
         """Test error handling in OpenAI handler"""
-        with patch('models.handlers.OpenAI') as mock_openai:
+        with patch('utils.clients.OpenAI') as mock_openai:
             mock_client = Mock()
             mock_openai.return_value = mock_client
 
@@ -76,7 +76,7 @@ class TestOpenAIHandler:
 
     def test_timeout_handling(self, mock_model_config, sample_prompt, sample_params):
         """Test timeout error handling"""
-        with patch('models.handlers.OpenAI') as mock_openai:
+        with patch('utils.clients.OpenAI') as mock_openai:
             mock_client = Mock()
             mock_openai.return_value = mock_client
 
@@ -102,7 +102,7 @@ class TestGoogleHandlers:
             'api_key': 'test-gemini-key'
         }
 
-        with patch('models.handlers.genai.Client') as mock_client_class:
+        with patch('utils.clients.genai.Client') as mock_client_class:
             mock_client = Mock()
             mock_client_class.return_value = mock_client
 
@@ -134,7 +134,7 @@ class TestGoogleHandlers:
             'api_key': 'test-gemini-key'
         }
 
-        with patch('models.handlers.genai.Client') as mock_client_class:
+        with patch('utils.clients.genai.Client') as mock_client_class:
             mock_client = Mock()
             mock_client_class.return_value = mock_client
 
@@ -214,7 +214,7 @@ class TestOtherHandlers:
             status=200
         )
 
-        with patch('models.handlers.OpenAI') as mock_openai:
+        with patch('utils.clients.OpenAI') as mock_openai:
             mock_client = Mock()
             mock_openai.return_value = mock_client
 
