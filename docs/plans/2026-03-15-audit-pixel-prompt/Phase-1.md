@@ -42,10 +42,10 @@ Remove all confirmed dead code, unused configuration, stale functions, and no-op
 - Verify no other test files import these symbols.
 
 **Verification Checklist:**
-- [ ] `is_model_enabled`, `MODEL_ORDER`, `handler_timeout`, `max_thread_workers` no longer exist in `config.py`
-- [ ] `grep -r "is_model_enabled\|MODEL_ORDER\|handler_timeout\|max_thread_workers" backend/src/` returns no results
-- [ ] `PYTHONPATH=backend/src pytest tests/backend/unit/test_config.py -v` passes
-- [ ] `ruff check backend/src/config.py` passes
+- [x]`is_model_enabled`, `MODEL_ORDER`, `handler_timeout`, `max_thread_workers` no longer exist in `config.py`
+- [x]`grep -r "is_model_enabled\|MODEL_ORDER\|handler_timeout\|max_thread_workers" backend/src/` returns no results
+- [x]`PYTHONPATH=backend/src pytest tests/backend/unit/test_config.py -v` passes
+- [x]`ruff check backend/src/config.py` passes
 
 **Testing Instructions:**
 - No new tests needed. Run existing test suite to verify nothing breaks.
@@ -78,10 +78,10 @@ chore(backend): remove unused config variables and is_model_enabled function
 - Search for any test files that reference these deleted functions and update accordingly.
 
 **Verification Checklist:**
-- [ ] `grep -r "save_image\b" backend/src/` returns only doc references, not function definitions
-- [ ] `grep -r "job_not_found\|reset_cache\|clear_context\|_save_context[^_]" backend/src/` returns no function definitions
-- [ ] `PYTHONPATH=backend/src pytest tests/backend/unit/ -v` passes
-- [ ] `ruff check backend/src/` passes
+- [x]`grep -r "save_image\b" backend/src/` returns only doc references, not function definitions
+- [x]`grep -r "job_not_found\|reset_cache\|clear_context\|_save_context[^_]" backend/src/` returns no function definitions
+- [x]`PYTHONPATH=backend/src pytest tests/backend/unit/ -v` passes
+- [x]`ruff check backend/src/` passes
 
 **Testing Instructions:**
 - Run full backend test suite. If any tests reference deleted functions, remove those test cases.
@@ -122,11 +122,11 @@ chore(backend): remove dead functions from storage, error_responses, rate_limit,
 - In `test_handlers.py`, remove any test cases for the deleted handlers.
 
 **Verification Checklist:**
-- [ ] `grep -r "bedrock\|stability\|handle_generic\|google_imagen" backend/src/` returns no function definitions (config references in docs are acceptable)
-- [ ] `handlers.py` is significantly shorter (should drop by ~300+ lines)
-- [ ] `get_handler()` only contains `bfl`, `recraft`, `google_gemini`, `openai` entries
-- [ ] `PYTHONPATH=backend/src pytest tests/backend/unit/ -v` passes
-- [ ] `ruff check backend/src/` passes
+- [x]`grep -r "bedrock\|stability\|handle_generic\|google_imagen" backend/src/` returns no function definitions (config references in docs are acceptable)
+- [x]`handlers.py` is significantly shorter (should drop by ~300+ lines)
+- [x]`get_handler()` only contains `bfl`, `recraft`, `google_gemini`, `openai` entries
+- [x]`PYTHONPATH=backend/src pytest tests/backend/unit/ -v` passes
+- [x]`ruff check backend/src/` passes
 
 **Testing Instructions:**
 - Run full backend test suite after removal.
@@ -154,9 +154,9 @@ chore(backend): remove unused Bedrock, Stability, Imagen, and generic handlers
 - Delete `backend/src/models/types.py`.
 
 **Verification Checklist:**
-- [ ] `backend/src/models/types.py` no longer exists
-- [ ] `PYTHONPATH=backend/src pytest tests/backend/unit/ -v` passes
-- [ ] `ruff check backend/src/` passes
+- [x]`backend/src/models/types.py` no longer exists
+- [x]`PYTHONPATH=backend/src pytest tests/backend/unit/ -v` passes
+- [x]`ruff check backend/src/` passes
 
 **Testing Instructions:**
 - Run full backend test suite.
@@ -184,10 +184,10 @@ chore(backend): remove unused types.py module
 - In `ImageCard.test.jsx` around line 197, find the `expect(true).toBe(true)` assertion. Either write a meaningful assertion for whatever the test is supposed to verify (read the test name/description for intent) or remove the entire test case if it has no meaningful purpose.
 
 **Verification Checklist:**
-- [ ] `grep -r "handleGallerySelect" frontend/src/` returns no results
-- [ ] `grep -r "expect(true).toBe(true)" frontend/tests/` returns no results
-- [ ] `cd frontend && npm test` passes
-- [ ] `cd frontend && npm run lint && npm run typecheck` passes
+- [x]`grep -r "handleGallerySelect" frontend/src/` returns no results
+- [x]`grep -r "expect(true).toBe(true)" frontend/tests/` returns no results
+- [x]`cd frontend && npm test` passes
+- [x]`cd frontend && npm run lint && npm run typecheck` passes
 
 **Testing Instructions:**
 - `cd frontend && npm test`
@@ -219,10 +219,10 @@ chore(frontend): remove no-op gallery handler and placeholder test assertion
 - Run `npm run build` to verify the production build still works.
 
 **Verification Checklist:**
-- [ ] `cd frontend && npm audit` shows zero high-severity vulnerabilities
-- [ ] `cd frontend && npm test` passes
-- [ ] `cd frontend && npm run build` completes successfully
-- [ ] `cd frontend && npm run lint && npm run typecheck` passes
+- [x]`cd frontend && npm audit` shows zero high-severity vulnerabilities
+- [x]`cd frontend && npm test` passes
+- [x]`cd frontend && npm run build` completes successfully
+- [x]`cd frontend && npm run lint && npm run typecheck` passes
 
 **Testing Instructions:**
 - `cd frontend && npm test`
