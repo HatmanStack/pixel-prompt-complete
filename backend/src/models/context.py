@@ -4,7 +4,6 @@ Maintains a rolling 3-iteration context window per model column.
 """
 
 import json
-import logging
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -13,8 +12,7 @@ from typing import Any, Dict, List, Optional
 from botocore.exceptions import ClientError
 
 from jobs.manager import ConcurrencyError
-
-logger = logging.getLogger(__name__)
+from utils.logger import StructuredLogger
 
 
 @dataclass
@@ -80,11 +78,15 @@ class ContextManager:
                             iteration=item["iteration"],
                             prompt=item["prompt"],
                             image_key=item["imageKey"],
-                            timestamp=item["timestamp"],
+                            timestamp=item.get("timestamp", ""),
                         )
                     )
                 except (KeyError, TypeError) as e:
-                    logger.warning(f"Skipping malformed context entry: {e}")
+                    StructuredLogger.warning(
+                        f"Skipping malformed context entry: {e}",
+                        session_id=session_id,
+                        model=model,
+                    )
 
             return entries
 
@@ -93,11 +95,19 @@ class ContextManager:
             return []
 
         except json.JSONDecodeError as e:
-            logger.warning(f"Corrupted context JSON for {session_id}/{model}: {e}")
+            StructuredLogger.warning(
+                f"Corrupted context JSON for {session_id}/{model}: {e}",
+                session_id=session_id,
+                model=model,
+            )
             return []
 
         except Exception as e:
-            logger.error(f"Error loading context for {session_id}/{model}: {e}")
+            StructuredLogger.error(
+                f"Error loading context for {session_id}/{model}: {e}",
+                session_id=session_id,
+                model=model,
+            )
             raise
 
     def add_entry(self, session_id: str, model: str, entry: ContextEntry) -> None:
@@ -124,7 +134,7 @@ class ContextManager:
                                 iteration=item["iteration"],
                                 prompt=item["prompt"],
                                 image_key=item["imageKey"],
-                                timestamp=item["timestamp"],
+                                timestamp=item.get("timestamp", ""),
                             )
                         )
                     except (KeyError, TypeError):

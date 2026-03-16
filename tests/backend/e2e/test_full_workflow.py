@@ -37,8 +37,8 @@ def _pick_completed_model(models):
     for name, result in models.items():
         if result.get("status") == "completed":
             return name
-    # Fall back to first model if none completed (test will fail on iterate anyway)
-    return next(iter(models))
+    statuses = {n: r.get("status") for n, r in models.items()}
+    raise AssertionError(f"No model completed during generate: {statuses}")
 
 
 # ── Tests ──────────────────────────────────────────────────────────────

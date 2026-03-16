@@ -335,7 +335,7 @@ def handle_generate(event: LambdaEvent, correlation_id: Optional[str] = None) ->
                         "duration": duration,
                     }
                 else:
-                    error_msg = result.get("error", "Unknown error")
+                    error_msg = sanitize_error_message(result.get("error", "Unknown error"))
                     _handle_failed_result(session_id, model_name, iteration_index, error_msg)
                     return model_name, {
                         "status": "error",
@@ -523,7 +523,7 @@ def _handle_refinement(
                 resp.update(extra_response_fields)
             return response(200, resp)
         else:
-            error_msg = result.get("error", "Unknown error")
+            error_msg = sanitize_error_message(result.get("error", "Unknown error"))
             _handle_failed_result(session_id, model_name, iteration_index, error_msg)
             return response(
                 500,

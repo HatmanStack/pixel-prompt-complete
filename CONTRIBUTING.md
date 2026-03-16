@@ -9,11 +9,11 @@
    npm install
 
    # Frontend
-   cd frontend && npm install
+   (cd frontend && npm install)
 
    # Backend (dev dependencies)
    pip install -r backend/src/requirements.txt
-   pip install -e "backend[dev]"
+   pip install -e ./backend[dev]
    ```
 3. **Verify your setup**: `make check`
 
