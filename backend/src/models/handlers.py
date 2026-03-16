@@ -289,7 +289,10 @@ def handle_bfl(model_config: ModelConfig, prompt: str, params: GenerationParams)
 
         # Start job
         start_url = f"https://api.bfl.ai/v1/{endpoint}"
-        headers = {"x-key": model_config.get("api_key") or None, "Content-Type": "application/json"}
+        api_key = model_config.get("api_key", "")
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["x-key"] = api_key
         payload = {"prompt": prompt, "width": 1024, "height": 1024}
 
         response = requests.post(start_url, headers=headers, json=payload, timeout=30)
@@ -303,7 +306,7 @@ def handle_bfl(model_config: ModelConfig, prompt: str, params: GenerationParams)
         # Poll for result using shared helper (configurable via environment or params)
         max_attempts = params.get("max_poll_attempts", bfl_max_poll_attempts)
         poll_interval = params.get("poll_interval_seconds", bfl_poll_interval)
-        poll_headers = {"x-key": model_config.get("api_key") or None}
+        poll_headers = {"x-key": api_key} if api_key else {}
         image_base64 = _poll_bfl_job(
             job_id,
             poll_headers,
