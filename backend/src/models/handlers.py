@@ -135,8 +135,13 @@ def sanitize_error_message(error: Union[Exception, str]) -> str:
     error_str = re.sub(r'(api[_-]?key|apikey|key|token|secret|password|authorization)["\']?\s*[:=]\s*["\']?[A-Za-z0-9\-_\.]+["\']?', r'\1=[REDACTED]', error_str, flags=re.IGNORECASE)
     # sk- prefixed keys (OpenAI style)
     error_str = re.sub(r'sk-[A-Za-z0-9\-_]{20,}', '[REDACTED_KEY]', error_str)
-    # Generic long alphanumeric strings that look like keys (32+ chars)
-    error_str = re.sub(r'[A-Za-z0-9]{32,}', '[REDACTED]', error_str)
+    # Generic long alphanumeric strings that look like keys (32+ chars, mixed-case + digits)
+    # Requires uppercase, lowercase, AND digits to avoid redacting session IDs / UUIDs
+    error_str = re.sub(
+        r'(?=[A-Za-z0-9]{32,})(?=.*[A-Z])(?=.*[a-z])(?=.*\d)[A-Za-z0-9]{32,}',
+        '[REDACTED]',
+        error_str,
+    )
 
     return error_str
 

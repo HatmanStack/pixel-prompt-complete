@@ -279,9 +279,11 @@ class TestErrorCases:
     def test_status_invalid_session_id_dots(self, mocks):
         resp = lambda_handler(_make_event(method="GET", path="/status/a..b"), None)
         assert resp["statusCode"] == 400
+        assert "Invalid session ID" in _body(resp)["error"]
 
         resp = lambda_handler(_make_event(method="GET", path="/status/.."), None)
         assert resp["statusCode"] == 400
+        assert "Invalid session ID" in _body(resp)["error"]
 
     def test_status_invalid_session_id_too_long(self, mocks):
         long_id = "a" * 65
@@ -355,9 +357,18 @@ class TestCorsHeaders:
 
     def test_cors_origin_configurable(self, mocks):
         """CORS origin should be configurable via CORS_ALLOWED_ORIGIN env var."""
+        import importlib
         import lambda_function
+
         original = lambda_function.cors_allowed_origin
         try:
+            # Verify the env var wiring: set env, reload config, verify value
+            with patch.dict(os.environ, {"CORS_ALLOWED_ORIGIN": "https://example.com"}):
+                import config
+                importlib.reload(config)
+                assert config.cors_allowed_origin == "https://example.com"
+
+            # Verify response() uses the module-level cors_allowed_origin
             lambda_function.cors_allowed_origin = "https://example.com"
             resp = lambda_handler(_make_event(method="GET", path="/nope"), None)
             assert resp["headers"]["Access-Control-Allow-Origin"] == "https://example.com"

@@ -45,6 +45,10 @@ Metadata:
           - GlobalRateLimit
           - IPRateLimit
           - IPWhitelist
+      - Label:
+          default: "CORS"
+        Parameters:
+          - CorsAllowedOrigin
 
 Parameters:
   Environment:
@@ -172,6 +176,12 @@ Parameters:
     Default: ""
     Description: Comma-separated IP addresses to bypass rate limits
 
+  # CORS
+  CorsAllowedOrigin:
+    Type: String
+    Default: "*"
+    Description: Allowed CORS origin (set to your frontend domain in production)
+
   # AWS Bedrock Configuration
   BedrockNovaRegion:
     Type: String
@@ -225,7 +235,7 @@ Resources:
           IP_LIMIT: !Ref IPRateLimit
           IP_INCLUDE: !Ref IPWhitelist
           # CORS
-          CORS_ALLOWED_ORIGIN: '*'
+          CORS_ALLOWED_ORIGIN: !Ref CorsAllowedOrigin
           # S3 and CloudFront
           S3_BUCKET: !Ref PixelPromptBucket
           CLOUDFRONT_DOMAIN: !GetAtt CloudFrontDistribution.DomainName

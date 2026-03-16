@@ -102,6 +102,7 @@ def _parse_and_validate_request(
     require_prompt: bool = True,
     default_prompt: str = '',
     max_body_size: int = MAX_BODY_SIZE,
+    max_prompt_length: int = 1000,
 ) -> tuple[ValidatedRequest | None, ApiResponse | None]:
     """Shared request validation for POST handlers.
 
@@ -136,8 +137,8 @@ def _parse_and_validate_request(
     if require_prompt:
         if not prompt:
             return None, response(400, error_responses.prompt_required())
-        if len(prompt) > 1000:
-            return None, response(400, error_responses.prompt_too_long(max_length=1000))
+        if len(prompt) > max_prompt_length:
+            return None, response(400, error_responses.prompt_too_long(max_length=max_prompt_length))
 
     # Content filter
     if prompt and content_filter.check_prompt(prompt):
@@ -597,28 +598,21 @@ def handle_status(event: LambdaEvent, correlation_id: Optional[str] = None) -> A
 
 def handle_enhance(event: LambdaEvent, correlation_id: Optional[str] = None) -> ApiResponse:
     """POST /enhance - Enhance prompt using configured LLM."""
+    validated, err = _parse_and_validate_request(
+        event, require_prompt=True, max_prompt_length=500,
+    )
+    if err:
+        return err
+
     try:
-        body = json.loads(event.get('body', '{}'))
-        prompt = body.get('prompt', '')
-
-        if not prompt:
-            return response(400, error_responses.prompt_required())
-        if len(prompt) > 500:
-            return response(400, error_responses.prompt_too_long(max_length=500))
-
-        if content_filter.check_prompt(prompt):
-            return response(400, error_responses.inappropriate_content())
-
-        enhanced = prompt_enhancer.enhance_safe(prompt)
+        enhanced = prompt_enhancer.enhance_safe(validated.prompt)
 
         return response(200, {
-            'original': prompt,
+            'original': validated.prompt,
             'short_prompt': enhanced,
             'long_prompt': enhanced
         })
 
-    except json.JSONDecodeError:
-        return response(400, error_responses.invalid_json())
     except Exception as e:
         StructuredLogger.error(
             f"Error in handle_enhance: {e}",

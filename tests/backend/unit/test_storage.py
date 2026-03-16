@@ -4,7 +4,7 @@ Unit tests for storage utilities
 
 import pytest
 import json
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 from botocore.exceptions import ClientError
 from utils.storage import ImageStorage
 from .fixtures.api_responses import SAMPLE_IMAGE_BASE64
@@ -179,8 +179,11 @@ class TestImageStorage:
         # Use a non-existent bucket to trigger ClientError
         storage.bucket = 'non-existent-bucket-xyz'
 
-        with pytest.raises(ClientError):
-            storage.list_galleries()
+        with patch('utils.storage.StructuredLogger') as mock_logger:
+            with pytest.raises(ClientError):
+                storage.list_galleries()
+            mock_logger.error.assert_called_once()
+            assert 'Failed to list galleries' in mock_logger.error.call_args[0][0]
 
     def test_list_gallery_images_pagination(self, mock_s3):
         """Test that list_gallery_images paginates through >1000 objects."""
@@ -208,8 +211,11 @@ class TestImageStorage:
         # Use a non-existent bucket to trigger ClientError
         storage.bucket = 'non-existent-bucket-xyz'
 
-        with pytest.raises(ClientError):
-            storage.list_gallery_images('some-gallery')
+        with patch('utils.storage.StructuredLogger') as mock_logger:
+            with pytest.raises(ClientError):
+                storage.list_gallery_images('some-gallery')
+            mock_logger.error.assert_called_once()
+            assert 'Failed to list gallery images' in mock_logger.error.call_args[0][0]
 
     def test_list_gallery_images_filters_json_only(self, mock_s3):
         """Test that list_gallery_images only returns .json files."""

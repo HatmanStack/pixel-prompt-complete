@@ -19,8 +19,14 @@ _genai_clients: Dict[str, genai.Client] = {}
 
 
 def get_openai_client(api_key: str, **kwargs) -> OpenAI:
-    """Get or create a cached OpenAI client keyed by api_key and relevant kwargs."""
-    extra = tuple(sorted((k, v) for k, v in kwargs.items() if k in ('base_url', 'timeout')))
+    """Get or create a cached OpenAI client keyed by api_key and relevant kwargs.
+
+    Note: The cache key only includes ``base_url`` and ``timeout``.  If a new kwarg
+    is added to callers that affects client behaviour, it **must** be added to the
+    ``_CACHE_KEY_KWARGS`` set below to avoid returning a stale cached client.
+    """
+    _CACHE_KEY_KWARGS = ('base_url', 'timeout')
+    extra = tuple(sorted((k, v) for k, v in kwargs.items() if k in _CACHE_KEY_KWARGS))
     cache_key = (api_key or '__default__', extra)
     if cache_key not in _openai_clients:
         _openai_clients[cache_key] = OpenAI(

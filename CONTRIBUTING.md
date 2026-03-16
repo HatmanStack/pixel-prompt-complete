@@ -13,7 +13,7 @@
 
    # Backend (dev dependencies)
    pip install -r backend/src/requirements.txt
-   pip install pytest pytest-mock pytest-cov moto ruff
+   pip install -e "backend[dev]"
    ```
 3. **Verify your setup**: `make check`
 
