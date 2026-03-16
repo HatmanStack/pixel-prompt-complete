@@ -240,7 +240,6 @@ Resources:
               Resource:
                 - !Sub '${PixelPromptBucket.Arn}/sessions/*'
                 - !Sub '${PixelPromptBucket.Arn}/rate-limit/*'
-                - !Sub '${PixelPromptBucket.Arn}/gallery/*'
             - Sid: S3ListBucket
               Effect: Allow
               Action: s3:ListBucket
@@ -249,7 +248,6 @@ Resources:
                 StringLike:
                   s3:prefix:
                     - 'sessions/*'
-                    - 'gallery/*'
       Events:
         GenerateApi:
           Type: HttpApi

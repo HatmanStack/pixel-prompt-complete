@@ -44,12 +44,12 @@ class ImageStorage:
     ) -> None:
         """Common logic: build metadata dict, upload to S3."""
         metadata: Dict[str, Any] = {
-            'output': base64_image,
-            'model': model_name,
-            'prompt': prompt,
-            'target': target,
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'NSFW': False,
+            "output": base64_image,
+            "model": model_name,
+            "prompt": prompt,
+            "target": target,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "NSFW": False,
         }
         if extra:
             metadata.update(extra)
@@ -57,7 +57,7 @@ class ImageStorage:
         self._put_object_with_retry(
             key=key,
             body=json.dumps(metadata),
-            content_type='application/json',
+            content_type="application/json",
         )
 
     @retry_with_backoff(max_retries=3, base_delay=1.0, max_delay=4.0)
@@ -73,12 +73,7 @@ class ImageStorage:
         Raises:
             Exception: If upload fails after retries
         """
-        self.s3.put_object(
-            Bucket=self.bucket,
-            Key=key,
-            Body=body,
-            ContentType=content_type
-        )
+        self.s3.put_object(Bucket=self.bucket, Key=key, Body=body, ContentType=content_type)
 
     def upload_image(
         self,
@@ -90,12 +85,12 @@ class ImageStorage:
     ) -> str:
         """Upload a generated image to S3 under sessions prefix with metadata."""
         normalized_model = self._normalize_model_name(model_name)
-        timestamp = datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
 
         iter_suffix = f"-iter{iteration}" if iteration is not None else ""
         key = f"sessions/{target}/{normalized_model}-{timestamp}{iter_suffix}.json"
 
-        extra = {'iteration': iteration} if iteration is not None else None
+        extra = {"iteration": iteration} if iteration is not None else None
         self._store_image(base64_image, key, model_name, prompt, target, extra=extra)
 
         return key
@@ -112,11 +107,11 @@ class ImageStorage:
         """
         try:
             response = self._get_object_with_retry(image_key)
-            metadata = json.loads(response['Body'].read().decode('utf-8'))
+            metadata = json.loads(response["Body"].read().decode("utf-8"))
             return metadata
 
         except ClientError as e:
-            if e.response['Error']['Code'] == 'NoSuchKey':
+            if e.response["Error"]["Code"] == "NoSuchKey":
                 return None
             else:
                 raise
@@ -137,9 +132,15 @@ class ImageStorage:
         """
         return self.s3.get_object(Bucket=self.bucket, Key=key)
 
+    # Timestamp folder pattern: YYYY-MM-DD-HH-MM-SS
+    _GALLERY_FOLDER_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}$")
+
     def list_galleries(self) -> List[str]:
         """
         List all gallery folders (target timestamps) from the sessions prefix.
+
+        Filters out non-gallery folders (e.g. session UUID folders) by matching
+        the timestamp pattern YYYY-MM-DD-HH-MM-SS.
 
         Returns:
             List of gallery folder names (target timestamps)
@@ -150,24 +151,25 @@ class ImageStorage:
         try:
             galleries = []
             kwargs = {
-                'Bucket': self.bucket,
-                'Prefix': 'sessions/',
-                'Delimiter': '/',
+                "Bucket": self.bucket,
+                "Prefix": "sessions/",
+                "Delimiter": "/",
             }
 
             while True:
                 response = self.s3.list_objects_v2(**kwargs)
 
                 # Extract folder names from CommonPrefixes
-                if 'CommonPrefixes' in response:
-                    for prefix in response['CommonPrefixes']:
+                if "CommonPrefixes" in response:
+                    for prefix in response["CommonPrefixes"]:
                         # e.g., "sessions/2025-11-15-14-30-45/" -> "2025-11-15-14-30-45"
-                        folder = prefix['Prefix'].split('/')[-2]
-                        galleries.append(folder)
+                        folder = prefix["Prefix"].split("/")[-2]
+                        if self._GALLERY_FOLDER_RE.match(folder):
+                            galleries.append(folder)
 
                 # Continue paginating if there are more results
-                if response.get('IsTruncated'):
-                    kwargs['ContinuationToken'] = response['NextContinuationToken']
+                if response.get("IsTruncated"):
+                    kwargs["ContinuationToken"] = response["NextContinuationToken"]
                 else:
                     break
 
@@ -197,23 +199,23 @@ class ImageStorage:
             prefix = f"sessions/{gallery_folder}/"
             images = []
             kwargs = {
-                'Bucket': self.bucket,
-                'Prefix': prefix,
+                "Bucket": self.bucket,
+                "Prefix": prefix,
             }
 
             while True:
                 response = self.s3.list_objects_v2(**kwargs)
 
-                if 'Contents' in response:
-                    for obj in response['Contents']:
-                        key = obj['Key']
+                if "Contents" in response:
+                    for obj in response["Contents"]:
+                        key = obj["Key"]
                         # Only include .json files (not folders)
-                        if key.endswith('.json'):
+                        if key.endswith(".json"):
                             images.append(key)
 
                 # Continue paginating if there are more results
-                if response.get('IsTruncated'):
-                    kwargs['ContinuationToken'] = response['NextContinuationToken']
+                if response.get("IsTruncated"):
+                    kwargs["ContinuationToken"] = response["NextContinuationToken"]
                 else:
                     break
 
@@ -249,15 +251,15 @@ class ImageStorage:
         normalized = model_name.lower()
 
         # Replace spaces with hyphens
-        normalized = normalized.replace(' ', '-')
+        normalized = normalized.replace(" ", "-")
 
         # Remove special characters (keep alphanumeric and hyphens)
-        normalized = re.sub(r'[^a-z0-9\-]', '', normalized)
+        normalized = re.sub(r"[^a-z0-9\-]", "", normalized)
 
         # Remove consecutive hyphens
-        normalized = re.sub(r'-+', '-', normalized)
+        normalized = re.sub(r"-+", "-", normalized)
 
         # Remove leading/trailing hyphens
-        normalized = normalized.strip('-')
+        normalized = normalized.strip("-")
 
         return normalized

@@ -48,6 +48,30 @@ class TestImageStorage:
 
         assert len(galleries) == 2
 
+    def test_list_galleries_excludes_session_uuid_folders(self, mock_s3):
+        """Test that list_galleries filters out session UUID folders."""
+        s3_client, bucket_name = mock_s3
+
+        # Create a timestamp gallery folder
+        s3_client.put_object(
+            Bucket=bucket_name,
+            Key='sessions/2025-11-16-10-00-00/image1.json',
+            Body=json.dumps({'test': 'data'})
+        )
+        # Create a session UUID folder (should be excluded)
+        s3_client.put_object(
+            Bucket=bucket_name,
+            Key='sessions/3f2504e0-4f89-11d3-9a0c-0305e82c3301/status.json',
+            Body=json.dumps({'status': 'completed'})
+        )
+
+        storage = ImageStorage(s3_client, bucket_name, 'https://cdn.example.com')
+
+        galleries = storage.list_galleries()
+
+        assert len(galleries) == 1
+        assert galleries[0] == '2025-11-16-10-00-00'
+
     def test_list_gallery_images(self, mock_s3):
         """Test listing images from a specific gallery"""
         s3_client, bucket_name = mock_s3
@@ -70,8 +94,7 @@ class TestImageStorage:
 
         images = storage.list_gallery_images(gallery_id)
 
-        assert isinstance(images, list)
-        # Test passes if method executes without error
+        assert len(images) == 2
 
     def test_get_image_metadata(self, mock_s3):
         """Test retrieving image metadata"""
@@ -158,7 +181,9 @@ class TestImageStorage:
 
         # Create 1050 gallery folders (need >1000 to trigger pagination)
         for i in range(1050):
-            folder_name = f"2025-01-01-{i:06d}"
+            h, remainder = divmod(i, 3600)
+            m, s = divmod(remainder, 60)
+            folder_name = f"2025-01-01-{h:02d}-{m:02d}-{s:02d}"
             s3_client.put_object(
                 Bucket=bucket_name,
                 Key=f'sessions/{folder_name}/image.json',

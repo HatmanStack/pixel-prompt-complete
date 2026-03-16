@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ContextEntry:
     """A single entry in the conversation context window."""
+
     iteration: int
     prompt: str
     image_key: str
@@ -68,18 +69,20 @@ class ContextManager:
 
         try:
             response = self.s3.get_object(Bucket=self.bucket, Key=key)
-            data = json.loads(response['Body'].read().decode('utf-8'))
+            data = json.loads(response["Body"].read().decode("utf-8"))
 
             # Parse context entries
             entries = []
-            for item in data.get('window', []):
+            for item in data.get("window", []):
                 try:
-                    entries.append(ContextEntry(
-                        iteration=item['iteration'],
-                        prompt=item['prompt'],
-                        image_key=item['imageKey'],
-                        timestamp=item['timestamp']
-                    ))
+                    entries.append(
+                        ContextEntry(
+                            iteration=item["iteration"],
+                            prompt=item["prompt"],
+                            image_key=item["imageKey"],
+                            timestamp=item["timestamp"],
+                        )
+                    )
                 except (KeyError, TypeError) as e:
                     logger.warning(f"Skipping malformed context entry: {e}")
 
@@ -111,17 +114,19 @@ class ContextManager:
 
             try:
                 resp = self.s3.get_object(Bucket=self.bucket, Key=key)
-                etag = resp.get('ETag')
-                data = json.loads(resp['Body'].read().decode('utf-8'))
+                etag = resp.get("ETag")
+                data = json.loads(resp["Body"].read().decode("utf-8"))
                 entries = []
-                for item in data.get('window', []):
+                for item in data.get("window", []):
                     try:
-                        entries.append(ContextEntry(
-                            iteration=item['iteration'],
-                            prompt=item['prompt'],
-                            image_key=item['imageKey'],
-                            timestamp=item['timestamp'],
-                        ))
+                        entries.append(
+                            ContextEntry(
+                                iteration=item["iteration"],
+                                prompt=item["prompt"],
+                                image_key=item["imageKey"],
+                                timestamp=item["timestamp"],
+                            )
+                        )
                     except (KeyError, TypeError):
                         pass
             except self.s3.exceptions.NoSuchKey:
@@ -131,7 +136,7 @@ class ContextManager:
 
             entries.append(entry)
             if len(entries) > self.WINDOW_SIZE:
-                entries = entries[-self.WINDOW_SIZE:]
+                entries = entries[-self.WINDOW_SIZE :]
 
             if self._save_context_conditional(session_id, model, entries, etag):
                 return
@@ -151,45 +156,43 @@ class ContextManager:
     ) -> bool:
         """Save context with ETag-based conditional write. Returns True on success."""
         key = self._get_context_key(session_id, model)
-        data = {
-            'model': model,
-            'sessionId': session_id,
-            'window': [
-                {
-                    'iteration': e.iteration,
-                    'prompt': e.prompt,
-                    'imageKey': e.image_key,
-                    'timestamp': e.timestamp,
-                }
-                for e in entries
-            ],
-        }
+        body = json.dumps(
+            {
+                "model": model,
+                "sessionId": session_id,
+                "window": [
+                    {
+                        "iteration": e.iteration,
+                        "prompt": e.prompt,
+                        "imageKey": e.image_key,
+                        "timestamp": e.timestamp,
+                    }
+                    for e in entries
+                ],
+            }
+        )
 
         try:
             put_kwargs = {
-                'Bucket': self.bucket,
-                'Key': key,
-                'Body': json.dumps(data),
-                'ContentType': 'application/json',
+                "Bucket": self.bucket,
+                "Key": key,
+                "Body": body,
+                "ContentType": "application/json",
             }
             if expected_etag:
-                put_kwargs['IfMatch'] = expected_etag
+                put_kwargs["IfMatch"] = expected_etag
             else:
-                put_kwargs['IfNoneMatch'] = '*'
+                put_kwargs["IfNoneMatch"] = "*"
 
             self.s3.put_object(**put_kwargs)
             return True
         except ClientError as e:
-            code = e.response['Error']['Code']
-            if code in ('PreconditionFailed', '412'):
+            code = e.response["Error"]["Code"]
+            if code in ("PreconditionFailed", "412"):
                 return False
             raise
 
-    def get_context_for_iteration(
-        self,
-        session_id: str,
-        model: str
-    ) -> List[Dict[str, Any]]:
+    def get_context_for_iteration(self, session_id: str, model: str) -> List[Dict[str, Any]]:
         """
         Get context in format suitable for model iteration handlers.
 
@@ -206,20 +209,16 @@ class ContextManager:
         entries = self.get_context(session_id, model)
         return [
             {
-                'iteration': e.iteration,
-                'prompt': e.prompt,
-                'imageKey': e.image_key,
-                'timestamp': e.timestamp
+                "iteration": e.iteration,
+                "prompt": e.prompt,
+                "imageKey": e.image_key,
+                "timestamp": e.timestamp,
             }
             for e in entries
         ]
 
 
-def create_context_entry(
-    iteration: int,
-    prompt: str,
-    image_key: str
-) -> ContextEntry:
+def create_context_entry(iteration: int, prompt: str, image_key: str) -> ContextEntry:
     """
     Factory function to create a new ContextEntry with current timestamp.
 
@@ -235,5 +234,5 @@ def create_context_entry(
         iteration=iteration,
         prompt=prompt,
         image_key=image_key,
-        timestamp=datetime.now(timezone.utc).isoformat()
+        timestamp=datetime.now(timezone.utc).isoformat(),
     )
