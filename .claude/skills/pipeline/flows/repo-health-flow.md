@@ -12,7 +12,7 @@
                         +--REQUIRED------+                   +--REQUESTED-----+               +--REQUESTED-----+                |
                                                                                                                                 |
                                                  +--------------------------------------------------------------------------+  |
-                                                 | Findings remain? Loop back to Planner with re-audit results              |  |
+                                                 | Unverified items? Loop back to Planner                                   |  |
                                                  +--------------------------------------------------------------------------+  |
 ```
 
@@ -34,9 +34,7 @@ Before starting any stage, detect prior progress:
    - `PHASE_APPROVED` for all phases → enter at Stage 4 (Re-Audit)
    - OPEN `CODE_REVIEW` items → enter at Stage 3 at the correct phase with revision instructions
    - OPEN `PLAN_REVIEW` items → enter at Stage 2 with revision instructions
-3. **Check health-audit.md** for re-audit sections (headers like `## Re-Audit Cycle N`):
-   - If re-audit exists with all CRITICAL/HIGH resolved → pipeline complete, report and stop
-   - If re-audit exists with remaining findings → enter at Stage 2 with updated targets
+3. **Check feedback.md** for `VERIFIED` signal → pipeline complete, report and stop
 4. **No plan files, no feedback.md** → enter at Stage 2 (first run)
 
 Apply the same per-phase state recovery logic from the main SKILL.md (check `PHASE_APPROVED`, OPEN/resolved `CODE_REVIEW`, and git commits per phase).
@@ -58,6 +56,15 @@ If any file is missing, **stop and report** which files are absent.
 ## Stage 1: Initial Audit (already done by intake)
 
 Skip this stage — the intake skill (`/repo-health`) already ran the auditor and produced `health-audit.md`. Read it to understand the findings.
+
+## Critical Rule: No Auditor Agents During Planning or Implementation
+
+Auditor agents are **token-expensive**. They run exactly twice in the full lifecycle:
+
+1. **Once during `/repo-health` intake** — produces health-audit.md
+2. **Never again** — Stage 4 (Verification) uses the existing code reviewer to spot-check findings, NOT the auditor agent
+
+**NEVER** re-run the auditor agent at any point during the pipeline. The planner, implementer, and verification reviewer work from health-audit.md and feedback.md.
 
 ## Stage 2: Planning (Planner ↔ Plan Reviewer GAN Loop)
 
@@ -133,68 +140,74 @@ Phase N ([HYGIENIST|FORTIFIER]) approved after M iteration(s).
 Remaining phases: [list]
 ```
 
-## Stage 4: Re-Audit
+## Stage 4: Verification
 
-After all phases are implemented and approved, re-run the auditor:
+After all phases are `PHASE_APPROVED`, run a single verification agent that spot-checks the original CRITICAL and HIGH findings.
 
-### 4a: Spawn Auditor
+### 4a: Spawn Verification Agent
 
-- **Read** `health-auditor.md` for the role prompt
-- Spawn an **Agent** with:
+- **Read** `reviewer.md` for the role prompt
+- Spawn **one Agent** with:
 
 ```xml
 <role_prompt>
-[Contents of health-auditor.md]
+[Contents of reviewer.md]
 </role_prompt>
 
 <task>
 Version: $ARGUMENTS
 
-This is a RE-AUDIT after remediation. Read the previous audit at docs/plans/$ARGUMENTS/health-audit.md.
+This is a VERIFICATION pass after remediation. You are NOT doing a full audit — you are spot-checking that specific CRITICAL and HIGH findings were addressed.
 
-Re-audit the codebase. Run all automated scans again. Verify prior findings were addressed. Produce a new full audit.
+Read docs/plans/$ARGUMENTS/health-audit.md — focus on CRITICAL and HIGH items in the Tech Debt Ledger.
 
-End with: AUDIT_COMPLETE
+For each CRITICAL/HIGH finding:
+1. Read the specific file:line referenced
+2. Verify the issue was addressed (Glob/Grep/Read)
+3. Run tests if the finding was about test coverage or behavior
+
+Also run the full test suite to catch regressions.
+
+Report which findings are VERIFIED (fixed) vs UNVERIFIED (still present).
+MEDIUM/LOW findings do not need verification — they are acceptable to carry.
+
+If all CRITICAL/HIGH verified and tests pass: end with VERIFIED
+If any CRITICAL/HIGH unverified or tests fail: list the unverified items, then end with UNVERIFIED
 </task>
 ```
 
 ### 4b: Assess Results
 
-The **orchestrator** (you) must:
-1. Read the re-audit agent's output
-2. Use **Write** to append a new `## Re-Audit Cycle N` section to `docs/plans/$ARGUMENTS/health-audit.md` with the re-audit findings (preserve all previous content)
-3. Check: are all CRITICAL and HIGH findings resolved?
+- If `VERIFIED` → report success
+- If `UNVERIFIED` → report unverified items to user, let them decide
 
-### Exit Gate Rationale
+**Max verification cycles: 2.** If items remain unverified after 2 cycles, stop and surface to user.
 
-The health pipeline exits when CRITICAL and HIGH findings are resolved, NOT when all findings reach a numeric score. This is intentionally softer than repo-eval's per-pillar threshold gate because:
-- Tech debt is continuous, not binary — MEDIUM/LOW items are acceptable to carry
-- The fortifier's guardrails prevent regression on resolved items
-- Forcing zero debt would trigger unbounded remediation cycles on subjective or low-impact findings
-- The re-audit catches regressions and new CRITICAL/HIGH issues introduced during fixes
-
-MEDIUM and LOW findings are reported in the final summary as known debt.
-
-### If all CRITICAL/HIGH resolved: Report success
+### If verified
 
 ```text
 Pipeline complete for $ARGUMENTS.
 
-Final verdict: CODEBASE HEALTHY
+Final verdict: VERIFIED
 
-[Summary: findings resolved, remaining MEDIUM/LOW items, guardrails installed]
+Verification checked [N] CRITICAL/HIGH findings from health-audit.md:
+- [X] verified (fixed)
+- Remaining MEDIUM/LOW: [Y] (acceptable, not gated)
+Tests: [all passing]
 
 All remediation is committed and verified.
 ```
 
-### If CRITICAL/HIGH findings remain: Loop back to Stage 2
+### If unverified
 
-- Re-enter planning with the remaining findings
-- **Max re-audit cycles: 2.** If findings persist after 2 full cycles, stop and surface to user. (2 cycles is sufficient because health remediations are concrete — if a finding persists after 2 targeted fix cycles, it likely requires human judgment on scope or trade-offs, not another automated pass. Repo-eval uses 3 cycles because score improvements are more incremental and subjective.)
-
-Report between cycles:
 ```text
-Re-audit cycle N complete.
-Remaining critical/high findings: [count]
-Re-entering planning for remaining targets...
+Pipeline paused for $ARGUMENTS.
+
+Verification found [Y] unverified CRITICAL/HIGH items:
+- [finding — file:line — still present because...]
+
+Options:
+A) Re-enter planning for unverified items: /pipeline $ARGUMENTS
+B) Review manually and decide
+C) Accept as-is
 ```
