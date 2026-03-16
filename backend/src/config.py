@@ -17,7 +17,9 @@ def _safe_int(env_var: str, default: int) -> int:
     try:
         return int(raw)
     except (ValueError, TypeError):
-        warnings.warn(f"Invalid integer for {env_var}={raw!r}, using default {default}", stacklevel=2)
+        warnings.warn(
+            f"Invalid integer for {env_var}={raw!r}, using default {default}", stacklevel=2
+        )
         return default
 
 
@@ -36,74 +38,75 @@ def _safe_float(env_var: str, default: float) -> float:
 @dataclass(frozen=True)
 class ModelConfig:
     """Configuration for a single image generation model."""
-    name: str           # Internal name: 'flux', 'recraft', 'gemini', 'openai'
-    provider: str       # Provider identifier for handler lookup
+
+    name: str  # Internal name: 'flux', 'recraft', 'gemini', 'openai'
+    provider: str  # Provider identifier for handler lookup
     enabled: bool
     api_key: str
     model_id: str
-    display_name: str   # Human-readable name for UI
+    display_name: str  # Human-readable name for UI
 
 
 # AWS configuration from Lambda execution environment
-aws_region = os.environ.get('AWS_REGION', 'us-west-2')
+aws_region = os.environ.get("AWS_REGION", "us-west-2")
 
 # S3 and CloudFront
-s3_bucket = os.environ.get('S3_BUCKET')
-cloudfront_domain = os.environ.get('CLOUDFRONT_DOMAIN')
+s3_bucket = os.environ.get("S3_BUCKET")
+cloudfront_domain = os.environ.get("CLOUDFRONT_DOMAIN")
 if s3_bucket is None:
     warnings.warn("S3_BUCKET not set — storage operations will fail", stacklevel=1)
 if cloudfront_domain is None:
     warnings.warn("CLOUDFRONT_DOMAIN not set — CDN URLs will be malformed", stacklevel=1)
 
 # Rate limiting
-global_limit = _safe_int('GLOBAL_LIMIT', 1000)
-ip_limit = _safe_int('IP_LIMIT', 50)
-ip_include_str = os.environ.get('IP_INCLUDE', '')
-ip_include = [ip.strip() for ip in ip_include_str.split(',') if ip.strip()]
+global_limit = _safe_int("GLOBAL_LIMIT", 1000)
+ip_limit = _safe_int("IP_LIMIT", 50)
+ip_include_str = os.environ.get("IP_INCLUDE", "")
+ip_include = [ip.strip() for ip in ip_include_str.split(",") if ip.strip()]
 
 # Prompt enhancement model configuration
-prompt_model_provider = os.environ.get('PROMPT_MODEL_PROVIDER', 'openai')
-prompt_model_id = os.environ.get('PROMPT_MODEL_ID', 'gpt-4o')
-prompt_model_api_key = os.environ.get('PROMPT_MODEL_API_KEY', '')
+prompt_model_provider = os.environ.get("PROMPT_MODEL_PROVIDER", "openai")
+prompt_model_id = os.environ.get("PROMPT_MODEL_ID", "gpt-4o")
+prompt_model_api_key = os.environ.get("PROMPT_MODEL_API_KEY", "")
 
 # 4 Fixed Models Configuration
 MODELS: Dict[str, ModelConfig] = {
-    'flux': ModelConfig(
-        name='flux',
-        provider='bfl',
-        enabled=os.environ.get('FLUX_ENABLED', 'true').lower() == 'true',
-        api_key=os.environ.get('FLUX_API_KEY', ''),
-        model_id=os.environ.get('FLUX_MODEL_ID', 'flux-2-pro'),
-        display_name='Flux'
+    "flux": ModelConfig(
+        name="flux",
+        provider="bfl",
+        enabled=os.environ.get("FLUX_ENABLED", "true").lower() == "true",
+        api_key=os.environ.get("FLUX_API_KEY", ""),
+        model_id=os.environ.get("FLUX_MODEL_ID", "flux-2-pro"),
+        display_name="Flux",
     ),
-    'recraft': ModelConfig(
-        name='recraft',
-        provider='recraft',
-        enabled=os.environ.get('RECRAFT_ENABLED', 'true').lower() == 'true',
-        api_key=os.environ.get('RECRAFT_API_KEY', ''),
-        model_id=os.environ.get('RECRAFT_MODEL_ID', 'recraftv3'),
-        display_name='Recraft'
+    "recraft": ModelConfig(
+        name="recraft",
+        provider="recraft",
+        enabled=os.environ.get("RECRAFT_ENABLED", "true").lower() == "true",
+        api_key=os.environ.get("RECRAFT_API_KEY", ""),
+        model_id=os.environ.get("RECRAFT_MODEL_ID", "recraftv3"),
+        display_name="Recraft",
     ),
-    'gemini': ModelConfig(
-        name='gemini',
-        provider='google_gemini',
-        enabled=os.environ.get('GEMINI_ENABLED', 'true').lower() == 'true',
-        api_key=os.environ.get('GEMINI_API_KEY', ''),
-        model_id=os.environ.get('GEMINI_MODEL_ID', 'gemini-2.5-flash-image'),
-        display_name='Gemini'
+    "gemini": ModelConfig(
+        name="gemini",
+        provider="google_gemini",
+        enabled=os.environ.get("GEMINI_ENABLED", "true").lower() == "true",
+        api_key=os.environ.get("GEMINI_API_KEY", ""),
+        model_id=os.environ.get("GEMINI_MODEL_ID", "gemini-2.5-flash-image"),
+        display_name="Gemini",
     ),
-    'openai': ModelConfig(
-        name='openai',
-        provider='openai',
-        enabled=os.environ.get('OPENAI_ENABLED', 'true').lower() == 'true',
-        api_key=os.environ.get('OPENAI_API_KEY', ''),
-        model_id=os.environ.get('OPENAI_MODEL_ID', 'gpt-image-1'),
-        display_name='OpenAI'
+    "openai": ModelConfig(
+        name="openai",
+        provider="openai",
+        enabled=os.environ.get("OPENAI_ENABLED", "true").lower() == "true",
+        api_key=os.environ.get("OPENAI_API_KEY", ""),
+        model_id=os.environ.get("OPENAI_MODEL_ID", "gpt-image-1"),
+        display_name="OpenAI",
     ),
 }
 
 # CORS
-cors_allowed_origin = os.environ.get('CORS_ALLOWED_ORIGIN', '*')
+cors_allowed_origin = os.environ.get("CORS_ALLOWED_ORIGIN", "*")
 
 # Iteration limits
 MAX_ITERATIONS = 7
@@ -146,19 +149,18 @@ def get_model_config_dict(model: ModelConfig) -> Dict:
         Dict with 'id', 'api_key', and provider-specific fields
     """
     config = {
-        'id': model.model_id,
-        'provider': model.provider,
+        "id": model.model_id,
+        "provider": model.provider,
     }
-    if model.api_key:
-        config['api_key'] = model.api_key
+    config["api_key"] = model.api_key
     return config
 
 
 # Operational Timeouts (seconds) - configurable via environment
-api_client_timeout = _safe_float('API_CLIENT_TIMEOUT', 120.0)
-image_download_timeout = _safe_int('IMAGE_DOWNLOAD_TIMEOUT', 30)
-generate_thread_workers = _safe_int('GENERATE_THREAD_WORKERS', 4)
+api_client_timeout = _safe_float("API_CLIENT_TIMEOUT", 120.0)
+image_download_timeout = _safe_int("IMAGE_DOWNLOAD_TIMEOUT", 30)
+generate_thread_workers = _safe_int("GENERATE_THREAD_WORKERS", 4)
 
 # BFL polling configuration
-bfl_max_poll_attempts = _safe_int('BFL_MAX_POLL_ATTEMPTS', 40)
-bfl_poll_interval = _safe_int('BFL_POLL_INTERVAL', 3)
+bfl_max_poll_attempts = _safe_int("BFL_MAX_POLL_ATTEMPTS", 40)
+bfl_poll_interval = _safe_int("BFL_POLL_INTERVAL", 3)

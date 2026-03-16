@@ -759,7 +759,7 @@ def handle_gallery_detail(event: LambdaEvent, correlation_id: Optional[str] = No
         if not gallery_id:
             return response(400, {"error": "Gallery ID is required"})
 
-        if not re.match(r"^[a-zA-Z0-9\-]+$", gallery_id):
+        if not image_storage._GALLERY_FOLDER_RE.match(gallery_id):
             return response(400, {"error": "Invalid gallery ID format"})
 
         image_keys = image_storage.list_gallery_images(gallery_id)

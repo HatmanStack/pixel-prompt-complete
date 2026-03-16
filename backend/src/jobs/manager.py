@@ -17,7 +17,7 @@ from botocore.exceptions import ClientError
 from config import MAX_ITERATIONS
 
 # Maximum retries for optimistic locking conflicts
-MAX_RETRIES = 5
+MAX_RETRIES = 3
 RETRY_DELAY_MS = 50
 
 

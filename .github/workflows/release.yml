@@ -24,6 +24,7 @@ jobs:
           VERSION=$(grep -m1 '^## \[' CHANGELOG.md | sed 's/^## \[\(.*\)\].*/\1/')
           if [ -z "$VERSION" ]; then
             echo "No version found in CHANGELOG.md"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           # Check if tag already exists
