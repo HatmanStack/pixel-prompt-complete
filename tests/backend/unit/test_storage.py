@@ -20,7 +20,7 @@ class TestImageStorage:
 
         storage = ImageStorage(s3_client, bucket_name, cloudfront_domain)
 
-        key = 'group-images/test/image.png'
+        key = 'sessions/test/image.png'
         url = storage.get_cloudfront_url(key)
 
         # Implementation adds https:// prefix
@@ -33,12 +33,12 @@ class TestImageStorage:
         # Create test objects in different folders
         s3_client.put_object(
             Bucket=bucket_name,
-            Key='group-images/2025-11-16-10-00-00/image1.json',
+            Key='sessions/2025-11-16-10-00-00/image1.json',
             Body=json.dumps({'test': 'data'})
         )
         s3_client.put_object(
             Bucket=bucket_name,
-            Key='group-images/2025-11-15-14-30-00/image2.json',
+            Key='sessions/2025-11-15-14-30-00/image2.json',
             Body=json.dumps({'test': 'data'})
         )
 
@@ -57,12 +57,12 @@ class TestImageStorage:
         # Create test images
         s3_client.put_object(
             Bucket=bucket_name,
-            Key=f'group-images/{gallery_id}/image1.json',
+            Key=f'sessions/{gallery_id}/image1.json',
             Body=json.dumps({'model': 'Model 1'})
         )
         s3_client.put_object(
             Bucket=bucket_name,
-            Key=f'group-images/{gallery_id}/image2.json',
+            Key=f'sessions/{gallery_id}/image2.json',
             Body=json.dumps({'model': 'Model 2'})
         )
 
@@ -77,7 +77,7 @@ class TestImageStorage:
         """Test retrieving image metadata"""
         s3_client, bucket_name = mock_s3
 
-        key = 'group-images/test/image.json'
+        key = 'sessions/test/image.json'
         metadata = {
             'prompt': 'test',
             'model': 'Test Model',
@@ -161,7 +161,7 @@ class TestImageStorage:
             folder_name = f"2025-01-01-{i:06d}"
             s3_client.put_object(
                 Bucket=bucket_name,
-                Key=f'group-images/{folder_name}/image.json',
+                Key=f'sessions/{folder_name}/image.json',
                 Body=json.dumps({'test': 'data'})
             )
 
@@ -193,7 +193,7 @@ class TestImageStorage:
         for i in range(1050):
             s3_client.put_object(
                 Bucket=bucket_name,
-                Key=f'group-images/{gallery_id}/image-{i:06d}.json',
+                Key=f'sessions/{gallery_id}/image-{i:06d}.json',
                 Body=json.dumps({'model': f'Model {i}'})
             )
 
@@ -223,12 +223,12 @@ class TestImageStorage:
 
         s3_client.put_object(
             Bucket=bucket_name,
-            Key=f'group-images/{gallery_id}/image.json',
+            Key=f'sessions/{gallery_id}/image.json',
             Body=json.dumps({'model': 'test'})
         )
         s3_client.put_object(
             Bucket=bucket_name,
-            Key=f'group-images/{gallery_id}/image.png',
+            Key=f'sessions/{gallery_id}/image.png',
             Body=b'binary data'
         )
 

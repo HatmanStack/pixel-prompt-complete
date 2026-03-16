@@ -466,7 +466,7 @@ def iterate_gemini(model_config: ModelConfig, source_image: Union[str, bytes], p
         ]
 
         response = client.models.generate_content(
-            model=model_config.get('id', 'gemini-2.0-flash-exp'),
+            model=model_config.get('id', 'gemini-2.5-flash-image'),
             contents=content_parts,
             config=types.GenerateContentConfig(response_modalities=['Image']),
         )
@@ -646,7 +646,7 @@ def outpaint_gemini(model_config: ModelConfig, source_image: Union[str, bytes], 
         ]
 
         response = client.models.generate_content(
-            model=model_config.get('id', 'gemini-2.0-flash-exp'),
+            model=model_config.get('id', 'gemini-2.5-flash-image'),
             contents=content_parts,
             config=types.GenerateContentConfig(response_modalities=['Image']),
         )

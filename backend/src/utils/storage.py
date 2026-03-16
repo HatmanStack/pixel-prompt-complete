@@ -4,15 +4,12 @@ Image Storage utilities for Pixel Prompt Complete.
 Handles saving generated images to S3 with metadata and gallery management.
 """
 
-import base64
-import io
 import json
 import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from botocore.exceptions import ClientError
-from PIL import Image
 
 from .logger import StructuredLogger
 from .retry import retry_with_backoff
@@ -142,7 +139,7 @@ class ImageStorage:
 
     def list_galleries(self) -> List[str]:
         """
-        List all gallery folders (target timestamps).
+        List all gallery folders (target timestamps) from the sessions prefix.
 
         Returns:
             List of gallery folder names (target timestamps)
@@ -154,7 +151,7 @@ class ImageStorage:
             galleries = []
             kwargs = {
                 'Bucket': self.bucket,
-                'Prefix': 'group-images/',
+                'Prefix': 'sessions/',
                 'Delimiter': '/',
             }
 
@@ -164,7 +161,7 @@ class ImageStorage:
                 # Extract folder names from CommonPrefixes
                 if 'CommonPrefixes' in response:
                     for prefix in response['CommonPrefixes']:
-                        # e.g., "group-images/2025-11-15-14-30-45/" -> "2025-11-15-14-30-45"
+                        # e.g., "sessions/2025-11-15-14-30-45/" -> "2025-11-15-14-30-45"
                         folder = prefix['Prefix'].split('/')[-2]
                         galleries.append(folder)
 
@@ -197,7 +194,7 @@ class ImageStorage:
             ClientError: If the S3 operation fails (e.g., IAM, throttling)
         """
         try:
-            prefix = f"group-images/{gallery_folder}/"
+            prefix = f"sessions/{gallery_folder}/"
             images = []
             kwargs = {
                 'Bucket': self.bucket,
@@ -237,49 +234,6 @@ class ImageStorage:
             CloudFront URL
         """
         return f"https://{self.cloudfront_domain}/{s3_key}"
-
-    def _generate_thumbnail(self, base64_image: str, size: int = 200, quality: int = 75) -> str:
-        """
-        Generate a thumbnail from base64 image data.
-
-        Args:
-            base64_image: Base64-encoded image data
-            size: Maximum dimension for thumbnail (default 200px)
-            quality: JPEG quality for compression (default 75)
-
-        Returns:
-            Base64-encoded thumbnail image
-
-        Raises:
-            Exception: If thumbnail generation fails
-        """
-        # Decode base64 to bytes
-        image_bytes = base64.b64decode(base64_image)
-
-        # Open image with Pillow
-        img = Image.open(io.BytesIO(image_bytes))
-
-        # Convert to RGB if necessary (for PNG with transparency)
-        if img.mode in ('RGBA', 'LA', 'P'):
-            background = Image.new('RGB', img.size, (255, 255, 255))
-            if img.mode == 'P':
-                img = img.convert('RGBA')
-            background.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
-            img = background
-
-        # Calculate thumbnail size maintaining aspect ratio
-        img.thumbnail((size, size), Image.Resampling.LANCZOS)
-
-        # Save to bytes buffer as JPEG with compression
-        buffer = io.BytesIO()
-        img.save(buffer, format='JPEG', quality=quality, optimize=True)
-        buffer.seek(0)
-
-        # Encode to base64
-        thumbnail_base64 = base64.b64encode(buffer.read()).decode('utf-8')
-
-
-        return thumbnail_base64
 
     def _normalize_model_name(self, model_name: str) -> str:
         """

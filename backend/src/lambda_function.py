@@ -5,7 +5,6 @@ iteration, outpainting, and session status.
 """
 
 import json
-import random
 import re
 import time
 import traceback
@@ -637,16 +636,13 @@ def handle_gallery_list(event: LambdaEvent, correlation_id: Optional[str] = None
         gallery_folders = image_storage.list_galleries()
 
         def _build_gallery_entry(folder):
-            all_images = image_storage.list_gallery_images(folder)
-            thumbnails = [img for img in all_images if '-thumb.json' in img]
-            images = [img for img in all_images if '-thumb.json' not in img]
+            images = image_storage.list_gallery_images(folder)
 
             preview_data = None
-            if thumbnails:
-                thumbnail_key = random.choice(thumbnails)
-                thumbnail_metadata = image_storage.get_image(thumbnail_key)
-                if thumbnail_metadata and thumbnail_metadata.get('output'):
-                    preview_data = thumbnail_metadata['output']
+            if images:
+                preview_metadata = image_storage.get_image(images[0])
+                if preview_metadata and preview_metadata.get('output'):
+                    preview_data = preview_metadata['output']
 
             try:
                 timestamp_str = f"{folder[:10]}T{folder[11:13]}:{folder[14:16]}:{folder[17:19]}Z"
@@ -733,9 +729,6 @@ def handle_gallery_detail(event: LambdaEvent, correlation_id: Optional[str] = No
 
         if not re.match(r'^[a-zA-Z0-9\-]+$', gallery_id):
             return response(400, {'error': 'Invalid gallery ID format'})
-
-        if '..' in gallery_id or '/' in gallery_id or '\\' in gallery_id:
-            return response(400, {'error': 'Invalid gallery ID'})
 
         image_keys = image_storage.list_gallery_images(gallery_id)
 
