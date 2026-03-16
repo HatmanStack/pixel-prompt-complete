@@ -7,7 +7,6 @@ Handles saving generated images to S3 with metadata and gallery management.
 import base64
 import io
 import json
-import logging
 import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -15,9 +14,8 @@ from typing import Any, Dict, List, Optional
 from botocore.exceptions import ClientError
 from PIL import Image
 
+from .logger import StructuredLogger
 from .retry import retry_with_backoff
-
-logger = logging.getLogger(__name__)
 
 
 class ImageStorage:
@@ -182,7 +180,7 @@ class ImageStorage:
             return galleries
 
         except ClientError as e:
-            logger.error("Failed to list galleries from S3: %s", e)
+            StructuredLogger.error(f"Failed to list galleries from S3: {e}")
             raise
 
     def list_gallery_images(self, gallery_folder: str) -> List[str]:
@@ -225,7 +223,7 @@ class ImageStorage:
             return images
 
         except ClientError as e:
-            logger.error("Failed to list gallery images from S3: %s", e)
+            StructuredLogger.error(f"Failed to list gallery images from S3: {e}")
             raise
 
     def get_cloudfront_url(self, s3_key: str) -> str:

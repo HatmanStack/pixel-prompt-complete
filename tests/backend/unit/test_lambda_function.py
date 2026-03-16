@@ -67,6 +67,7 @@ _TARGETS = [
     f"{_MOD}.content_filter",
     f"{_MOD}.prompt_enhancer",
     f"{_MOD}._executor",
+    f"{_MOD}._gallery_executor",
     f"{_MOD}.get_enabled_models",
     f"{_MOD}.get_handler",
     f"{_MOD}.get_iterate_handler",
@@ -276,8 +277,9 @@ class TestErrorCases:
         assert "Invalid session ID" in _body(resp)["error"]
 
     def test_status_invalid_session_id_dots(self, mocks):
-        resp = lambda_handler(_make_event(method="GET", path="/status/../something"), None)
-        # Last segment is "something" which is valid, but let's test with dots in the ID
+        resp = lambda_handler(_make_event(method="GET", path="/status/a..b"), None)
+        assert resp["statusCode"] == 400
+
         resp = lambda_handler(_make_event(method="GET", path="/status/.."), None)
         assert resp["statusCode"] == 400
 

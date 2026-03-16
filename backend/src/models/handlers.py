@@ -20,6 +20,7 @@ import requests
 from google.genai import types
 
 from config import (
+    api_client_timeout,
     bfl_max_poll_attempts,
     bfl_poll_interval,
     image_download_timeout,
@@ -36,7 +37,7 @@ def _decode_source_image(source_image: Union[str, bytes]) -> bytes:
     return source_image
 
 
-def _build_context_prompt(prompt: str, context: List[Dict[str, Any]], max_history: int = 2) -> str:
+def _build_context_prompt(prompt: str, context: List[Dict[str, Any]], max_history: int = 3) -> str:
     """Build context-enriched prompt from iteration history."""
     if not context:
         return prompt
@@ -286,40 +287,15 @@ def handle_bfl(model_config: ModelConfig, prompt: str, params: GenerationParams)
         if not job_id:
             raise ValueError("No job ID returned from BFL API")
 
-
-        # Poll for result (configurable via environment or params)
-        result_url = f"https://api.bfl.ai/v1/get_result?id={job_id}"
+        # Poll for result using shared helper (configurable via environment or params)
         max_attempts = params.get('max_poll_attempts', bfl_max_poll_attempts)
         poll_interval = params.get('poll_interval_seconds', bfl_poll_interval)
-        attempt = 0
+        poll_headers = {"x-key": model_config.get('api_key') or None}
+        image_base64 = _poll_bfl_job(
+            job_id, poll_headers, max_attempts=max_attempts, interval=poll_interval,
+        )
 
-        while attempt < max_attempts:
-            time.sleep(poll_interval)
-            attempt += 1
-
-            result_response = requests.get(result_url, headers=headers, timeout=10)
-            result_response.raise_for_status()
-            result_data = result_response.json()
-
-            status = result_data.get('status')
-
-            if status == 'Ready':
-                # Download image from result URL
-                image_url = result_data['result']['sample']
-                img_response = requests.get(image_url, timeout=30)
-                img_response.raise_for_status()
-
-                # Convert to base64
-                image_base64 = base64.b64encode(img_response.content).decode('utf-8')
-
-                return _success_result(image_base64, model_config, 'bfl')
-
-            elif status == 'Error':
-                error_msg = result_data.get('error', 'Unknown error')
-                raise ValueError(f"BFL job failed: {error_msg}")
-
-        # Timeout
-        raise TimeoutError(f"BFL job timeout after {max_attempts * 3} seconds")
+        return _success_result(image_base64, model_config, 'bfl')
 
     except Exception as e:
         return _error_result(e, model_config, 'bfl')
@@ -347,7 +323,7 @@ def handle_recraft(model_config: ModelConfig, prompt: str, _params: GenerationPa
 
         # Call image generation (OpenAI-compatible)
         response = client.images.generate(
-            model="recraftv3",
+            model=model_config.get('id', 'recraftv3'),
             prompt=prompt,
             size="1024x1024",
             n=1
@@ -454,7 +430,7 @@ def iterate_recraft(model_config: ModelConfig, source_image: Union[str, bytes], 
         context_prompt = _build_context_prompt(prompt, context)
 
         files = {'image': ('image.png', image_bytes, 'image/png')}
-        data = {'prompt': context_prompt, 'model': 'recraftv3', 'response_format': 'url'}
+        data = {'prompt': context_prompt, 'model': model_config.get('id', 'recraftv3'), 'response_format': 'url'}
 
         response = requests.post(url, headers=headers, files=files, data=data, timeout=60)
         response.raise_for_status()
@@ -501,7 +477,7 @@ def iterate_gemini(model_config: ModelConfig, source_image: Union[str, bytes], p
 def iterate_openai(model_config: ModelConfig, source_image: Union[str, bytes], prompt: str, context: List[Dict[str, Any]]) -> HandlerResult:
     """Iterate on an image using OpenAI images.edit endpoint."""
     try:
-        client = _get_openai_client(model_config.get('api_key', ''), timeout=120.0)
+        client = _get_openai_client(model_config.get('api_key', ''), timeout=api_client_timeout)
         image_bytes = _decode_source_image(source_image)
         context_prompt = _build_context_prompt(prompt, context)
 
@@ -624,7 +600,7 @@ def outpaint_recraft(model_config: ModelConfig, source_image: Union[str, bytes],
         files = {'image': ('image.png', image_bytes, 'image/png')}
         data = {
             'prompt': prompt,
-            'model': 'recraftv3',
+            'model': model_config.get('id', 'recraftv3'),
             'left': expansion['left'],
             'right': expansion['right'],
             'top': expansion['top'],
@@ -693,7 +669,7 @@ def outpaint_openai(model_config: ModelConfig, source_image: Union[str, bytes], 
         expansion = calculate_expansion(width, height, preset)
         padded_image = pad_image_with_transparency(image_bytes, expansion)
 
-        client = _get_openai_client(model_config.get('api_key', ''), timeout=120.0)
+        client = _get_openai_client(model_config.get('api_key', ''), timeout=api_client_timeout)
         target_size = get_openai_compatible_size(expansion['new_width'], expansion['new_height'])
 
         response = client.images.edit(

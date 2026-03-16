@@ -110,7 +110,7 @@ class TestModelConfig:
 
             # Default model IDs
             flux = config.MODELS['flux']
-            assert flux.model_id == 'flux-pro-1.1'
+            assert flux.model_id == 'flux-2-pro'
 
     def test_iteration_limits_defined(self):
         """MAX_ITERATIONS and ITERATION_WARNING_THRESHOLD should be defined."""

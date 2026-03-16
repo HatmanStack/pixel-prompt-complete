@@ -83,8 +83,10 @@ content_filter = ContentFilter()
 # Prompt enhancer
 prompt_enhancer = PromptEnhancer()
 
-# Module-level thread pool for Lambda container reuse
+# Module-level thread pools for Lambda container reuse.
+# Separate pools prevent gallery metadata fetches from starving generation threads.
 _executor = ThreadPoolExecutor(max_workers=generate_thread_workers)
+_gallery_executor = ThreadPoolExecutor(max_workers=4)
 
 
 @dataclass
@@ -391,11 +393,12 @@ def _validate_refinement_request(
 
 def _load_source_image(
     session_id: str, model_name: str,
-) -> tuple[str | None, ApiResponse | None]:
+) -> tuple[tuple[str, int] | None, ApiResponse | None]:
     """Check iteration limit, load source image from latest iteration.
 
     Returns:
-        (source_image_base64, None) on success, or (None, error_response) on failure.
+        ((source_image_base64, iteration_count), None) on success,
+        or (None, error_response) on failure.
     """
     iteration_count = session_manager.get_iteration_count(session_id, model_name)
     if iteration_count >= MAX_ITERATIONS:
@@ -411,7 +414,7 @@ def _load_source_image(
     if not source_data or not source_data.get('output'):
         return None, response(500, {'error': 'Failed to load source image'})
 
-    return source_data['output'], None
+    return (source_data['output'], iteration_count), None
 
 
 def _handle_refinement(
@@ -445,12 +448,12 @@ def _handle_refinement(
             return err
         session_id, model_name, model_config = refs
 
-        source_image, err = _load_source_image(session_id, model_name)
+        loaded, err = _load_source_image(session_id, model_name)
         if err:
             return err
+        source_image, iteration_count = loaded
 
         # Iteration warning at threshold
-        iteration_count = session_manager.get_iteration_count(session_id, model_name)
         warning = None
         if iteration_count >= ITERATION_WARNING_THRESHOLD:
             remaining = MAX_ITERATIONS - iteration_count
@@ -654,9 +657,9 @@ def handle_gallery_list(event: LambdaEvent, correlation_id: Optional[str] = None
                 'imageCount': len(images),
             }
 
-        # Fetch gallery entries in parallel
+        # Fetch gallery entries in parallel (using dedicated gallery executor)
         galleries = []
-        futures = {_executor.submit(_build_gallery_entry, f): f for f in gallery_folders}
+        futures = {_gallery_executor.submit(_build_gallery_entry, f): f for f in gallery_folders}
         for future in as_completed(futures):
             try:
                 galleries.append(future.result())
@@ -746,9 +749,9 @@ def handle_gallery_detail(event: LambdaEvent, correlation_id: Optional[str] = No
                 }
             return None
 
-        # Fetch image metadata in parallel
+        # Fetch image metadata in parallel (using dedicated gallery executor)
         images = []
-        futures = {_executor.submit(_load_image, key): key for key in image_keys}
+        futures = {_gallery_executor.submit(_load_image, key): key for key in image_keys}
         for future in as_completed(futures):
             try:
                 result = future.result()
