@@ -48,7 +48,8 @@ jobs:
         if: steps.version.outputs.skip != 'true' && steps.version.outputs.version != ''
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          NOTES=$(sed -n "/^## \[${VERSION}\]/,/^## \[/p" CHANGELOG.md | head -n -1)
+          ESCAPED_VERSION=$(echo "$VERSION" | sed 's/\./\\./g')
+          NOTES=$(sed -n "/^## \[${ESCAPED_VERSION}\]/,/^## \[/p" CHANGELOG.md | head -n -1)
           if [ -z "$NOTES" ]; then
             NOTES="Release v${VERSION}"
           fi

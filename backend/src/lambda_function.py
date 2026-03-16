@@ -57,12 +57,17 @@ MAX_BODY_SIZE = 1_048_576  # 1 MB for generation endpoints
 MAX_LOG_BODY_SIZE = 10_240  # 10 KB for log endpoint
 
 # Reserved metadata keys that must not be overwritten by client log payloads
-_RESERVED_LOG_METADATA_KEYS = frozenset({
-    'timestamp', 'level', 'correlation_id', 'message',
-})
+_RESERVED_LOG_METADATA_KEYS = frozenset(
+    {
+        "timestamp",
+        "level",
+        "correlation_id",
+        "message",
+    }
+)
 
 # Initialize components at module level (Lambda container reuse)
-s3_client = boto3.client('s3')
+s3_client = boto3.client("s3")
 
 # Session manager (replaces job manager)
 session_manager = SessionManager(s3_client, s3_bucket)
@@ -91,6 +96,7 @@ _gallery_executor = ThreadPoolExecutor(max_workers=4)
 @dataclass
 class ValidatedRequest:
     """Result of successful request validation."""
+
     body: dict[str, Any]
     ip: str
     prompt: str
@@ -99,7 +105,7 @@ class ValidatedRequest:
 def _parse_and_validate_request(
     event: LambdaEvent,
     require_prompt: bool = True,
-    default_prompt: str = '',
+    default_prompt: str = "",
     max_body_size: int = MAX_BODY_SIZE,
     max_prompt_length: int = 1000,
 ) -> tuple[ValidatedRequest | None, ApiResponse | None]:
@@ -111,19 +117,18 @@ def _parse_and_validate_request(
     Returns:
         (ValidatedRequest, None) on success, or (None, error_response) on failure.
     """
-    raw_body = event.get('body', '')
+    raw_body = event.get("body", "")
     if len(raw_body) > max_body_size:
-        return None, response(413, {'error': 'Request body too large'})
+        return None, response(413, {"error": "Request body too large"})
 
     try:
-        body = json.loads(raw_body or '{}')
+        body = json.loads(raw_body or "{}")
     except json.JSONDecodeError:
         return None, response(400, error_responses.invalid_json())
 
     # Prefer real client IP from API Gateway, fall back to body.ip for local dev
-    ip = (
-        event.get('requestContext', {}).get('http', {}).get('sourceIp')
-        or body.get('ip', 'unknown')
+    ip = event.get("requestContext", {}).get("http", {}).get("sourceIp") or body.get(
+        "ip", "unknown"
     )
 
     # Rate limit
@@ -131,13 +136,15 @@ def _parse_and_validate_request(
         return None, response(429, error_responses.rate_limit_exceeded(retry_after=3600))
 
     # Extract prompt
-    prompt = body.get('prompt', default_prompt)
+    prompt = body.get("prompt", default_prompt)
 
     if require_prompt:
         if not prompt:
             return None, response(400, error_responses.prompt_required())
         if len(prompt) > max_prompt_length:
-            return None, response(400, error_responses.prompt_too_long(max_length=max_prompt_length))
+            return None, response(
+                400, error_responses.prompt_too_long(max_length=max_prompt_length)
+            )
 
     # Content filter
     if prompt and content_filter.check_prompt(prompt):
@@ -165,7 +172,7 @@ def _handle_successful_result(
         Dict with image_key and image_url.
     """
     image_key = image_storage.upload_image(
-        result['image'],
+        result["image"],
         target,
         model_name,
         prompt,
@@ -173,15 +180,19 @@ def _handle_successful_result(
     )
 
     session_manager.complete_iteration(
-        session_id, model_name, iteration_index, image_key, duration,
+        session_id,
+        model_name,
+        iteration_index,
+        image_key,
+        duration,
     )
 
     entry = create_context_entry(iteration_index, context_prompt or prompt, image_key)
     context_manager.add_entry(session_id, model_name, entry)
 
     return {
-        'image_key': image_key,
-        'image_url': image_storage.get_cloudfront_url(image_key),
+        "image_key": image_key,
+        "image_url": image_storage.get_cloudfront_url(image_key),
     }
 
 
@@ -197,8 +208,8 @@ def _handle_failed_result(
 
 def extract_correlation_id(event: LambdaEvent) -> str:
     """Extract correlation ID from event headers or generate new one."""
-    headers = event.get('headers', {}) or {}
-    correlation_id = headers.get('x-correlation-id') or headers.get('X-Correlation-ID')
+    headers = event.get("headers", {}) or {}
+    correlation_id = headers.get("x-correlation-id") or headers.get("X-Correlation-ID")
     return correlation_id or str(uuid4())
 
 
@@ -206,44 +217,45 @@ def lambda_handler(event: LambdaEvent, context: LambdaContext) -> ApiResponse:
     """Main Lambda handler function."""
     correlation_id = extract_correlation_id(event)
 
-    path = event.get('rawPath', event.get('path', ''))
+    path = event.get("rawPath", event.get("path", ""))
     # Remove known stage prefixes (e.g. /Prod/generate -> /generate)
-    for stage_prefix in ('/Prod/', '/Staging/', '/Dev/'):
+    for stage_prefix in ("/Prod/", "/Staging/", "/Dev/"):
         if path.startswith(stage_prefix):
-            path = path[len(stage_prefix):]
+            path = path[len(stage_prefix) :]
             break
     # Ensure path starts with /
-    if path and not path.startswith('/'):
-        path = '/' + path
+    if path and not path.startswith("/"):
+        path = "/" + path
 
-    method = event.get('requestContext', {}).get('http', {}).get('method',
-             event.get('httpMethod', ''))
+    method = (
+        event.get("requestContext", {}).get("http", {}).get("method", event.get("httpMethod", ""))
+    )
 
     StructuredLogger.info(f"Request: {method} {path}", correlation_id=correlation_id)
 
-    if method == 'OPTIONS':
-        return response(200, {'message': 'CORS preflight'})
+    if method == "OPTIONS":
+        return response(200, {"message": "CORS preflight"})
 
     try:
         # Route based on path and method
-        if path == '/generate' and method == 'POST':
+        if path == "/generate" and method == "POST":
             return handle_generate(event, correlation_id)
-        elif path == '/iterate' and method == 'POST':
+        elif path == "/iterate" and method == "POST":
             return handle_iterate(event, correlation_id)
-        elif path == '/outpaint' and method == 'POST':
+        elif path == "/outpaint" and method == "POST":
             return handle_outpaint(event, correlation_id)
-        elif path.startswith('/status/') and method == 'GET':
+        elif path.startswith("/status/") and method == "GET":
             return handle_status(event, correlation_id)
-        elif path == '/enhance' and method == 'POST':
+        elif path == "/enhance" and method == "POST":
             return handle_enhance(event, correlation_id)
-        elif path == '/log' and method == 'POST':
+        elif path == "/log" and method == "POST":
             return handle_log_endpoint(event)
-        elif path == '/gallery/list' and method == 'GET':
+        elif path == "/gallery/list" and method == "GET":
             return handle_gallery_list(event, correlation_id)
-        elif path.startswith('/gallery/') and method == 'GET':
+        elif path.startswith("/gallery/") and method == "GET":
             return handle_gallery_detail(event, correlation_id)
         else:
-            return response(404, {'error': 'Not found', 'path': path, 'method': method})
+            return response(404, {"error": "Not found", "path": path, "method": method})
 
     except Exception as e:
         StructuredLogger.error(
@@ -251,7 +263,7 @@ def lambda_handler(event: LambdaEvent, context: LambdaContext) -> ApiResponse:
             correlation_id=correlation_id,
             traceback=traceback.format_exc(),
         )
-        return response(500, {'error': 'Internal server error'})
+        return response(500, {"error": "Internal server error"})
 
 
 def handle_generate(event: LambdaEvent, correlation_id: Optional[str] = None) -> ApiResponse:
@@ -274,7 +286,7 @@ def handle_generate(event: LambdaEvent, correlation_id: Optional[str] = None) ->
         # Get enabled models
         enabled_models = get_enabled_models()
         if not enabled_models:
-            return response(500, {'error': 'No models enabled'})
+            return response(500, {"error": "No models enabled"})
 
         enabled_model_names = [m.name for m in enabled_models]
 
@@ -285,11 +297,11 @@ def handle_generate(event: LambdaEvent, correlation_id: Optional[str] = None) ->
             f"Session {session_id} created",
             correlation_id=correlation_id,
             sessionId=session_id,
-            models=enabled_model_names
+            models=enabled_model_names,
         )
 
         results = {}
-        target = datetime.now(timezone.utc).strftime('%Y-%m-%d-%H-%M-%S')
+        target = datetime.now(timezone.utc).strftime("%Y-%m-%d-%H-%M-%S")
 
         def generate_for_model(model_config):
             model_name = model_config.name
@@ -297,9 +309,7 @@ def handle_generate(event: LambdaEvent, correlation_id: Optional[str] = None) ->
             iteration_index = None
 
             try:
-                iteration_index = session_manager.add_iteration(
-                    session_id, model_name, prompt
-                )
+                iteration_index = session_manager.add_iteration(session_id, model_name, prompt)
 
                 handler = get_handler(model_config.provider)
                 config_dict = get_model_config_dict(model_config)
@@ -307,52 +317,48 @@ def handle_generate(event: LambdaEvent, correlation_id: Optional[str] = None) ->
 
                 duration = time.time() - start_time
 
-                if result['status'] == 'success':
+                if result["status"] == "success":
                     info = _handle_successful_result(
-                        session_id, model_name, prompt, result,
-                        iteration_index, target, duration,
+                        session_id,
+                        model_name,
+                        prompt,
+                        result,
+                        iteration_index,
+                        target,
+                        duration,
                     )
                     return model_name, {
-                        'status': 'completed',
-                        'imageKey': info['image_key'],
-                        'imageUrl': info['image_url'],
-                        'iteration': iteration_index,
-                        'duration': duration,
+                        "status": "completed",
+                        "imageKey": info["image_key"],
+                        "imageUrl": info["image_url"],
+                        "iteration": iteration_index,
+                        "duration": duration,
                     }
                 else:
-                    error_msg = result.get('error', 'Unknown error')
+                    error_msg = result.get("error", "Unknown error")
                     _handle_failed_result(session_id, model_name, iteration_index, error_msg)
                     return model_name, {
-                        'status': 'error',
-                        'error': error_msg,
-                        'iteration': iteration_index,
+                        "status": "error",
+                        "error": error_msg,
+                        "iteration": iteration_index,
                     }
 
             except Exception as e:
                 sanitized = sanitize_error_message(e)
                 if iteration_index is not None:
                     try:
-                        _handle_failed_result(
-                            session_id, model_name, iteration_index, sanitized
-                        )
+                        _handle_failed_result(session_id, model_name, iteration_index, sanitized)
                     except Exception:
                         pass  # Best-effort; don't mask the original error
-                return model_name, {'status': 'error', 'error': sanitized}
+                return model_name, {"status": "error", "error": sanitized}
 
         # Execute in parallel using module-level executor
-        futures = {
-            _executor.submit(generate_for_model, model): model
-            for model in enabled_models
-        }
+        futures = {_executor.submit(generate_for_model, model): model for model in enabled_models}
         for future in as_completed(futures):
             model_name, result = future.result()
             results[model_name] = result
 
-        return response(200, {
-            'sessionId': session_id,
-            'prompt': prompt,
-            'models': results
-        })
+        return response(200, {"sessionId": session_id, "prompt": prompt, "models": results})
 
     except Exception as e:
         StructuredLogger.error(
@@ -373,26 +379,27 @@ def _validate_refinement_request(
         or (None, error_response) on failure.
     """
     body = validated.body
-    session_id = body.get('sessionId')
-    model_name = body.get('model')
+    session_id = body.get("sessionId")
+    model_name = body.get("model")
 
     if not session_id:
-        return None, response(400, {'error': 'sessionId is required'})
+        return None, response(400, {"error": "sessionId is required"})
     if not model_name:
-        return None, response(400, {'error': 'model is required'})
+        return None, response(400, {"error": "model is required"})
     if model_name not in MODELS:
-        return None, response(400, {'error': f'Invalid model: {model_name}'})
+        return None, response(400, {"error": f"Invalid model: {model_name}"})
 
     try:
         model_config = get_model(model_name)
     except ValueError as e:
-        return None, response(400, {'error': str(e)})
+        return None, response(400, {"error": str(e)})
 
     return (session_id, model_name, model_config), None
 
 
 def _load_source_image(
-    session_id: str, model_name: str,
+    session_id: str,
+    model_name: str,
 ) -> tuple[tuple[str, int] | None, ApiResponse | None]:
     """Check iteration limit, load source image from latest iteration.
 
@@ -402,19 +409,22 @@ def _load_source_image(
     """
     iteration_count = session_manager.get_iteration_count(session_id, model_name)
     if iteration_count >= MAX_ITERATIONS:
-        return None, response(400, {
-            'error': f'Iteration limit ({MAX_ITERATIONS}) reached for {model_name}',
-        })
+        return None, response(
+            400,
+            {
+                "error": f"Iteration limit ({MAX_ITERATIONS}) reached for {model_name}",
+            },
+        )
 
     source_image_key = session_manager.get_latest_image_key(session_id, model_name)
     if not source_image_key:
-        return None, response(400, {'error': f'No source image for {model_name}'})
+        return None, response(400, {"error": f"No source image for {model_name}"})
 
     source_data = image_storage.get_image(source_image_key)
-    if not source_data or not source_data.get('output'):
-        return None, response(500, {'error': 'Failed to load source image'})
+    if not source_data or not source_data.get("output"):
+        return None, response(500, {"error": "Failed to load source image"})
 
-    return (source_data['output'], iteration_count), None
+    return (source_data["output"], iteration_count), None
 
 
 def _handle_refinement(
@@ -459,53 +469,70 @@ def _handle_refinement(
         warning = None
         if iteration_count >= ITERATION_WARNING_THRESHOLD:
             remaining = MAX_ITERATIONS - iteration_count
-            warning = f'Only {remaining} iterations remaining for {model_name}'
+            warning = f"Only {remaining} iterations remaining for {model_name}"
 
         prompt = validated.prompt
         start_time = time.time()
 
         iter_kwargs = add_iteration_kwargs or {}
         iteration_index = session_manager.add_iteration(
-            session_id, model_name, prompt, **iter_kwargs,
+            session_id,
+            model_name,
+            prompt,
+            **iter_kwargs,
         )
 
         config_dict = get_model_config_dict(model_config)
         handler = get_handler_fn(model_config.provider)
         handler_args = build_handler_args_fn(
-            config_dict, source_image, prompt, session_id, model_name,
+            config_dict,
+            source_image,
+            prompt,
+            session_id,
+            model_name,
         )
         result = handler(*handler_args)
 
         duration = time.time() - start_time
-        target = datetime.now(timezone.utc).strftime('%Y-%m-%d-%H-%M-%S')
+        target = datetime.now(timezone.utc).strftime("%Y-%m-%d-%H-%M-%S")
 
-        if result['status'] == 'success':
+        if result["status"] == "success":
             store_prompt = result_prompt_fn(prompt) if result_prompt_fn else prompt
             ctx_prompt = context_prompt_fn(prompt) if context_prompt_fn else None
             info = _handle_successful_result(
-                session_id, model_name, store_prompt, result,
-                iteration_index, target, duration,
+                session_id,
+                model_name,
+                store_prompt,
+                result,
+                iteration_index,
+                target,
+                duration,
                 context_prompt=ctx_prompt,
             )
             resp = {
-                'status': 'completed',
-                'imageKey': info['image_key'],
-                'imageUrl': info['image_url'],
-                'iteration': iteration_index,
-                'iterationCount': iteration_index + 1,
-                'duration': duration,
+                "status": "completed",
+                "imageKey": info["image_key"],
+                "imageUrl": info["image_url"],
+                "iteration": iteration_index,
+                "iterationCount": iteration_index + 1,
+                "duration": duration,
             }
             if warning:
-                resp['warning'] = warning
+                resp["warning"] = warning
             if extra_response_fields:
                 resp.update(extra_response_fields)
             return response(200, resp)
         else:
-            error_msg = result.get('error', 'Unknown error')
+            error_msg = result.get("error", "Unknown error")
             _handle_failed_result(session_id, model_name, iteration_index, error_msg)
-            return response(500, {
-                'status': 'error', 'error': error_msg, 'iteration': iteration_index,
-            })
+            return response(
+                500,
+                {
+                    "status": "error",
+                    "error": error_msg,
+                    "iteration": iteration_index,
+                },
+            )
 
     except Exception as e:
         if iteration_index is not None:
@@ -534,7 +561,9 @@ def handle_iterate(event: LambdaEvent, correlation_id: Optional[str] = None) -> 
         return (config_dict, source_image, prompt, context)
 
     return _handle_refinement(
-        validated, correlation_id, 'handle_iterate',
+        validated,
+        correlation_id,
+        "handle_iterate",
         get_handler_fn=get_iterate_handler,
         build_handler_args_fn=_build_args,
     )
@@ -543,29 +572,33 @@ def handle_iterate(event: LambdaEvent, correlation_id: Optional[str] = None) -> 
 def handle_outpaint(event: LambdaEvent, correlation_id: Optional[str] = None) -> ApiResponse:
     """POST /outpaint - Expand image to new aspect ratio."""
     validated, err = _parse_and_validate_request(
-        event, require_prompt=False, default_prompt='continue the scene naturally',
+        event,
+        require_prompt=False,
+        default_prompt="continue the scene naturally",
     )
     if err:
         return err
 
-    preset = validated.body.get('preset')
+    preset = validated.body.get("preset")
     if not preset:
-        return response(400, {'error': 'preset is required'})
-    valid_presets = ['16:9', '9:16', '1:1', '4:3', 'expand_all']
+        return response(400, {"error": "preset is required"})
+    valid_presets = ["16:9", "9:16", "1:1", "4:3", "expand_all"]
     if preset not in valid_presets:
-        return response(400, {'error': f'Invalid preset. Valid: {valid_presets}'})
+        return response(400, {"error": f"Invalid preset. Valid: {valid_presets}"})
 
     def _build_args(config_dict, source_image, prompt, session_id, model_name):
         return (config_dict, source_image, preset, prompt)
 
     return _handle_refinement(
-        validated, correlation_id, 'handle_outpaint',
+        validated,
+        correlation_id,
+        "handle_outpaint",
         get_handler_fn=get_outpaint_handler,
         build_handler_args_fn=_build_args,
-        add_iteration_kwargs={'is_outpaint': True, 'outpaint_preset': preset},
+        add_iteration_kwargs={"is_outpaint": True, "outpaint_preset": preset},
         result_prompt_fn=lambda p: f"outpaint:{preset} - {p}",
         context_prompt_fn=lambda p: f"outpaint:{preset}",
-        extra_response_fields={'preset': preset},
+        extra_response_fields={"preset": preset},
     )
 
 
@@ -576,22 +609,22 @@ def handle_status(event: LambdaEvent, correlation_id: Optional[str] = None) -> A
     Returns session status with all model states and iterations.
     """
     try:
-        path = event.get('rawPath', event.get('path', ''))
-        session_id = path.split('/')[-1]
+        path = event.get("rawPath", event.get("path", ""))
+        session_id = path.split("/")[-1]
 
         # Validate session_id format (alphanumeric + hyphens, max 64 chars)
-        if not session_id or not re.match(r'^[a-zA-Z0-9\-]{1,64}$', session_id):
-            return response(400, {'error': 'Invalid session ID format'})
+        if not session_id or not re.match(r"^[a-zA-Z0-9\-]{1,64}$", session_id):
+            return response(400, {"error": "Invalid session ID format"})
 
         session = session_manager.get_session(session_id)
         if not session:
-            return response(404, {'error': f'Session {session_id} not found'})
+            return response(404, {"error": f"Session {session_id} not found"})
 
         # Add CloudFront URLs to all completed iterations
-        for model_name, model_data in session.get('models', {}).items():
-            for iteration in model_data.get('iterations', []):
-                if iteration.get('status') == 'completed' and iteration.get('imageKey'):
-                    iteration['imageUrl'] = image_storage.get_cloudfront_url(iteration['imageKey'])
+        for model_name, model_data in session.get("models", {}).items():
+            for iteration in model_data.get("iterations", []):
+                if iteration.get("status") == "completed" and iteration.get("imageKey"):
+                    iteration["imageUrl"] = image_storage.get_cloudfront_url(iteration["imageKey"])
 
         return response(200, session)
 
@@ -607,7 +640,9 @@ def handle_status(event: LambdaEvent, correlation_id: Optional[str] = None) -> A
 def handle_enhance(event: LambdaEvent, correlation_id: Optional[str] = None) -> ApiResponse:
     """POST /enhance - Enhance prompt using configured LLM."""
     validated, err = _parse_and_validate_request(
-        event, require_prompt=True, max_prompt_length=500,
+        event,
+        require_prompt=True,
+        max_prompt_length=500,
     )
     if err:
         return err
@@ -615,11 +650,9 @@ def handle_enhance(event: LambdaEvent, correlation_id: Optional[str] = None) -> 
     try:
         enhanced = prompt_enhancer.enhance_safe(validated.prompt)
 
-        return response(200, {
-            'original': validated.prompt,
-            'short_prompt': enhanced,
-            'long_prompt': enhanced
-        })
+        return response(
+            200, {"original": validated.prompt, "short_prompt": enhanced, "long_prompt": enhanced}
+        )
 
     except Exception as e:
         StructuredLogger.error(
@@ -641,8 +674,8 @@ def handle_gallery_list(event: LambdaEvent, correlation_id: Optional[str] = None
             preview_data = None
             if images:
                 preview_metadata = image_storage.get_image(images[0])
-                if preview_metadata and preview_metadata.get('output'):
-                    preview_data = preview_metadata['output']
+                if preview_metadata and preview_metadata.get("output"):
+                    preview_data = preview_metadata["output"]
 
             try:
                 timestamp_str = f"{folder[:10]}T{folder[11:13]}:{folder[14:16]}:{folder[17:19]}Z"
@@ -650,10 +683,10 @@ def handle_gallery_list(event: LambdaEvent, correlation_id: Optional[str] = None
                 timestamp_str = folder
 
             return {
-                'id': folder,
-                'timestamp': timestamp_str,
-                'previewData': preview_data,
-                'imageCount': len(images),
+                "id": folder,
+                "timestamp": timestamp_str,
+                "previewData": preview_data,
+                "imageCount": len(images),
             }
 
         # Fetch gallery entries in parallel (using dedicated gallery executor)
@@ -669,9 +702,9 @@ def handle_gallery_list(event: LambdaEvent, correlation_id: Optional[str] = None
                 )
 
         # Sort by ID (timestamp) descending
-        galleries.sort(key=lambda g: g['id'], reverse=True)
+        galleries.sort(key=lambda g: g["id"], reverse=True)
 
-        return response(200, {'galleries': galleries, 'total': len(galleries)})
+        return response(200, {"galleries": galleries, "total": len(galleries)})
 
     except Exception as e:
         StructuredLogger.error(
@@ -679,56 +712,55 @@ def handle_gallery_list(event: LambdaEvent, correlation_id: Optional[str] = None
             correlation_id=correlation_id,
             traceback=traceback.format_exc(),
         )
-        return response(500, {'error': 'Internal server error'})
+        return response(500, {"error": "Internal server error"})
 
 
 def handle_log_endpoint(event: LambdaEvent) -> ApiResponse:
     """POST /log - Accept frontend error logs."""
-    raw_body = event.get('body', '')
+    raw_body = event.get("body", "")
     if len(raw_body) > MAX_LOG_BODY_SIZE:
-        return response(413, {'error': 'Request body too large'})
+        return response(413, {"error": "Request body too large"})
 
     try:
-        body = json.loads(raw_body or '{}')
-        ip = event.get('requestContext', {}).get('http', {}).get('sourceIp', 'unknown')
+        body = json.loads(raw_body or "{}")
+        ip = event.get("requestContext", {}).get("http", {}).get("sourceIp", "unknown")
 
         if rate_limiter.check_rate_limit(ip):
-            return response(429, {'error': 'Rate limit exceeded'})
+            return response(429, {"error": "Rate limit exceeded"})
 
         # Sanitize metadata: remove reserved keys that could overwrite structured log fields
-        if 'metadata' in body and isinstance(body['metadata'], dict):
-            body['metadata'] = {
-                k: v for k, v in body['metadata'].items()
-                if k not in _RESERVED_LOG_METADATA_KEYS
+        if "metadata" in body and isinstance(body["metadata"], dict):
+            body["metadata"] = {
+                k: v for k, v in body["metadata"].items() if k not in _RESERVED_LOG_METADATA_KEYS
             }
 
-        headers = event.get('headers', {})
-        correlation_id = headers.get('x-correlation-id') or headers.get('X-Correlation-ID')
+        headers = event.get("headers", {})
+        correlation_id = headers.get("x-correlation-id") or headers.get("X-Correlation-ID")
 
         result = handle_log(body, correlation_id, ip)
         return response(200, result)
 
     except json.JSONDecodeError:
-        return response(400, {'error': 'Invalid JSON in request body'})
+        return response(400, {"error": "Invalid JSON in request body"})
     except Exception as e:
         StructuredLogger.error(
             f"Error in handle_log_endpoint: {e}",
             traceback=traceback.format_exc(),
         )
-        return response(500, {'error': 'Internal server error'})
+        return response(500, {"error": "Internal server error"})
 
 
 def handle_gallery_detail(event: LambdaEvent, correlation_id: Optional[str] = None) -> ApiResponse:
     """GET /gallery/{galleryId} - Get all images from a specific gallery."""
     try:
-        path = event.get('rawPath', event.get('path', ''))
-        gallery_id = path.split('/')[-1]
+        path = event.get("rawPath", event.get("path", ""))
+        gallery_id = path.split("/")[-1]
 
-        if not gallery_id or gallery_id == 'list':
-            return response(400, {'error': 'Gallery ID is required'})
+        if not gallery_id:
+            return response(400, {"error": "Gallery ID is required"})
 
-        if not re.match(r'^[a-zA-Z0-9\-]+$', gallery_id):
-            return response(400, {'error': 'Invalid gallery ID format'})
+        if not re.match(r"^[a-zA-Z0-9\-]+$", gallery_id):
+            return response(400, {"error": "Invalid gallery ID format"})
 
         image_keys = image_storage.list_gallery_images(gallery_id)
 
@@ -736,12 +768,12 @@ def handle_gallery_detail(event: LambdaEvent, correlation_id: Optional[str] = No
             metadata = image_storage.get_image(key)
             if metadata:
                 return {
-                    'key': key,
-                    'url': image_storage.get_cloudfront_url(key),
-                    'model': metadata.get('model', 'Unknown'),
-                    'prompt': metadata.get('prompt', ''),
-                    'timestamp': metadata.get('timestamp'),
-                    'output': metadata.get('output'),
+                    "key": key,
+                    "url": image_storage.get_cloudfront_url(key),
+                    "model": metadata.get("model", "Unknown"),
+                    "prompt": metadata.get("prompt", ""),
+                    "timestamp": metadata.get("timestamp"),
+                    "output": metadata.get("output"),
                 }
             return None
 
@@ -759,11 +791,14 @@ def handle_gallery_detail(event: LambdaEvent, correlation_id: Optional[str] = No
                     correlation_id=correlation_id,
                 )
 
-        return response(200, {
-            'galleryId': gallery_id,
-            'images': images,
-            'total': len(images),
-        })
+        return response(
+            200,
+            {
+                "galleryId": gallery_id,
+                "images": images,
+                "total": len(images),
+            },
+        )
 
     except Exception as e:
         StructuredLogger.error(
@@ -771,18 +806,18 @@ def handle_gallery_detail(event: LambdaEvent, correlation_id: Optional[str] = No
             correlation_id=correlation_id,
             traceback=traceback.format_exc(),
         )
-        return response(500, {'error': 'Internal server error'})
+        return response(500, {"error": "Internal server error"})
 
 
 def response(status_code: int, body: Dict[str, Any]) -> ApiResponse:
     """Helper function to create API Gateway response."""
     return {
-        'statusCode': status_code,
-        'headers': {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': cors_allowed_origin,
-            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With, X-Correlation-ID'
+        "statusCode": status_code,
+        "headers": {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": cors_allowed_origin,
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, X-Correlation-ID",
         },
-        'body': json.dumps(body)
+        "body": json.dumps(body),
     }
