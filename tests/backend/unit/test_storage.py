@@ -46,8 +46,7 @@ class TestImageStorage:
 
         galleries = storage.list_galleries()
 
-        assert len(galleries) >= 0  # Moto may not perfectly simulate prefix listing
-        # Test passes if no exception is raised
+        assert len(galleries) == 2
 
     def test_list_gallery_images(self, mock_s3):
         """Test listing images from a specific gallery"""

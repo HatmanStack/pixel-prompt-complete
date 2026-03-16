@@ -243,7 +243,10 @@ class TestErrorCases:
     def test_rate_limit_outpaint(self, mocks):
         mocks["rate_limiter"].check_rate_limit.return_value = True
         resp = lambda_handler(
-            _make_event(path="/outpaint", body={"sessionId": "s", "model": "flux", "preset": "16:9"}),
+            _make_event(path="/outpaint", body={
+                "sessionId": "s", "model": "flux", "preset": "16:9",
+                "prompt": "expand the scene",
+            }),
             None,
         )
         assert resp["statusCode"] == 429

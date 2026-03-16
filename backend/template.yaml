@@ -182,16 +182,6 @@ Parameters:
     Default: "*"
     Description: Allowed CORS origin (set to your frontend domain in production)
 
-  # AWS Bedrock Configuration
-  BedrockNovaRegion:
-    Type: String
-    Default: "us-east-1"
-    Description: AWS region for Bedrock Nova Canvas (requires us-east-1)
-
-  BedrockSdRegion:
-    Type: String
-    Default: "us-west-2"
-    Description: AWS region for Bedrock Stable Diffusion
 
 Globals:
   Function:
@@ -239,9 +229,6 @@ Resources:
           # S3 and CloudFront
           S3_BUCKET: !Ref PixelPromptBucket
           CLOUDFRONT_DOMAIN: !GetAtt CloudFrontDistribution.DomainName
-          # Bedrock Regions
-          BEDROCK_NOVA_REGION: !Ref BedrockNovaRegion
-          BEDROCK_SD_REGION: !Ref BedrockSdRegion
       Policies:
         - Version: '2012-10-17'
           Statement:

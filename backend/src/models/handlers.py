@@ -63,7 +63,7 @@ def _poll_bfl_job(job_id: str, headers: dict, max_attempts: int = 40, interval: 
 
         if result_data.get('status') == 'Ready':
             image_url = result_data['result']['sample']
-            img_response = requests.get(image_url, timeout=30)
+            img_response = requests.get(image_url, timeout=image_download_timeout)
             img_response.raise_for_status()
             return base64.b64encode(img_response.content).decode('utf-8')
         elif result_data.get('status') == 'Error':
@@ -84,7 +84,7 @@ def _extract_gemini_image(response) -> str:
     raise ValueError("No image data found in Gemini response")
 
 
-def _download_image_as_base64(url: str, timeout: int = 30) -> str:
+def _download_image_as_base64(url: str, timeout: int = image_download_timeout) -> str:
     """Download image from URL and return as base64."""
     img_response = requests.get(url, timeout=timeout)
     img_response.raise_for_status()
@@ -338,7 +338,7 @@ def handle_recraft(model_config: ModelConfig, prompt: str, _params: GenerationPa
         image_url = response.data[0].url
 
         # Download image
-        img_response = requests.get(image_url, timeout=30)
+        img_response = requests.get(image_url, timeout=image_download_timeout)
         img_response.raise_for_status()
 
         # Convert to base64

@@ -443,6 +443,8 @@ def _handle_refinement(
         context_prompt_fn: Optional callable(prompt) -> context prompt string.
         extra_response_fields: Extra fields to include in success response.
     """
+    iteration_index = None
+    session_id = model_name = None
     try:
         refs, err = _validate_refinement_request(validated)
         if err:
@@ -507,6 +509,13 @@ def _handle_refinement(
             })
 
     except Exception as e:
+        if iteration_index is not None:
+            try:
+                _handle_failed_result(
+                    session_id, model_name, iteration_index, sanitize_error_message(e)
+                )
+            except Exception:
+                pass  # Best-effort; don't mask the original error
         StructuredLogger.error(
             f"Error in {handler_name}: {e}",
             correlation_id=correlation_id,
