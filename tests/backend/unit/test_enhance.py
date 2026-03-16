@@ -18,9 +18,9 @@ class TestPromptEnhancer:
 
             enhancer = PromptEnhancer()
 
-            with patch('api.enhance.OpenAI') as mock_openai:
+            with patch('api.enhance.get_openai_client') as mock_get_client:
                 mock_client = Mock()
-                mock_openai.return_value = mock_client
+                mock_get_client.return_value = mock_client
 
                 mock_response = Mock()
                 mock_response.choices = [Mock()]
@@ -43,9 +43,9 @@ class TestPromptEnhancer:
 
             enhancer = PromptEnhancer()
 
-            with patch('api.enhance.genai.Client') as mock_genai_client:
+            with patch('api.enhance.get_genai_client') as mock_get_client:
                 mock_client = Mock()
-                mock_genai_client.return_value = mock_client
+                mock_get_client.return_value = mock_client
 
                 mock_response = Mock()
                 mock_candidate = Mock()
@@ -71,9 +71,9 @@ class TestPromptEnhancer:
             # Manually add base_url for testing
             enhancer.prompt_model['base_url'] = 'https://custom-api.example.com/v1'
 
-            with patch('api.enhance.OpenAI') as mock_openai:
+            with patch('api.enhance.get_openai_client') as mock_get_client:
                 mock_client = Mock()
-                mock_openai.return_value = mock_client
+                mock_get_client.return_value = mock_client
 
                 mock_response = Mock()
                 mock_response.choices = [Mock()]
@@ -82,7 +82,7 @@ class TestPromptEnhancer:
 
                 result = enhancer.enhance("test")
 
-                call_args = mock_openai.call_args
+                call_args = mock_get_client.call_args
                 assert call_args.kwargs['base_url'] == 'https://custom-api.example.com/v1'
                 assert result == "Enhanced prompt text"
 
@@ -94,9 +94,9 @@ class TestPromptEnhancer:
 
             enhancer = PromptEnhancer()
 
-            with patch('api.enhance.OpenAI') as mock_openai:
+            with patch('api.enhance.get_openai_client') as mock_get_client:
                 mock_client = Mock()
-                mock_openai.return_value = mock_client
+                mock_get_client.return_value = mock_client
 
                 mock_client.chat.completions.create.side_effect = Exception("API Error")
 
@@ -151,9 +151,9 @@ class TestPromptEnhancer:
 
             enhancer = PromptEnhancer()
 
-            with patch('api.enhance.OpenAI') as mock_openai:
+            with patch('api.enhance.get_openai_client') as mock_get_client:
                 mock_client = Mock()
-                mock_openai.return_value = mock_client
+                mock_get_client.return_value = mock_client
 
                 mock_response = Mock()
                 mock_response.choices = [Mock()]
@@ -172,9 +172,9 @@ class TestPromptEnhancer:
 
             enhancer = PromptEnhancer()
 
-            with patch('api.enhance.genai.Client') as mock_genai_client:
+            with patch('api.enhance.get_genai_client') as mock_get_client:
                 mock_client = Mock()
-                mock_genai_client.return_value = mock_client
+                mock_get_client.return_value = mock_client
 
                 mock_response = Mock()
                 mock_response.candidates = []
@@ -193,9 +193,9 @@ class TestPromptEnhancer:
 
             enhancer = PromptEnhancer()
 
-            with patch('api.enhance.OpenAI') as mock_openai:
+            with patch('api.enhance.get_openai_client') as mock_get_client:
                 mock_client = Mock()
-                mock_openai.return_value = mock_client
+                mock_get_client.return_value = mock_client
 
                 mock_response = Mock()
                 mock_response.choices = [Mock()]
@@ -220,9 +220,9 @@ class TestPromptEnhancer:
 
             enhancer = PromptEnhancer()
 
-            with patch('api.enhance.OpenAI') as mock_openai:
+            with patch('api.enhance.get_openai_client') as mock_get_client:
                 mock_client = Mock()
-                mock_openai.return_value = mock_client
+                mock_get_client.return_value = mock_client
 
                 mock_response = Mock()
                 mock_response.choices = [Mock()]
@@ -244,9 +244,9 @@ class TestPromptEnhancer:
 
             enhancer = PromptEnhancer()
 
-            with patch('api.enhance.OpenAI') as mock_openai:
+            with patch('api.enhance.get_openai_client') as mock_get_client:
                 mock_client = Mock()
-                mock_openai.return_value = mock_client
+                mock_get_client.return_value = mock_client
 
                 mock_response = Mock()
                 mock_response.choices = [Mock()]

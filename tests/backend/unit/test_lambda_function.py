@@ -67,6 +67,7 @@ _TARGETS = [
     f"{_MOD}.content_filter",
     f"{_MOD}.prompt_enhancer",
     f"{_MOD}._executor",
+    f"{_MOD}._gallery_executor",
     f"{_MOD}.get_enabled_models",
     f"{_MOD}.get_handler",
     f"{_MOD}.get_iterate_handler",
@@ -231,6 +232,25 @@ class TestErrorCases:
         resp = lambda_handler(_make_event(body={"prompt": "bad"}), None)
         assert resp["statusCode"] == 400
 
+    def test_content_filter_outpaint(self, mocks):
+        mocks["content_filter"].check_prompt.return_value = True
+        resp = lambda_handler(
+            _make_event(path="/outpaint", body={"sessionId": "s", "model": "flux", "preset": "16:9", "prompt": "bad"}),
+            None,
+        )
+        assert resp["statusCode"] == 400
+
+    def test_rate_limit_outpaint(self, mocks):
+        mocks["rate_limiter"].check_rate_limit.return_value = True
+        resp = lambda_handler(
+            _make_event(path="/outpaint", body={
+                "sessionId": "s", "model": "flux", "preset": "16:9",
+                "prompt": "expand the scene",
+            }),
+            None,
+        )
+        assert resp["statusCode"] == 429
+
     def test_empty_prompt_400(self, mocks):
         resp = lambda_handler(_make_event(body={"prompt": ""}), None)
         assert resp["statusCode"] == 400
@@ -254,6 +274,34 @@ class TestErrorCases:
         resp = lambda_handler(_make_event(method="GET", path="/status/missing"), None)
         assert resp["statusCode"] == 404
 
+    def test_status_invalid_session_id_path_traversal(self, mocks):
+        resp = lambda_handler(_make_event(method="GET", path="/status/..%2F..%2Fetc%2Fpasswd"), None)
+        assert resp["statusCode"] == 400
+        assert "Invalid session ID" in _body(resp)["error"]
+
+    def test_status_invalid_session_id_dots(self, mocks):
+        resp = lambda_handler(_make_event(method="GET", path="/status/a..b"), None)
+        assert resp["statusCode"] == 400
+        assert "Invalid session ID" in _body(resp)["error"]
+
+        resp = lambda_handler(_make_event(method="GET", path="/status/.."), None)
+        assert resp["statusCode"] == 400
+        assert "Invalid session ID" in _body(resp)["error"]
+
+    def test_status_invalid_session_id_too_long(self, mocks):
+        long_id = "a" * 65
+        resp = lambda_handler(_make_event(method="GET", path=f"/status/{long_id}"), None)
+        assert resp["statusCode"] == 400
+
+    def test_status_invalid_session_id_special_chars(self, mocks):
+        resp = lambda_handler(_make_event(method="GET", path="/status/<script>alert(1)</script>"), None)
+        assert resp["statusCode"] == 400
+
+    def test_status_valid_uuid_session_id(self, mocks):
+        mocks["session_manager"].get_session.return_value = {"sessionId": "abc-123-def", "models": {}}
+        resp = lambda_handler(_make_event(method="GET", path="/status/abc-123-def"), None)
+        assert resp["statusCode"] == 200
+
 
 # ============================================================
 # Stage prefix stripping
@@ -269,6 +317,16 @@ class TestStagePrefixStripping:
     def test_staging_prefix(self, mocks):
         mocks["session_manager"].get_session.return_value = {"sessionId": "abc", "models": {}}
         resp = lambda_handler(_make_event(method="GET", path="/Staging/status/abc"), None)
+        assert resp["statusCode"] == 200
+
+    def test_dev_prefix(self, mocks):
+        mocks["session_manager"].get_session.return_value = {"sessionId": "abc", "models": {}}
+        resp = lambda_handler(_make_event(method="GET", path="/Dev/status/abc"), None)
+        assert resp["statusCode"] == 200
+
+    def test_no_prefix(self, mocks):
+        mocks["session_manager"].get_session.return_value = {"sessionId": "abc", "models": {}}
+        resp = lambda_handler(_make_event(method="GET", path="/status/abc"), None)
         assert resp["statusCode"] == 200
 
 
@@ -300,6 +358,26 @@ class TestCorsHeaders:
         resp = lambda_handler(_make_event(body={"prompt": "hi"}), None)
         self._check_cors(resp)
 
+    def test_cors_origin_configurable(self, mocks):
+        """CORS origin should be configurable via CORS_ALLOWED_ORIGIN env var."""
+        import importlib
+        import lambda_function
+
+        original = lambda_function.cors_allowed_origin
+        try:
+            # Verify the env var wiring: set env, reload config, verify value
+            with patch.dict(os.environ, {"CORS_ALLOWED_ORIGIN": "https://example.com"}):
+                import config
+                importlib.reload(config)
+                assert config.cors_allowed_origin == "https://example.com"
+
+            # Verify response() uses the module-level cors_allowed_origin
+            lambda_function.cors_allowed_origin = "https://example.com"
+            resp = lambda_handler(_make_event(method="GET", path="/nope"), None)
+            assert resp["headers"]["Access-Control-Allow-Origin"] == "https://example.com"
+        finally:
+            lambda_function.cors_allowed_origin = original
+
 
 # ============================================================
 # Correlation ID
@@ -316,3 +394,126 @@ class TestCorrelationId:
         mocks["session_manager"].get_session.return_value = {"sessionId": "s", "models": {}}
         resp = lambda_handler(_make_event(method="GET", path="/status/s"), None)
         assert resp["statusCode"] == 200
+
+
+# ============================================================
+# generate_for_model error handling
+# ============================================================
+
+
+# ============================================================
+# Body size limits
+# ============================================================
+
+
+class TestBodySizeLimits:
+    def test_generate_rejects_oversized_body(self, mocks):
+        """POST /generate rejects bodies > 1 MB."""
+        oversized = "x" * (1_048_577)  # 1 MB + 1
+        event = _make_event(body={"prompt": "test"})
+        event["body"] = oversized
+        resp = lambda_handler(event, None)
+        assert resp["statusCode"] == 413
+
+    def test_iterate_rejects_oversized_body(self, mocks):
+        """POST /iterate rejects bodies > 1 MB."""
+        oversized = "x" * (1_048_577)
+        event = _make_event(path="/iterate", body={"sessionId": "s", "model": "flux", "prompt": "x"})
+        event["body"] = oversized
+        resp = lambda_handler(event, None)
+        assert resp["statusCode"] == 413
+
+    def test_outpaint_rejects_oversized_body(self, mocks):
+        """POST /outpaint rejects bodies > 1 MB."""
+        oversized = "x" * (1_048_577)
+        event = _make_event(path="/outpaint", body={"sessionId": "s", "model": "flux", "preset": "16:9"})
+        event["body"] = oversized
+        resp = lambda_handler(event, None)
+        assert resp["statusCode"] == 413
+
+    def test_log_rejects_oversized_body(self, mocks):
+        """POST /log rejects bodies > 10 KB."""
+        oversized = "x" * (10_241)  # 10 KB + 1
+        event = _make_event(path="/log", body={"level": "ERROR", "message": "test"})
+        event["body"] = oversized
+        resp = lambda_handler(event, None)
+        assert resp["statusCode"] == 413
+
+    def test_log_sanitizes_metadata_keys(self, mocks):
+        """POST /log strips reserved keys from metadata."""
+        mocks["handle_log"].return_value = {"success": True}
+        resp = lambda_handler(_make_event(path="/log", body={
+            "level": "ERROR",
+            "message": "test",
+            "metadata": {
+                "component": "Test",
+                "timestamp": "evil-override",
+                "level": "FAKE",
+                "correlation_id": "injected"
+            }
+        }), None)
+        assert resp["statusCode"] == 200
+        # Verify handle_log was called with sanitized metadata
+        call_body = mocks["handle_log"].call_args[0][0]
+        meta = call_body.get("metadata", {})
+        assert "timestamp" not in meta
+        assert "level" not in meta
+        assert "correlation_id" not in meta
+        assert meta.get("component") == "Test"
+
+
+class TestGenerateForModelErrorHandling:
+    """Tests for error sanitization and fail_iteration in generate_for_model."""
+
+    @patch("lambda_function.as_completed")
+    def test_handler_exception_sanitizes_error_and_calls_fail_iteration(self, mock_as_completed, mocks):
+        """When a handler raises, error should be sanitized and fail_iteration called."""
+        from concurrent.futures import ThreadPoolExecutor
+
+        fake_model = MagicMock(provider="bfl")
+        fake_model.name = "flux"
+        mocks["get_enabled_models"].return_value = [fake_model]
+        mocks["session_manager"].create_session.return_value = "sess-err"
+        mocks["session_manager"].add_iteration.return_value = 0
+        mocks["get_model_config_dict"].return_value = {"id": "flux-2-pro"}
+
+        # Handler that raises with an API key in the message
+        def failing_handler(config, prompt, params):
+            raise RuntimeError("Auth failed for key sk-abcdefghijklmnopqrstuvwxyz1234567890")
+
+        mocks["get_handler"].return_value = failing_handler
+
+        # Use a real executor so generate_for_model actually runs
+        real_executor = ThreadPoolExecutor(max_workers=1)
+        mocks["_executor"].submit.side_effect = real_executor.submit
+
+        # Capture the futures from submit
+        futures = []
+        original_submit = real_executor.submit
+
+        def capture_submit(*args, **kwargs):
+            f = original_submit(*args, **kwargs)
+            futures.append(f)
+            return f
+
+        mocks["_executor"].submit.side_effect = capture_submit
+        mock_as_completed.side_effect = lambda futs: futs
+
+        resp = lambda_handler(_make_event(body={"prompt": "test"}), None)
+        real_executor.shutdown(wait=True)
+
+        assert resp["statusCode"] == 200
+        result_body = _body(resp)
+
+        # Verify fail_iteration was called
+        mocks["session_manager"].fail_iteration.assert_called_once()
+        fail_args = mocks["session_manager"].fail_iteration.call_args
+
+        # Verify error message was sanitized (API key should be redacted)
+        error_msg = fail_args[0][3]  # 4th positional arg is the error message
+        assert "sk-abcdefghijklmnopqrstuvwxyz" not in error_msg
+
+        # Verify the model result in response also has sanitized error
+        assert "flux" in result_body["models"]
+        assert result_body["models"]["flux"]["status"] == "error"
+        assert "sk-abcdefghijklmnopqrstuvwxyz" not in result_body["models"]["flux"]["error"]

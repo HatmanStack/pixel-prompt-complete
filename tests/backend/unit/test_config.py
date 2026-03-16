@@ -77,21 +77,6 @@ class TestModelConfig:
                 config.get_model('unknown_model')
             assert 'unknown model' in str(excinfo.value).lower()
 
-    def test_is_model_enabled(self):
-        """is_model_enabled() should return correct boolean."""
-        env = {
-            'FLUX_ENABLED': 'true',
-            'RECRAFT_ENABLED': 'false',
-        }
-        with patch.dict(os.environ, env, clear=True):
-            import importlib
-            import config
-            importlib.reload(config)
-
-            assert config.is_model_enabled('flux') is True
-            assert config.is_model_enabled('recraft') is False
-            assert config.is_model_enabled('nonexistent') is False
-
     def test_get_model_config_dict(self):
         """get_model_config_dict() should return handler-compatible dict."""
         env = {
@@ -125,7 +110,7 @@ class TestModelConfig:
 
             # Default model IDs
             flux = config.MODELS['flux']
-            assert flux.model_id == 'flux-pro-1.1'
+            assert flux.model_id == 'flux-2-pro'
 
     def test_iteration_limits_defined(self):
         """MAX_ITERATIONS and ITERATION_WARNING_THRESHOLD should be defined."""

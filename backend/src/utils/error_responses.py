@@ -116,15 +116,3 @@ def invalid_json(**kwargs) -> Dict[str, Any]:
         details="The request body contains invalid JSON. Please check the format and try again.",
         **kwargs
     )
-
-
-def job_not_found(job_id: str, **kwargs) -> Dict[str, Any]:
-    """Job not found"""
-    return error_response(
-        status_code=404,
-        error_code="JOB_NOT_FOUND",
-        message="Job not found",
-        details=f"The job with ID '{job_id}' could not be found. It may have expired.",
-        jobId=job_id,
-        **kwargs
-    )

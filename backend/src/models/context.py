@@ -4,7 +4,6 @@ Maintains a rolling 3-iteration context window per model column.
 """
 
 import json
-import logging
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -13,13 +12,13 @@ from typing import Any, Dict, List, Optional
 from botocore.exceptions import ClientError
 
 from jobs.manager import ConcurrencyError
-
-logger = logging.getLogger(__name__)
+from utils.logger import StructuredLogger
 
 
 @dataclass
 class ContextEntry:
     """A single entry in the conversation context window."""
+
     iteration: int
     prompt: str
     image_key: str
@@ -68,20 +67,26 @@ class ContextManager:
 
         try:
             response = self.s3.get_object(Bucket=self.bucket, Key=key)
-            data = json.loads(response['Body'].read().decode('utf-8'))
+            data = json.loads(response["Body"].read().decode("utf-8"))
 
             # Parse context entries
             entries = []
-            for item in data.get('window', []):
+            for item in data.get("window", []):
                 try:
-                    entries.append(ContextEntry(
-                        iteration=item['iteration'],
-                        prompt=item['prompt'],
-                        image_key=item['imageKey'],
-                        timestamp=item['timestamp']
-                    ))
+                    entries.append(
+                        ContextEntry(
+                            iteration=item["iteration"],
+                            prompt=item["prompt"],
+                            image_key=item["imageKey"],
+                            timestamp=item.get("timestamp", ""),
+                        )
+                    )
                 except (KeyError, TypeError) as e:
-                    logger.warning(f"Skipping malformed context entry: {e}")
+                    StructuredLogger.warning(
+                        f"Skipping malformed context entry: {e}",
+                        session_id=session_id,
+                        model=model,
+                    )
 
             return entries
 
@@ -90,11 +95,19 @@ class ContextManager:
             return []
 
         except json.JSONDecodeError as e:
-            logger.warning(f"Corrupted context JSON for {session_id}/{model}: {e}")
+            StructuredLogger.warning(
+                f"Corrupted context JSON for {session_id}/{model}: {e}",
+                session_id=session_id,
+                model=model,
+            )
             return []
 
         except Exception as e:
-            logger.error(f"Error loading context for {session_id}/{model}: {e}")
+            StructuredLogger.error(
+                f"Error loading context for {session_id}/{model}: {e}",
+                session_id=session_id,
+                model=model,
+            )
             raise
 
     def add_entry(self, session_id: str, model: str, entry: ContextEntry) -> None:
@@ -111,17 +124,19 @@ class ContextManager:
 
             try:
                 resp = self.s3.get_object(Bucket=self.bucket, Key=key)
-                etag = resp.get('ETag')
-                data = json.loads(resp['Body'].read().decode('utf-8'))
+                etag = resp.get("ETag")
+                data = json.loads(resp["Body"].read().decode("utf-8"))
                 entries = []
-                for item in data.get('window', []):
+                for item in data.get("window", []):
                     try:
-                        entries.append(ContextEntry(
-                            iteration=item['iteration'],
-                            prompt=item['prompt'],
-                            image_key=item['imageKey'],
-                            timestamp=item['timestamp'],
-                        ))
+                        entries.append(
+                            ContextEntry(
+                                iteration=item["iteration"],
+                                prompt=item["prompt"],
+                                image_key=item["imageKey"],
+                                timestamp=item.get("timestamp", ""),
+                            )
+                        )
                     except (KeyError, TypeError):
                         pass
             except self.s3.exceptions.NoSuchKey:
@@ -131,7 +146,7 @@ class ContextManager:
 
             entries.append(entry)
             if len(entries) > self.WINDOW_SIZE:
-                entries = entries[-self.WINDOW_SIZE:]
+                entries = entries[-self.WINDOW_SIZE :]
 
             if self._save_context_conditional(session_id, model, entries, etag):
                 return
@@ -140,53 +155,6 @@ class ContextManager:
 
         raise ConcurrencyError(
             f"Failed to add context entry after {max_retries} retries for {session_id}/{model}"
-        )
-
-    def clear_context(self, session_id: str, model: str) -> None:
-        """
-        Clear context for a model column.
-
-        Args:
-            session_id: Session identifier
-            model: Model name
-        """
-        key = self._get_context_key(session_id, model)
-
-        try:
-            self.s3.delete_object(Bucket=self.bucket, Key=key)
-        except Exception as e:
-            logger.warning(f"Error clearing context for {session_id}/{model}: {e}")
-
-    def _save_context(self, session_id: str, model: str, entries: List[ContextEntry]) -> None:
-        """
-        Save context entries to S3.
-
-        Args:
-            session_id: Session identifier
-            model: Model name
-            entries: List of ContextEntry objects
-        """
-        key = self._get_context_key(session_id, model)
-
-        data = {
-            'model': model,
-            'sessionId': session_id,
-            'window': [
-                {
-                    'iteration': e.iteration,
-                    'prompt': e.prompt,
-                    'imageKey': e.image_key,
-                    'timestamp': e.timestamp
-                }
-                for e in entries
-            ]
-        }
-
-        self.s3.put_object(
-            Bucket=self.bucket,
-            Key=key,
-            Body=json.dumps(data),
-            ContentType='application/json'
         )
 
     def _save_context_conditional(
@@ -198,45 +166,43 @@ class ContextManager:
     ) -> bool:
         """Save context with ETag-based conditional write. Returns True on success."""
         key = self._get_context_key(session_id, model)
-        data = {
-            'model': model,
-            'sessionId': session_id,
-            'window': [
-                {
-                    'iteration': e.iteration,
-                    'prompt': e.prompt,
-                    'imageKey': e.image_key,
-                    'timestamp': e.timestamp,
-                }
-                for e in entries
-            ],
-        }
+        body = json.dumps(
+            {
+                "model": model,
+                "sessionId": session_id,
+                "window": [
+                    {
+                        "iteration": e.iteration,
+                        "prompt": e.prompt,
+                        "imageKey": e.image_key,
+                        "timestamp": e.timestamp,
+                    }
+                    for e in entries
+                ],
+            }
+        )
 
         try:
             put_kwargs = {
-                'Bucket': self.bucket,
-                'Key': key,
-                'Body': json.dumps(data),
-                'ContentType': 'application/json',
+                "Bucket": self.bucket,
+                "Key": key,
+                "Body": body,
+                "ContentType": "application/json",
             }
             if expected_etag:
-                put_kwargs['IfMatch'] = expected_etag
+                put_kwargs["IfMatch"] = expected_etag
             else:
-                put_kwargs['IfNoneMatch'] = '*'
+                put_kwargs["IfNoneMatch"] = "*"
 
             self.s3.put_object(**put_kwargs)
             return True
         except ClientError as e:
-            code = e.response['Error']['Code']
-            if code in ('PreconditionFailed', '412'):
+            code = e.response["Error"]["Code"]
+            if code in ("PreconditionFailed", "412"):
                 return False
             raise
 
-    def get_context_for_iteration(
-        self,
-        session_id: str,
-        model: str
-    ) -> List[Dict[str, Any]]:
+    def get_context_for_iteration(self, session_id: str, model: str) -> List[Dict[str, Any]]:
         """
         Get context in format suitable for model iteration handlers.
 
@@ -253,20 +219,16 @@ class ContextManager:
         entries = self.get_context(session_id, model)
         return [
             {
-                'iteration': e.iteration,
-                'prompt': e.prompt,
-                'imageKey': e.image_key,
-                'timestamp': e.timestamp
+                "iteration": e.iteration,
+                "prompt": e.prompt,
+                "imageKey": e.image_key,
+                "timestamp": e.timestamp,
             }
             for e in entries
         ]
 
 
-def create_context_entry(
-    iteration: int,
-    prompt: str,
-    image_key: str
-) -> ContextEntry:
+def create_context_entry(iteration: int, prompt: str, image_key: str) -> ContextEntry:
     """
     Factory function to create a new ContextEntry with current timestamp.
 
@@ -282,5 +244,5 @@ def create_context_entry(
         iteration=iteration,
         prompt=prompt,
         image_key=image_key,
-        timestamp=datetime.now(timezone.utc).isoformat()
+        timestamp=datetime.now(timezone.utc).isoformat(),
     )

@@ -4,20 +4,15 @@ Image Storage utilities for Pixel Prompt Complete.
 Handles saving generated images to S3 with metadata and gallery management.
 """
 
-import base64
-import io
 import json
-import logging
 import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from botocore.exceptions import ClientError
-from PIL import Image
 
+from .logger import StructuredLogger
 from .retry import retry_with_backoff
-
-logger = logging.getLogger(__name__)
 
 
 class ImageStorage:
@@ -49,12 +44,12 @@ class ImageStorage:
     ) -> None:
         """Common logic: build metadata dict, upload to S3."""
         metadata: Dict[str, Any] = {
-            'output': base64_image,
-            'model': model_name,
-            'prompt': prompt,
-            'target': target,
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'NSFW': False,
+            "output": base64_image,
+            "model": model_name,
+            "prompt": prompt,
+            "target": target,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "NSFW": False,
         }
         if extra:
             metadata.update(extra)
@@ -62,35 +57,8 @@ class ImageStorage:
         self._put_object_with_retry(
             key=key,
             body=json.dumps(metadata),
-            content_type='application/json',
+            content_type="application/json",
         )
-
-    def save_image(
-        self,
-        base64_image: str,
-        model_name: str,
-        prompt: str,
-        target: str
-    ) -> str:
-        """Save generated image to S3 with metadata and thumbnail."""
-        normalized_model = self._normalize_model_name(model_name)
-        timestamp = datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')
-        key = f"group-images/{target}/{normalized_model}-{timestamp}.json"
-
-        self._store_image(base64_image, key, model_name, prompt, target)
-
-        # Generate and save thumbnail (non-critical)
-        try:
-            thumbnail_base64 = self._generate_thumbnail(base64_image)
-            thumbnail_key = f"group-images/{target}/{normalized_model}-{timestamp}-thumb.json"
-            self._store_image(
-                thumbnail_base64, thumbnail_key, model_name, prompt, target,
-                extra={'thumbnail': True},
-            )
-        except Exception as e:
-            logger.debug("Thumbnail generation failed for %s: %s", key, e)
-
-        return key
 
     @retry_with_backoff(max_retries=3, base_delay=1.0, max_delay=4.0)
     def _put_object_with_retry(self, key: str, body: str, content_type: str):
@@ -105,12 +73,7 @@ class ImageStorage:
         Raises:
             Exception: If upload fails after retries
         """
-        self.s3.put_object(
-            Bucket=self.bucket,
-            Key=key,
-            Body=body,
-            ContentType=content_type
-        )
+        self.s3.put_object(Bucket=self.bucket, Key=key, Body=body, ContentType=content_type)
 
     def upload_image(
         self,
@@ -122,12 +85,12 @@ class ImageStorage:
     ) -> str:
         """Upload a generated image to S3 under sessions prefix with metadata."""
         normalized_model = self._normalize_model_name(model_name)
-        timestamp = datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
 
         iter_suffix = f"-iter{iteration}" if iteration is not None else ""
         key = f"sessions/{target}/{normalized_model}-{timestamp}{iter_suffix}.json"
 
-        extra = {'iteration': iteration} if iteration is not None else None
+        extra = {"iteration": iteration} if iteration is not None else None
         self._store_image(base64_image, key, model_name, prompt, target, extra=extra)
 
         return key
@@ -144,11 +107,11 @@ class ImageStorage:
         """
         try:
             response = self._get_object_with_retry(image_key)
-            metadata = json.loads(response['Body'].read().decode('utf-8'))
+            metadata = json.loads(response["Body"].read().decode("utf-8"))
             return metadata
 
         except ClientError as e:
-            if e.response['Error']['Code'] == 'NoSuchKey':
+            if e.response["Error"]["Code"] == "NoSuchKey":
                 return None
             else:
                 raise
@@ -169,38 +132,55 @@ class ImageStorage:
         """
         return self.s3.get_object(Bucket=self.bucket, Key=key)
 
+    # Timestamp folder pattern: YYYY-MM-DD-HH-MM-SS
+    _GALLERY_FOLDER_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}$")
+
     def list_galleries(self) -> List[str]:
         """
-        List all gallery folders (target timestamps).
+        List all gallery folders (target timestamps) from the sessions prefix.
+
+        Filters out non-gallery folders (e.g. session UUID folders) by matching
+        the timestamp pattern YYYY-MM-DD-HH-MM-SS.
 
         Returns:
             List of gallery folder names (target timestamps)
+
+        Raises:
+            ClientError: If the S3 operation fails (e.g., IAM, throttling)
         """
         try:
-            # List objects with prefix and delimiter to get folders
-            response = self.s3.list_objects_v2(
-                Bucket=self.bucket,
-                Prefix='group-images/',
-                Delimiter='/'
-            )
-
-            # Extract folder names from CommonPrefixes
             galleries = []
-            if 'CommonPrefixes' in response:
-                for prefix in response['CommonPrefixes']:
-                    # Extract folder name from prefix
-                    # e.g., "group-images/2025-11-15-14-30-45/" -> "2025-11-15-14-30-45"
-                    folder = prefix['Prefix'].split('/')[-2]
-                    galleries.append(folder)
+            kwargs = {
+                "Bucket": self.bucket,
+                "Prefix": "sessions/",
+                "Delimiter": "/",
+            }
+
+            while True:
+                response = self.s3.list_objects_v2(**kwargs)
+
+                # Extract folder names from CommonPrefixes
+                if "CommonPrefixes" in response:
+                    for prefix in response["CommonPrefixes"]:
+                        # e.g., "sessions/2025-11-15-14-30-45/" -> "2025-11-15-14-30-45"
+                        folder = prefix["Prefix"].split("/")[-2]
+                        if self._GALLERY_FOLDER_RE.match(folder):
+                            galleries.append(folder)
+
+                # Continue paginating if there are more results
+                if response.get("IsTruncated"):
+                    kwargs["ContinuationToken"] = response["NextContinuationToken"]
+                else:
+                    break
 
             # Sort by timestamp (newest first)
             galleries.sort(reverse=True)
 
-
             return galleries
 
-        except Exception:
-            return []
+        except ClientError as e:
+            StructuredLogger.error(f"Failed to list galleries from S3: {e}")
+            raise
 
     def list_gallery_images(self, gallery_folder: str) -> List[str]:
         """
@@ -211,29 +191,39 @@ class ImageStorage:
 
         Returns:
             List of S3 keys for images in the gallery
+
+        Raises:
+            ClientError: If the S3 operation fails (e.g., IAM, throttling)
         """
         try:
-            prefix = f"group-images/{gallery_folder}/"
-
-            # List all objects in the folder
-            response = self.s3.list_objects_v2(
-                Bucket=self.bucket,
-                Prefix=prefix
-            )
-
+            prefix = f"sessions/{gallery_folder}/"
             images = []
-            if 'Contents' in response:
-                for obj in response['Contents']:
-                    key = obj['Key']
-                    # Only include .json files (not folders)
-                    if key.endswith('.json'):
-                        images.append(key)
+            kwargs = {
+                "Bucket": self.bucket,
+                "Prefix": prefix,
+            }
 
+            while True:
+                response = self.s3.list_objects_v2(**kwargs)
+
+                if "Contents" in response:
+                    for obj in response["Contents"]:
+                        key = obj["Key"]
+                        # Only include .json files (not folders)
+                        if key.endswith(".json"):
+                            images.append(key)
+
+                # Continue paginating if there are more results
+                if response.get("IsTruncated"):
+                    kwargs["ContinuationToken"] = response["NextContinuationToken"]
+                else:
+                    break
 
             return images
 
-        except Exception:
-            return []
+        except ClientError as e:
+            StructuredLogger.error(f"Failed to list gallery images from S3: {e}")
+            raise
 
     def get_cloudfront_url(self, s3_key: str) -> str:
         """
@@ -246,49 +236,6 @@ class ImageStorage:
             CloudFront URL
         """
         return f"https://{self.cloudfront_domain}/{s3_key}"
-
-    def _generate_thumbnail(self, base64_image: str, size: int = 200, quality: int = 75) -> str:
-        """
-        Generate a thumbnail from base64 image data.
-
-        Args:
-            base64_image: Base64-encoded image data
-            size: Maximum dimension for thumbnail (default 200px)
-            quality: JPEG quality for compression (default 75)
-
-        Returns:
-            Base64-encoded thumbnail image
-
-        Raises:
-            Exception: If thumbnail generation fails
-        """
-        # Decode base64 to bytes
-        image_bytes = base64.b64decode(base64_image)
-
-        # Open image with Pillow
-        img = Image.open(io.BytesIO(image_bytes))
-
-        # Convert to RGB if necessary (for PNG with transparency)
-        if img.mode in ('RGBA', 'LA', 'P'):
-            background = Image.new('RGB', img.size, (255, 255, 255))
-            if img.mode == 'P':
-                img = img.convert('RGBA')
-            background.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
-            img = background
-
-        # Calculate thumbnail size maintaining aspect ratio
-        img.thumbnail((size, size), Image.Resampling.LANCZOS)
-
-        # Save to bytes buffer as JPEG with compression
-        buffer = io.BytesIO()
-        img.save(buffer, format='JPEG', quality=quality, optimize=True)
-        buffer.seek(0)
-
-        # Encode to base64
-        thumbnail_base64 = base64.b64encode(buffer.read()).decode('utf-8')
-
-
-        return thumbnail_base64
 
     def _normalize_model_name(self, model_name: str) -> str:
         """
@@ -304,15 +251,15 @@ class ImageStorage:
         normalized = model_name.lower()
 
         # Replace spaces with hyphens
-        normalized = normalized.replace(' ', '-')
+        normalized = normalized.replace(" ", "-")
 
         # Remove special characters (keep alphanumeric and hyphens)
-        normalized = re.sub(r'[^a-z0-9\-]', '', normalized)
+        normalized = re.sub(r"[^a-z0-9\-]", "", normalized)
 
         # Remove consecutive hyphens
-        normalized = re.sub(r'-+', '-', normalized)
+        normalized = re.sub(r"-+", "-", normalized)
 
         # Remove leading/trailing hyphens
-        normalized = normalized.strip('-')
+        normalized = normalized.strip("-")
 
         return normalized

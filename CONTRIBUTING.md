@@ -5,14 +5,15 @@
 1. **Fork** the repository and clone your fork
 2. **Install dependencies**:
    ```bash
-   # Frontend
-   cd frontend && npm install
-
-   # Backend (dev dependencies)
-   cd backend && uv pip install -e ".[dev]"
-
    # Root (husky, lint-staged, commitlint)
    npm install
+
+   # Frontend
+   (cd frontend && npm install)
+
+   # Backend (dev dependencies)
+   pip install -r backend/src/requirements.txt
+   pip install -e ./backend[dev]
    ```
 3. **Verify your setup**: `make check`
 

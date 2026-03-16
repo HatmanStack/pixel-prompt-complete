@@ -32,6 +32,15 @@ def _body(resp):
     return json.loads(resp["body"])
 
 
+def _pick_completed_model(models):
+    """Pick a model that completed successfully from generate results."""
+    for name, result in models.items():
+        if result.get("status") == "completed":
+            return name
+    statuses = {n: r.get("status") for n, r in models.items()}
+    raise AssertionError(f"No model completed during generate: {statuses}")
+
+
 # ── Tests ──────────────────────────────────────────────────────────────
 
 
@@ -90,9 +99,9 @@ class TestIterateWorkflow:
         gen_resp = handler(_make_event(body={"prompt": "a blue sky"}), None)
         session_id = _body(gen_resp)["sessionId"]
 
-        # Pick first enabled model from response
+        # Pick a model that completed successfully
         models = _body(gen_resp)["models"]
-        model_name = next(iter(models))
+        model_name = _pick_completed_model(models)
 
         # Iterate
         iter_resp = handler(
@@ -125,7 +134,7 @@ class TestOutpaintWorkflow:
         # Generate
         gen_resp = handler(_make_event(body={"prompt": "forest path"}), None)
         session_id = _body(gen_resp)["sessionId"]
-        model_name = next(iter(_body(gen_resp)["models"]))
+        model_name = _pick_completed_model(_body(gen_resp)["models"])
 
         # Outpaint
         out_resp = handler(
@@ -154,7 +163,7 @@ class TestIterationLimit:
 
         gen_resp = handler(_make_event(body={"prompt": "test limit"}), None)
         session_id = _body(gen_resp)["sessionId"]
-        model_name = next(iter(_body(gen_resp)["models"]))
+        model_name = _pick_completed_model(_body(gen_resp)["models"])
 
         # Already at iteration 0 from generate. Add 6 more to reach limit of 7.
         for i in range(6):
@@ -195,7 +204,7 @@ class TestContextWindow:
 
         gen_resp = handler(_make_event(body={"prompt": "context test"}), None)
         session_id = _body(gen_resp)["sessionId"]
-        model_name = next(iter(_body(gen_resp)["models"]))
+        model_name = _pick_completed_model(_body(gen_resp)["models"])
 
         # Add 4 more iterations (5 total including initial generate)
         for i in range(4):

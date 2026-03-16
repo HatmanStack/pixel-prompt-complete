@@ -7,10 +7,8 @@ Uses configured LLM to expand short prompts into detailed image generation promp
 import warnings
 from typing import Optional
 
-from google import genai
-from openai import OpenAI
-
 from config import prompt_model_api_key, prompt_model_id, prompt_model_provider
+from utils.clients import get_genai_client, get_openai_client
 
 
 class PromptEnhancer:
@@ -79,7 +77,7 @@ Enhance the following prompt:"""
                 if not api_key:
                     return prompt
 
-                client = genai.Client(api_key=api_key)
+                client = get_genai_client(api_key)
 
                 response = client.models.generate_content(
                     model=prompt_model['id'],
@@ -99,7 +97,6 @@ Enhance the following prompt:"""
                     return prompt
 
                 client_kwargs = {
-                    'api_key': api_key,
                     'timeout': 30.0
                 }
 
@@ -107,7 +104,7 @@ Enhance the following prompt:"""
                 if 'base_url' in prompt_model:
                     client_kwargs['base_url'] = prompt_model['base_url']
 
-                client = OpenAI(**client_kwargs)
+                client = get_openai_client(api_key, **client_kwargs)
 
                 # Determine model identifier
                 # Use configured model ID from prompt_model
