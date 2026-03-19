@@ -91,5 +91,5 @@ urllib3==2.6.3
     # via
     #   botocore
     #   requests
-websockets==15.0.1
+websockets==16.0
     # via google-genai
