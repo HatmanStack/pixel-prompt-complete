@@ -12,16 +12,13 @@ window.HTMLMediaElement.prototype.pause = vi.fn();
 window.HTMLMediaElement.prototype.play = vi.fn(() => Promise.resolve());
 window.HTMLMediaElement.prototype.load = vi.fn();
 
-// Mock Audio constructor for sound tests
-global.Audio = vi.fn().mockImplementation(() => ({
-  play: vi.fn().mockResolvedValue(undefined),
-  pause: vi.fn(),
-  load: vi.fn(),
-  addEventListener: vi.fn(),
-  removeEventListener: vi.fn(),
-  volume: 1,
-  muted: false,
-})) as unknown as typeof Audio;
+// Mock useSound hook globally - Audio constructor doesn't work with vitest 4 mocks
+vi.mock('@/hooks/useSound', () => ({
+  useSound: () => ({
+    playSound: vi.fn(),
+    soundsLoaded: true,
+  }),
+}));
 
 // Mock localStorage
 const localStorageMock = {

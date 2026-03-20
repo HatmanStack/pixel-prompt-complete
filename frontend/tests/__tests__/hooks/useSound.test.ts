@@ -4,6 +4,10 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
+
+// Restore real useSound for this test file
+vi.unmock('@/hooks/useSound');
+
 import { useSound } from '../../../src/hooks/useSound';
 import { useUIStore } from '../../../src/stores/useUIStore';
 
@@ -29,7 +33,7 @@ describe('useSound', () => {
     });
 
     // Mock Audio constructor
-    vi.stubGlobal('Audio', vi.fn().mockImplementation(() => new MockAudio()));
+    vi.stubGlobal('Audio', vi.fn(function() { return new MockAudio(); }));
 
     // Mock localStorage
     const localStorageMock = {

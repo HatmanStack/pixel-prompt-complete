@@ -4,18 +4,23 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
+
+// Restore real useSound for this test and provide Audio constructor
+vi.unmock('@/hooks/useSound');
+
+class MockAudio {
+  volume = 0.5;
+  currentTime = 0;
+  preload = '';
+  src = '';
+  play = vi.fn().mockResolvedValue(undefined);
+  pause = vi.fn();
+  load = vi.fn();
+}
+vi.stubGlobal('Audio', vi.fn(function() { return new MockAudio(); }));
+
 import { SoundToggle } from '../../../../src/components/common/SoundToggle';
 import { useUIStore } from '../../../../src/stores/useUIStore';
-
-// Mock Audio
-vi.stubGlobal('Audio', vi.fn().mockImplementation(() => ({
-  volume: 0.5,
-  currentTime: 0,
-  preload: '',
-  src: '',
-  play: vi.fn().mockResolvedValue(undefined),
-  pause: vi.fn(),
-})));
 
 describe('SoundToggle', () => {
   beforeEach(() => {
