@@ -8,5 +8,5 @@ requests==2.32.5
 Pillow==12.1.1
 
 # AI provider SDKs
-openai==1.72.0
+openai==2.29.0
 google-genai==1.68.0
