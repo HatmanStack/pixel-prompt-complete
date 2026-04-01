@@ -19,13 +19,13 @@ format: ## Format all code (Prettier + ruff format)
 	cd frontend && npx prettier --write 'src/**/*.{ts,tsx,js,jsx,css,json}'
 	ruff format backend/src/
 
-e2e-up: ## Start LocalStack
+e2e-up: ## Start MiniStack
 	docker compose up -d --wait
 
 e2e: ## Run E2E tests
 	PYTHONPATH=backend/src pytest tests/backend/e2e -v -m e2e
 
-e2e-down: ## Stop LocalStack
+e2e-down: ## Stop MiniStack
 	docker compose down
 
 check: lint test ## Full CI-equivalent check (lint + test)
