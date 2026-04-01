@@ -5,7 +5,7 @@ anyio==4.12.1
     #   google-genai
     #   httpx
     #   openai
-boto3==1.37.22
+boto3==1.42.81
     # via -r requirements.txt
 botocore==1.37.38
     # via
