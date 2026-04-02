@@ -43,7 +43,7 @@ language_stack: both
 
 5. **`CLAUDE.md:48-50`** -- CI description is incomplete
    - Doc says: "Runs on push/PR to main/develop: frontend lint + typecheck -> frontend tests -> backend lint + tests."
-   - Code (`.github/workflows/ci.yml`): CI also runs `format:check` in frontend-lint and includes a separate `e2e-tests` job with LocalStack. The description omits format checking and E2E testing.
+   - Code (`.github/workflows/ci.yml`): CI also runs `format:check` in frontend-lint and includes a separate `e2e-tests` job with MiniStack. The description omits format checking and E2E testing.
 
 6. **`README.md:168-171`** -- Model default IDs in README
    - README says Flux default is `flux-pro-1.1` and Gemini default is `gemini-2.0-flash-exp`

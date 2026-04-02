@@ -116,12 +116,12 @@ npm run dev
 | `ruff format backend/src/` | Format |
 | `sam local start-api` | Local API |
 
-### E2E Tests (LocalStack)
+### E2E Tests (MiniStack)
 
 ```bash
-make e2e-up                                    # Start LocalStack
+make e2e-up                                    # Start MiniStack
 PYTHONPATH=backend/src pytest tests/backend/e2e -v -m e2e  # Run E2E
-make e2e-down                                  # Stop LocalStack
+make e2e-down                                  # Stop MiniStack
 ```
 
 ### Quick Check (All Tests + Linting)
@@ -152,9 +152,9 @@ make check
 ├── tests/
 │   └── backend/
 │       ├── unit/           # Unit tests (moto S3 mocks)
-│       └── e2e/            # E2E tests (LocalStack)
+│       └── e2e/            # E2E tests (MiniStack)
 ├── docs/adr/               # Architecture Decision Records
-├── docker-compose.yml      # LocalStack for E2E tests
+├── docker-compose.yml      # MiniStack for E2E tests
 ├── Makefile                # Common dev commands
 └── CONTRIBUTING.md         # Contribution guide
 ```

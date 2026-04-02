@@ -1,8 +1,8 @@
 """
-E2E test fixtures providing real S3-backed components via LocalStack.
+E2E test fixtures providing real S3-backed components via MiniStack.
 
 All external model API calls are stubbed with fake image generators,
-but all S3 state management runs against real LocalStack S3.
+but all S3 state management runs against real MiniStack S3.
 """
 
 import json
@@ -14,33 +14,33 @@ import boto3
 import pytest
 import requests
 
-# ── LocalStack connectivity check ──────────────────────────────────────
+# ── MiniStack connectivity check ──────────────────────────────────────
 
-LOCALSTACK_ENDPOINT = os.environ.get("LOCALSTACK_ENDPOINT", "http://localhost:4566")
+MINISTACK_ENDPOINT = os.environ.get("MINISTACK_ENDPOINT", "http://localhost:4566")
 
 
-def _localstack_available() -> bool:
+def _ministack_available() -> bool:
     try:
-        resp = requests.get(f"{LOCALSTACK_ENDPOINT}/_localstack/health", timeout=2)
+        resp = requests.get(f"{MINISTACK_ENDPOINT}/_ministack/health", timeout=2)
         return resp.status_code == 200
     except Exception:
         return False
 
 
-skip_no_localstack = pytest.mark.skipif(
-    not _localstack_available(),
-    reason="LocalStack not running",
+skip_no_ministack = pytest.mark.skipif(
+    not _ministack_available(),
+    reason="MiniStack not running",
 )
 
 # ── Fixtures ───────────────────────────────────────────────────────────
 
 
 @pytest.fixture
-def localstack_s3():
-    """Create a real S3 client pointing at LocalStack with a fresh bucket."""
+def ministack_s3():
+    """Create a real S3 client pointing at MiniStack with a fresh bucket."""
     s3 = boto3.client(
         "s3",
-        endpoint_url=LOCALSTACK_ENDPOINT,
+        endpoint_url=MINISTACK_ENDPOINT,
         region_name="us-east-1",
         aws_access_key_id="test",
         aws_secret_access_key="test",
@@ -75,14 +75,14 @@ def _fake_outpaint(config, source_image, preset, prompt):
 
 
 @pytest.fixture
-def e2e_handler(localstack_s3):
+def e2e_handler(ministack_s3):
     """
-    Construct real S3-backed components against LocalStack, patch them into
+    Construct real S3-backed components against MiniStack, patch them into
     lambda_function module singletons, and yield the lambda_handler.
 
     Only model API handler functions are stubbed with fakes.
     """
-    s3, bucket = localstack_s3
+    s3, bucket = ministack_s3
 
     from jobs.manager import SessionManager
     from models.context import ContextManager

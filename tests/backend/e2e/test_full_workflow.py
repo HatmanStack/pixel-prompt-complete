@@ -1,5 +1,5 @@
 """
-E2E tests exercising the critical user journey with real S3 state via LocalStack.
+E2E tests exercising the critical user journey with real S3 state via MiniStack.
 
 These tests validate the full request lifecycle: session creation, iteration,
 outpainting, rate limiting, and gallery queries — all backed by real S3.
@@ -9,9 +9,9 @@ import json
 
 import pytest
 
-from .conftest import skip_no_localstack
+from .conftest import skip_no_ministack
 
-pytestmark = [pytest.mark.e2e, skip_no_localstack]
+pytestmark = [pytest.mark.e2e, skip_no_ministack]
 
 
 # ── Helpers ────────────────────────────────────────────────────────────

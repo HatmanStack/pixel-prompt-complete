@@ -64,7 +64,7 @@ PYTHONPATH=backend/src pytest tests/backend/unit -v
 
 ### Backend E2E Tests
 
-Require LocalStack (Docker):
+Require MiniStack (Docker):
 
 ```bash
 make e2e-up

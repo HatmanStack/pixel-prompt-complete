@@ -172,7 +172,7 @@ pillar_overrides:
 | Pillar | Score | Evidence |
 |--------|-------|----------|
 | Test Value | 8/10 | `tests/backend/unit/test_session_manager.py` tests observable behavior against real moto S3; `frontend/tests/__tests__/hooks/useIteration.test.ts` tests hook contracts not implementation. One placeholder at `frontend/tests/__tests__/components/ImageCard.test.jsx:197`. |
-| Reproducibility | 8/10 | `Makefile` with `make check` one-liner; `.github/workflows/ci.yml` covers lint+typecheck+tests+E2E with LocalStack; `package-lock.json` and `requirements.txt` lock deps. Missing backend lockfile (no `uv.lock`/`poetry.lock`). |
+| Reproducibility | 8/10 | `Makefile` with `make check` one-liner; `.github/workflows/ci.yml` covers lint+typecheck+tests+E2E with MiniStack; `package-lock.json` and `requirements.txt` lock deps. Missing backend lockfile (no `uv.lock`/`poetry.lock`). |
 | Git Hygiene | 7/10 | Conventional commits enforced via husky/commitlint (`.husky/commit-msg`); feature branch PRs used. Some vague messages ("fix: info", "deleted plans") and a few mega-commits ("refactor: comprehensive quality remediation across all pillars"). |
 | Onboarding | 9/10 | `README.md` has quick start in 3 commands; `CONTRIBUTING.md` covers workflow, coding standards, commit conventions; `CLAUDE.md` provides deep architecture context; `frontend/.env.example` exists; `docs/adr/` records architectural decisions; `Makefile` centralizes commands. |
 
@@ -185,7 +185,7 @@ pillar_overrides:
 ### HIGHLIGHTS
 - **Process Win:** The `conftest.py` at `tests/backend/unit/conftest.py` provides proper test isolation with `autouse=True` singleton reset and moto-backed `mock_s3` fixture.
 - **Process Win:** `CLAUDE.md` is one of the most thorough project context files seen -- documents module structure, API endpoints, handler registration patterns, S3 key structure, and "how to add a new handler type" recipe.
-- **Process Win:** CI pipeline at `.github/workflows/ci.yml` is well-structured with proper job dependencies, coverage enforcement (`--cov-fail-under=60`), E2E tests against LocalStack, and a final status-check gate job.
+- **Process Win:** CI pipeline at `.github/workflows/ci.yml` is well-structured with proper job dependencies, coverage enforcement (`--cov-fail-under=60`), E2E tests against MiniStack, and a final status-check gate job.
 - **Maintenance Drag:** `test_context_manager.py` asserts on mock call args -- exactly the kind of implementation coupling that `test_session_manager.py` was refactored to avoid.
 
 ### REMEDIATION TARGETS

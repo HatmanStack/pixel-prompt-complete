@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - S3 pagination for gallery listing endpoints
 - Configurable CORS allowed origin via `CORS_ALLOWED_ORIGIN` env var
 - Comprehensive environment variable reference in CLAUDE.md
-- E2E test suite running against LocalStack in CI
+- E2E test suite running against MiniStack in CI
 - `.env.example` and `requirements-lock.txt` for reproducibility
 - `LICENSE` file
 
@@ -53,4 +53,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Gallery browser with CloudFront CDN delivery
 - LLM-based prompt enhancement
 - React + TypeScript frontend with Zustand state management
-- E2E test suite with LocalStack
+- E2E test suite with MiniStack

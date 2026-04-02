@@ -108,9 +108,9 @@ docs: align model default IDs across config.py, template.yaml, CLAUDE.md, and RE
   - Change the line to: `- \`useSessionPolling\` -- Poll /status/{sessionId} until complete`
 - In the CI description (around line 48-50):
   - Update to mention `format:check` in frontend lint
-  - Add mention of the `e2e-tests` job with LocalStack
+  - Add mention of the `e2e-tests` job with MiniStack
   - Add mention of the `status-check` gate job
-  - Example: "Runs on push/PR to main/develop: frontend format check + lint + typecheck -> frontend tests -> backend lint + tests -> E2E tests (LocalStack) -> status gate."
+  - Example: "Runs on push/PR to main/develop: frontend format check + lint + typecheck -> frontend tests -> backend lint + tests -> E2E tests (MiniStack) -> status gate."
 
 **Verification Checklist:**
 - [x] `useJobPolling` does not appear in CLAUDE.md
@@ -141,7 +141,7 @@ docs: fix CLAUDE.md hooks listing and CI description
   - Remove `sam local invoke -e events/generate.json` since the `events/` directory does not exist. Replace with a comment noting that event files can be created for local testing, or simply remove the line.
   - Update `sam deploy  # Uses samconfig.toml` comment to note that `samconfig.toml` is generated on first `sam deploy --guided` and is not checked in.
 - In the Test Structure section (around lines 149-163):
-  - Add `tests/backend/e2e/` directory and describe it: "E2E tests with LocalStack (require Docker, run via `pytest tests/backend/e2e -v -m e2e`)"
+  - Add `tests/backend/e2e/` directory and describe it: "E2E tests with MiniStack (require Docker, run via `pytest tests/backend/e2e -v -m e2e`)"
   - Add missing frontend test subdirectories: `api/` and `fixtures/`
   - Verify subdirectory listing matches actual `ls frontend/tests/__tests__/`
 

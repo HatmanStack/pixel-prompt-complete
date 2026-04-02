@@ -35,7 +35,7 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 markers = [
-    "e2e: E2E tests requiring LocalStack",
+    "e2e: E2E tests requiring MiniStack",
     "slow: slow tests (deselect with -m 'not slow')",
 ]
 
