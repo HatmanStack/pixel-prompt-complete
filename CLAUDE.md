@@ -46,7 +46,7 @@ sam local start-api
 
 ### CI (`.github/workflows/ci.yml`)
 
-Runs on push/PR to main/develop: frontend format check + lint + typecheck → frontend tests → backend lint + tests → E2E tests (LocalStack) → status gate. Backend CI sets `PYTHONPATH=$GITHUB_WORKSPACE/backend/src`.
+Runs on push/PR to main/develop: frontend format check + lint + typecheck → frontend tests → backend lint + tests → E2E tests (MiniStack) → status gate. Backend CI sets `PYTHONPATH=$GITHUB_WORKSPACE/backend/src`.
 
 ## Architecture
 
@@ -235,7 +235,7 @@ Backend tests live at repo root in `tests/`. Frontend tests live in `frontend/te
 tests/backend/unit/          # Unit tests with moto S3 mocks (conftest.py provides mock_s3 fixture)
 tests/backend/unit/fixtures/ # Shared API response fixtures
 tests/backend/integration/   # Integration tests (require deployed backend + API_ENDPOINT env var)
-tests/backend/e2e/           # E2E tests with LocalStack (require Docker, run via pytest tests/backend/e2e -v -m e2e)
+tests/backend/e2e/           # E2E tests with MiniStack (require Docker, run via pytest tests/backend/e2e -v -m e2e)
 frontend/tests/__tests__/    # Vitest + React Testing Library
   api/                       # API client tests
   components/                # Component tests (.jsx and .tsx)
