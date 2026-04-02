@@ -98,7 +98,7 @@ jobs:
       MINISTACK_ENDPOINT: http://localhost:4566
     services:
       ministack:
-        image: ministack/ministack:4
+        image: nahuelnucera/ministack
         ports:
           - 4566:4566
         env:
