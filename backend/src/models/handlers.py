@@ -13,7 +13,6 @@ by redacting any keys that might appear in exception messages returned to client
 
 import base64
 import re
-import time
 from typing import Any, Callable, Dict, List, Literal, NotRequired, TypedDict, Union
 
 import requests
@@ -21,8 +20,6 @@ from google.genai import types
 
 from config import (
     api_client_timeout,
-    bfl_max_poll_attempts,
-    bfl_poll_interval,
     image_download_timeout,
 )
 from utils.clients import get_genai_client as _get_genai_client
@@ -50,26 +47,6 @@ def _ensure_base64(source_image: Union[str, bytes]) -> str:
     if isinstance(source_image, str):
         return source_image
     return base64.b64encode(source_image).decode("utf-8")
-
-
-def _poll_bfl_job(job_id: str, headers: dict, max_attempts: int = 40, interval: int = 3) -> str:
-    """Common BFL polling logic. Returns base64 image or raises."""
-    result_url = f"https://api.bfl.ai/v1/get_result?id={job_id}"
-    for _attempt in range(max_attempts):
-        time.sleep(interval)
-        result_response = requests.get(result_url, headers=headers, timeout=10)
-        result_response.raise_for_status()
-        result_data = result_response.json()
-
-        if result_data.get("status") == "Ready":
-            image_url = result_data["result"]["sample"]
-            img_response = requests.get(image_url, timeout=image_download_timeout)
-            img_response.raise_for_status()
-            return base64.b64encode(img_response.content).decode("utf-8")
-        elif result_data.get("status") == "Error":
-            raise ValueError(f"BFL job failed: {result_data.get('error', 'Unknown error')}")
-
-    raise TimeoutError(f"BFL job timeout after {max_attempts * interval} seconds")
 
 
 def _extract_gemini_image(response) -> str:
@@ -271,97 +248,6 @@ def handle_google_gemini(
         return _error_result(e, model_config, "google_gemini")
 
 
-def handle_bfl(model_config: ModelConfig, prompt: str, params: GenerationParams) -> HandlerResult:
-    """
-    Handle image generation for Black Forest Labs (Flux).
-
-    Args:
-        model_config: Model configuration dict
-        prompt: Text prompt for image generation
-        params: Generation parameters (supports max_poll_attempts, poll_interval_seconds)
-
-    Returns:
-        Standardized response dict
-    """
-    try:
-        # Use model ID directly as endpoint (e.g., "flux-pro-1.1", "flux-dev")
-        endpoint = model_config["id"]
-
-        # Start job
-        start_url = f"https://api.bfl.ai/v1/{endpoint}"
-        api_key = model_config.get("api_key", "")
-        headers = {"Content-Type": "application/json"}
-        if api_key:
-            headers["x-key"] = api_key
-        payload = {"prompt": prompt, "width": 1024, "height": 1024}
-
-        response = requests.post(start_url, headers=headers, json=payload, timeout=30)
-        response.raise_for_status()
-        job_data = response.json()
-        job_id = job_data.get("id")
-
-        if not job_id:
-            raise ValueError("No job ID returned from BFL API")
-
-        # Poll for result using shared helper (configurable via environment or params)
-        max_attempts = params.get("max_poll_attempts", bfl_max_poll_attempts)
-        poll_interval = params.get("poll_interval_seconds", bfl_poll_interval)
-        poll_headers = {"x-key": api_key} if api_key else {}
-        image_base64 = _poll_bfl_job(
-            job_id,
-            poll_headers,
-            max_attempts=max_attempts,
-            interval=poll_interval,
-        )
-
-        return _success_result(image_base64, model_config, "bfl")
-
-    except Exception as e:
-        return _error_result(e, model_config, "bfl")
-
-
-def handle_recraft(
-    model_config: ModelConfig, prompt: str, _params: GenerationParams
-) -> HandlerResult:
-    """
-    Handle image generation for Recraft.
-
-    Args:
-        model_config: Model configuration dict
-        prompt: Text prompt for image generation
-        _params: Generation parameters (unused - Recraft uses default settings)
-
-    Returns:
-        Standardized response dict
-    """
-    try:
-        # Recraft uses OpenAI-compatible API with custom base URL
-        client = _get_openai_client(
-            model_config.get("api_key", ""),
-            base_url="https://external.api.recraft.ai/v1",
-        )
-
-        # Call image generation (OpenAI-compatible)
-        response = client.images.generate(
-            model=model_config.get("id", "recraftv3"), prompt=prompt, size="1024x1024", n=1
-        )
-
-        # Extract image URL
-        image_url = response.data[0].url
-
-        # Download image
-        img_response = requests.get(image_url, timeout=image_download_timeout)
-        img_response.raise_for_status()
-
-        # Convert to base64
-        image_base64 = base64.b64encode(img_response.content).decode("utf-8")
-
-        return _success_result(image_base64, model_config, "recraft")
-
-    except Exception as e:
-        return _error_result(e, model_config, "recraft")
-
-
 def get_handler(provider: str) -> HandlerFunc:
     """
     Get the appropriate handler function for a provider.
@@ -378,8 +264,6 @@ def get_handler(provider: str) -> HandlerFunc:
     handlers = {
         "openai": handle_openai,
         "google_gemini": handle_google_gemini,
-        "bfl": handle_bfl,
-        "recraft": handle_recraft,
     }
 
     handler = handlers.get(provider)
@@ -392,94 +276,6 @@ def get_handler(provider: str) -> HandlerFunc:
 # ============================================================================
 # ITERATION HANDLERS
 # ============================================================================
-
-
-def iterate_flux(
-    model_config: ModelConfig,
-    source_image: Union[str, bytes],
-    prompt: str,
-    context: List[Dict[str, Any]],
-) -> HandlerResult:
-    """
-    Iterate on an image using FLUX Fill API.
-
-    Uses full-image mask for complete refinement based on prompt.
-
-    Args:
-        model_config: Model configuration with API key
-        source_image: Base64-encoded source image
-        prompt: Refinement instruction
-        context: Rolling 3-iteration context window (unused for Flux)
-
-    Returns:
-        Standardized response dict
-    """
-    try:
-        url = "https://api.bfl.ai/v1/flux-pro-1.1-fill"
-        api_key = model_config.get("api_key", "")
-        headers = {
-            "x-key": api_key,
-            "Content-Type": "application/json",
-        }
-
-        context_prompt = _build_context_prompt(prompt, context)
-        payload = {
-            "image": _ensure_base64(source_image),
-            "prompt": context_prompt,
-            "width": 1024,
-            "height": 1024,
-        }
-
-        response = requests.post(url, headers=headers, json=payload, timeout=30)
-        response.raise_for_status()
-        job_id = response.json().get("id")
-        if not job_id:
-            raise ValueError("No job ID returned from BFL Fill API")
-
-        poll_headers = {"x-key": api_key}
-        image_base64 = _poll_bfl_job(job_id, poll_headers)
-
-        return _success_result(image_base64, model_config, "bfl")
-
-    except Exception as e:
-        return _error_result(e, model_config, "bfl")
-
-
-def iterate_recraft(
-    model_config: ModelConfig,
-    source_image: Union[str, bytes],
-    prompt: str,
-    context: List[Dict[str, Any]],
-) -> HandlerResult:
-    """Iterate on an image using Recraft imageToImage endpoint."""
-    try:
-        url = "https://external.api.recraft.ai/v1/images/imageToImage"
-        headers = {"Authorization": f"Bearer {model_config.get('api_key', '')}"}
-
-        image_bytes = _decode_source_image(source_image)
-        context_prompt = _build_context_prompt(prompt, context)
-
-        files = {"image": ("image.png", image_bytes, "image/png")}
-        data = {
-            "prompt": context_prompt,
-            "model": model_config.get("id", "recraftv3"),
-            "response_format": "url",
-        }
-
-        response = requests.post(url, headers=headers, files=files, data=data, timeout=60)
-        response.raise_for_status()
-        result = response.json()
-
-        image_url = result.get("data", [{}])[0].get("url")
-        if not image_url:
-            raise ValueError("No image URL in Recraft response")
-
-        image_base64 = _download_image_as_base64(image_url)
-
-        return _success_result(image_base64, model_config, "recraft")
-
-    except Exception as e:
-        return _error_result(e, model_config, "recraft")
 
 
 def iterate_gemini(
@@ -557,8 +353,6 @@ def get_iterate_handler(provider: str) -> IterateHandlerFunc:
         Iteration handler function
     """
     handlers = {
-        "bfl": iterate_flux,
-        "recraft": iterate_recraft,
         "google_gemini": iterate_gemini,
         "openai": iterate_openai,
     }
@@ -573,110 +367,6 @@ def get_iterate_handler(provider: str) -> IterateHandlerFunc:
 # ============================================================================
 # OUTPAINTING HANDLERS
 # ============================================================================
-
-
-def outpaint_flux(
-    model_config: ModelConfig, source_image: Union[str, bytes], preset: str, prompt: str
-) -> HandlerResult:
-    """
-    Expand an image using FLUX Fill with edge mask.
-
-    Args:
-        model_config: Model configuration with API key
-        source_image: Base64-encoded source image
-        preset: Aspect preset ('16:9', '9:16', '1:1', '4:3', 'expand_all')
-        prompt: Description for expanded regions
-
-    Returns:
-        Standardized response dict
-    """
-    try:
-        from utils.outpaint import (
-            calculate_expansion,
-            create_expansion_mask,
-            get_image_dimensions,
-            pad_image_with_transparency,
-        )
-
-        image_bytes = _decode_source_image(source_image)
-        width, height = get_image_dimensions(image_bytes)
-        expansion = calculate_expansion(width, height, preset)
-
-        if (
-            expansion["left"] == 0
-            and expansion["right"] == 0
-            and expansion["top"] == 0
-            and expansion["bottom"] == 0
-        ):
-            return _success_result(_ensure_base64(source_image), model_config, "bfl")
-
-        padded_image = pad_image_with_transparency(image_bytes, expansion)
-        mask = create_expansion_mask(width, height, expansion, mask_format="base64")
-
-        url = "https://api.bfl.ai/v1/flux-pro-1.1-fill"
-        api_key = model_config.get("api_key", "")
-        headers = {"x-key": api_key, "Content-Type": "application/json"}
-        payload = {
-            "image": base64.b64encode(padded_image).decode("utf-8"),
-            "mask": mask,
-            "prompt": f"Expand the image: {prompt}",
-            "width": expansion["new_width"],
-            "height": expansion["new_height"],
-        }
-
-        response = requests.post(url, headers=headers, json=payload, timeout=30)
-        response.raise_for_status()
-        job_id = response.json().get("id")
-        if not job_id:
-            raise ValueError("No job ID returned from BFL Fill API")
-
-        poll_headers = {"x-key": api_key}
-        image_base64 = _poll_bfl_job(job_id, poll_headers)
-
-        return _success_result(image_base64, model_config, "bfl")
-
-    except Exception as e:
-        return _error_result(e, model_config, "bfl")
-
-
-def outpaint_recraft(
-    model_config: ModelConfig, source_image: Union[str, bytes], preset: str, prompt: str
-) -> HandlerResult:
-    """Expand an image using Recraft outpaint endpoint."""
-    try:
-        from utils.outpaint import calculate_expansion, get_image_dimensions
-
-        image_bytes = _decode_source_image(source_image)
-        width, height = get_image_dimensions(image_bytes)
-        expansion = calculate_expansion(width, height, preset)
-
-        url = "https://external.api.recraft.ai/v1/images/outpaint"
-        headers = {"Authorization": f"Bearer {model_config.get('api_key', '')}"}
-        files = {"image": ("image.png", image_bytes, "image/png")}
-        data = {
-            "prompt": prompt,
-            "model": model_config.get("id", "recraftv3"),
-            "left": expansion["left"],
-            "right": expansion["right"],
-            "top": expansion["top"],
-            "bottom": expansion["bottom"],
-            "response_format": "url",
-        }
-
-        response = requests.post(url, headers=headers, files=files, data=data, timeout=60)
-        response.raise_for_status()
-        result = response.json()
-
-        image_url = result.get("data", [{}])[0].get("url")
-        if not image_url:
-            raise ValueError("No image URL in Recraft outpaint response")
-
-        image_base64 = _download_image_as_base64(image_url)
-
-        return _success_result(image_base64, model_config, "recraft")
-
-    except Exception as e:
-        return _error_result(e, model_config, "recraft")
 
 
 def outpaint_gemini(
@@ -763,8 +453,6 @@ def get_outpaint_handler(provider: str) -> OutpaintHandlerFunc:
         Outpainting handler function
     """
     handlers = {
-        "bfl": outpaint_flux,
-        "recraft": outpaint_recraft,
         "google_gemini": outpaint_gemini,
         "openai": outpaint_openai,
     }

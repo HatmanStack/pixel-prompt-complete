@@ -8,8 +8,6 @@ from unittest.mock import Mock, patch, MagicMock
 from models.handlers import (
     handle_openai,
     handle_google_gemini,
-    handle_bfl,
-    handle_recraft,
 )
 from .fixtures.api_responses import (
     SAMPLE_IMAGE_CONTENT,
@@ -144,88 +142,3 @@ class TestGoogleHandlers:
 
             assert result['status'] == 'error'
             assert 'Gemini API Error' in result['error']
-
-
-class TestOtherHandlers:
-    """Tests for BFL and Recraft handlers"""
-
-    @responses.activate
-    def test_black_forest_success(self, sample_prompt, sample_params):
-        """Test Black Forest Labs handler with polling"""
-        bfl_config = {
-            'index': 1,
-            'provider': 'bfl',
-            'id': 'flux-pro-1.1',
-            'api_key': 'test-bfl-key'
-        }
-
-        # Mock job creation
-        responses.add(
-            responses.POST,
-            "https://api.bfl.ai/v1/flux-pro-1.1",
-            json={"id": "test-job-id"},
-            status=200
-        )
-
-        # Mock polling result (Ready immediately)
-        responses.add(
-            responses.GET,
-            "https://api.bfl.ai/v1/get_result?id=test-job-id",
-            json={
-                "status": "Ready",
-                "result": {"sample": "https://example.com/bfl-image.png"}
-            },
-            status=200
-        )
-
-        # Mock image download
-        responses.add(
-            responses.GET,
-            "https://example.com/bfl-image.png",
-            body=SAMPLE_IMAGE_CONTENT,
-            status=200
-        )
-
-        # Reduce polling parameters to speed up test
-        params_with_fast_poll = {**sample_params, 'max_poll_attempts': 1, 'poll_interval_seconds': 0}
-
-        with patch('models.handlers.time.sleep'):  # Skip actual sleeping
-            result = handle_bfl(bfl_config, sample_prompt, params_with_fast_poll)
-
-        assert result['status'] == 'success'
-        assert 'image' in result
-        assert result['provider'] == 'bfl'
-
-    @responses.activate
-    def test_recraft_success(self, sample_prompt, sample_params):
-        """Test Recraft handler - uses OpenAI SDK"""
-        recraft_config = {
-            'index': 1,
-            'provider': 'recraft',
-            'id': 'recraftv3',
-            'api_key': 'test-recraft-key'
-        }
-
-        # Mock image download
-        responses.add(
-            responses.GET,
-            "https://example.com/recraft-image.png",
-            body=SAMPLE_IMAGE_CONTENT,
-            status=200
-        )
-
-        with patch('utils.clients.OpenAI') as mock_openai:
-            mock_client = Mock()
-            mock_openai.return_value = mock_client
-
-            # Setup mock response
-            mock_response = Mock()
-            mock_response.data = [Mock(url="https://example.com/recraft-image.png")]
-            mock_client.images.generate.return_value = mock_response
-
-            result = handle_recraft(recraft_config, sample_prompt, sample_params)
-
-            assert result['status'] == 'success'
-            assert 'image' in result
-            assert result['provider'] == 'recraft'
-

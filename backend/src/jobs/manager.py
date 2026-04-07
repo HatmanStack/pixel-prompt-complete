@@ -67,7 +67,7 @@ class SessionManager:
 
         # Initialize model states for all 4 models
         models = {}
-        for model_name in ["flux", "recraft", "gemini", "openai"]:
+        for model_name in ["gemini", "openai"]:
             models[model_name] = {
                 "enabled": model_name in enabled_models,
                 "status": "pending" if model_name in enabled_models else "disabled",

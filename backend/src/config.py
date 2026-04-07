@@ -71,22 +71,6 @@ prompt_model_api_key = os.environ.get("PROMPT_MODEL_API_KEY", "")
 
 # 4 Fixed Models Configuration
 MODELS: Dict[str, ModelConfig] = {
-    "flux": ModelConfig(
-        name="flux",
-        provider="bfl",
-        enabled=os.environ.get("FLUX_ENABLED", "true").lower() == "true",
-        api_key=os.environ.get("FLUX_API_KEY", ""),
-        model_id=os.environ.get("FLUX_MODEL_ID", "flux-2-pro"),
-        display_name="Flux",
-    ),
-    "recraft": ModelConfig(
-        name="recraft",
-        provider="recraft",
-        enabled=os.environ.get("RECRAFT_ENABLED", "true").lower() == "true",
-        api_key=os.environ.get("RECRAFT_API_KEY", ""),
-        model_id=os.environ.get("RECRAFT_MODEL_ID", "recraftv3"),
-        display_name="Recraft",
-    ),
     "gemini": ModelConfig(
         name="gemini",
         provider="google_gemini",
@@ -160,7 +144,3 @@ def get_model_config_dict(model: ModelConfig) -> Dict:
 api_client_timeout = _safe_float("API_CLIENT_TIMEOUT", 120.0)
 image_download_timeout = _safe_int("IMAGE_DOWNLOAD_TIMEOUT", 30)
 generate_thread_workers = _safe_int("GENERATE_THREAD_WORKERS", 4)
-
-# BFL polling configuration
-bfl_max_poll_attempts = _safe_int("BFL_MAX_POLL_ATTEMPTS", 40)
-bfl_poll_interval = _safe_int("BFL_POLL_INTERVAL", 3)

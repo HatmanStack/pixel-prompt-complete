@@ -10,18 +10,6 @@ Metadata:
         Parameters:
           - Environment
       - Label:
-          default: "Flux Configuration (BFL)"
-        Parameters:
-          - FluxEnabled
-          - FluxApiKey
-          - FluxModelId
-      - Label:
-          default: "Recraft Configuration"
-        Parameters:
-          - RecraftEnabled
-          - RecraftApiKey
-          - RecraftModelId
-      - Label:
           default: "Gemini Configuration (Google)"
         Parameters:
           - GeminiEnabled
@@ -59,46 +47,6 @@ Parameters:
       - staging
       - prod
     Description: Environment name for resource tagging
-
-  # Flux (BFL) Configuration
-  FluxEnabled:
-    Type: String
-    Default: "true"
-    AllowedValues:
-      - "true"
-      - "false"
-    Description: Enable Flux model (Black Forest Labs)
-
-  FluxApiKey:
-    Type: String
-    NoEcho: true
-    Default: ""
-    Description: BFL API key for Flux models
-
-  FluxModelId:
-    Type: String
-    Default: "flux-2-pro"
-    Description: Flux model ID (e.g., flux-2-pro, flux-pro-1.1, flux-dev)
-
-  # Recraft Configuration
-  RecraftEnabled:
-    Type: String
-    Default: "true"
-    AllowedValues:
-      - "true"
-      - "false"
-    Description: Enable Recraft v3 model
-
-  RecraftApiKey:
-    Type: String
-    NoEcho: true
-    Default: ""
-    Description: Recraft API key
-
-  RecraftModelId:
-    Type: String
-    Default: "recraftv3"
-    Description: Recraft model ID
 
   # Gemini Configuration
   GeminiEnabled:
@@ -203,13 +151,7 @@ Resources:
       ReservedConcurrentExecutions: 10
       Environment:
         Variables:
-          # 4 Fixed Models Configuration
-          FLUX_ENABLED: !Ref FluxEnabled
-          FLUX_API_KEY: !Ref FluxApiKey
-          FLUX_MODEL_ID: !Ref FluxModelId
-          RECRAFT_ENABLED: !Ref RecraftEnabled
-          RECRAFT_API_KEY: !Ref RecraftApiKey
-          RECRAFT_MODEL_ID: !Ref RecraftModelId
+          # Model Configuration
           GEMINI_ENABLED: !Ref GeminiEnabled
           GEMINI_API_KEY: !Ref GeminiApiKey
           GEMINI_MODEL_ID: !Ref GeminiModelId

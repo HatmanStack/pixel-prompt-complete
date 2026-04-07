@@ -110,15 +110,15 @@ from lambda_function import lambda_handler  # noqa: E402
 class TestRouting:
     @patch("lambda_function.as_completed")
     def test_post_generate(self, mock_as_completed, mocks):
-        fake_model = MagicMock(name="flux", provider="bfl")
-        fake_model.name = "flux"
+        fake_model = MagicMock(name="gemini", provider="google_gemini")
+        fake_model.name = "gemini"
         mocks["get_enabled_models"].return_value = [fake_model]
         mocks["session_manager"].create_session.return_value = "sess-1"
-        mocks["get_model_config_dict"].return_value = {"id": "flux-2-pro"}
+        mocks["get_model_config_dict"].return_value = {"id": "gemini-2.5-flash-image"}
 
         # Create a real-looking future mock
         future = MagicMock()
-        future.result.return_value = ("flux", {
+        future.result.return_value = ("gemini", {
             "status": "completed",
             "imageKey": "k",
             "imageUrl": "https://cdn/k",
@@ -136,6 +136,7 @@ class TestRouting:
         resp = lambda_handler(_make_event(body={"prompt": "sunset"}), None)
         assert resp["statusCode"] == 200
         assert _body(resp)["sessionId"] == "sess-1"
+        assert "gemini" in _body(resp)["models"]
 
     def test_post_iterate(self, mocks):
         mocks["session_manager"].get_iteration_count.return_value = 1
@@ -143,13 +144,13 @@ class TestRouting:
         mocks["session_manager"].add_iteration.return_value = 1
         mocks["image_storage"].get_image.return_value = {"output": "b64"}
         mocks["context_manager"].get_context_for_iteration.return_value = []
-        mocks["get_model"].return_value = MagicMock(provider="bfl")
-        mocks["get_model_config_dict"].return_value = {"id": "flux"}
+        mocks["get_model"].return_value = MagicMock(provider="google_gemini")
+        mocks["get_model_config_dict"].return_value = {"id": "gemini-2.5-flash-image"}
         mocks["get_iterate_handler"].return_value = lambda c, s, p, ctx: {"status": "success", "image": "new"}
         mocks["image_storage"].upload_image.return_value = "k2"
         mocks["image_storage"].get_cloudfront_url.return_value = "https://cdn/k2"
 
-        resp = lambda_handler(_make_event(path="/iterate", body={"sessionId": "s1", "model": "flux", "prompt": "more"}), None)
+        resp = lambda_handler(_make_event(path="/iterate", body={"sessionId": "s1", "model": "gemini", "prompt": "more"}), None)
         assert resp["statusCode"] == 200
         assert _body(resp)["status"] == "completed"
 
@@ -158,13 +159,13 @@ class TestRouting:
         mocks["session_manager"].get_latest_image_key.return_value = "k"
         mocks["session_manager"].add_iteration.return_value = 1
         mocks["image_storage"].get_image.return_value = {"output": "b64"}
-        mocks["get_model"].return_value = MagicMock(provider="bfl")
-        mocks["get_model_config_dict"].return_value = {"id": "flux"}
+        mocks["get_model"].return_value = MagicMock(provider="google_gemini")
+        mocks["get_model_config_dict"].return_value = {"id": "gemini-2.5-flash-image"}
         mocks["get_outpaint_handler"].return_value = lambda c, s, pr, p: {"status": "success", "image": "out"}
         mocks["image_storage"].upload_image.return_value = "k3"
         mocks["image_storage"].get_cloudfront_url.return_value = "https://cdn/k3"
 
-        resp = lambda_handler(_make_event(path="/outpaint", body={"sessionId": "s1", "model": "flux", "preset": "16:9", "prompt": "expand"}), None)
+        resp = lambda_handler(_make_event(path="/outpaint", body={"sessionId": "s1", "model": "gemini", "preset": "16:9", "prompt": "expand"}), None)
         assert resp["statusCode"] == 200
         assert _body(resp)["preset"] == "16:9"
 
@@ -224,7 +225,7 @@ class TestErrorCases:
 
     def test_rate_limit_iterate(self, mocks):
         mocks["rate_limiter"].check_rate_limit.return_value = True
-        resp = lambda_handler(_make_event(path="/iterate", body={"sessionId": "s", "model": "flux", "prompt": "x"}), None)
+        resp = lambda_handler(_make_event(path="/iterate", body={"sessionId": "s", "model": "gemini", "prompt": "x"}), None)
         assert resp["statusCode"] == 429
 
     def test_content_filter_generate(self, mocks):
@@ -235,7 +236,7 @@ class TestErrorCases:
     def test_content_filter_outpaint(self, mocks):
         mocks["content_filter"].check_prompt.return_value = True
         resp = lambda_handler(
-            _make_event(path="/outpaint", body={"sessionId": "s", "model": "flux", "preset": "16:9", "prompt": "bad"}),
+            _make_event(path="/outpaint", body={"sessionId": "s", "model": "gemini", "preset": "16:9", "prompt": "bad"}),
             None,
         )
         assert resp["statusCode"] == 400
@@ -244,7 +245,7 @@ class TestErrorCases:
         mocks["rate_limiter"].check_rate_limit.return_value = True
         resp = lambda_handler(
             _make_event(path="/outpaint", body={
-                "sessionId": "s", "model": "flux", "preset": "16:9",
+                "sessionId": "s", "model": "gemini", "preset": "16:9",
                 "prompt": "expand the scene",
             }),
             None,
@@ -418,7 +419,7 @@ class TestBodySizeLimits:
     def test_iterate_rejects_oversized_body(self, mocks):
         """POST /iterate rejects bodies > 1 MB."""
         oversized = "x" * (1_048_577)
-        event = _make_event(path="/iterate", body={"sessionId": "s", "model": "flux", "prompt": "x"})
+        event = _make_event(path="/iterate", body={"sessionId": "s", "model": "gemini", "prompt": "x"})
         event["body"] = oversized
         resp = lambda_handler(event, None)
         assert resp["statusCode"] == 413
@@ -426,7 +427,7 @@ class TestBodySizeLimits:
     def test_outpaint_rejects_oversized_body(self, mocks):
         """POST /outpaint rejects bodies > 1 MB."""
         oversized = "x" * (1_048_577)
-        event = _make_event(path="/outpaint", body={"sessionId": "s", "model": "flux", "preset": "16:9"})
+        event = _make_event(path="/outpaint", body={"sessionId": "s", "model": "gemini", "preset": "16:9"})
         event["body"] = oversized
         resp = lambda_handler(event, None)
         assert resp["statusCode"] == 413
@@ -470,12 +471,12 @@ class TestGenerateForModelErrorHandling:
         """When a handler raises, error should be sanitized and fail_iteration called."""
         from concurrent.futures import ThreadPoolExecutor
 
-        fake_model = MagicMock(provider="bfl")
-        fake_model.name = "flux"
+        fake_model = MagicMock(provider="google_gemini")
+        fake_model.name = "gemini"
         mocks["get_enabled_models"].return_value = [fake_model]
         mocks["session_manager"].create_session.return_value = "sess-err"
         mocks["session_manager"].add_iteration.return_value = 0
-        mocks["get_model_config_dict"].return_value = {"id": "flux-2-pro"}
+        mocks["get_model_config_dict"].return_value = {"id": "gemini-2.5-flash-image"}
 
         # Handler that raises with an API key in the message
         def failing_handler(config, prompt, params):
@@ -514,6 +515,6 @@ class TestGenerateForModelErrorHandling:
         assert "sk-abcdefghijklmnopqrstuvwxyz" not in error_msg
 
         # Verify the model result in response also has sanitized error
-        assert "flux" in result_body["models"]
-        assert result_body["models"]["flux"]["status"] == "error"
-        assert "sk-abcdefghijklmnopqrstuvwxyz" not in result_body["models"]["flux"]["error"]
+        assert "gemini" in result_body["models"]
+        assert result_body["models"]["gemini"]["status"] == "error"
+        assert "sk-abcdefghijklmnopqrstuvwxyz" not in result_body["models"]["gemini"]["error"]

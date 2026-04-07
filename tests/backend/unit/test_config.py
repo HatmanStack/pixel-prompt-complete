@@ -13,9 +13,6 @@ class TestModelConfig:
     def test_get_enabled_models_returns_enabled_only(self):
         """Only enabled models should be returned."""
         env = {
-            'FLUX_ENABLED': 'true',
-            'FLUX_API_KEY': 'test-key',
-            'RECRAFT_ENABLED': 'false',
             'GEMINI_ENABLED': 'true',
             'GEMINI_API_KEY': 'test-key-2',
             'OPENAI_ENABLED': 'false',
@@ -29,32 +26,30 @@ class TestModelConfig:
             enabled = config.get_enabled_models()
             names = [m.name for m in enabled]
 
-            assert 'flux' in names
             assert 'gemini' in names
-            assert 'recraft' not in names
             assert 'openai' not in names
 
     def test_get_model_returns_config_when_enabled(self):
         """get_model() should return config for enabled model."""
         env = {
-            'FLUX_ENABLED': 'true',
-            'FLUX_API_KEY': 'test-flux-key',
-            'FLUX_MODEL_ID': 'flux-dev',
+            'GEMINI_ENABLED': 'true',
+            'GEMINI_API_KEY': 'test-gemini-key',
+            'GEMINI_MODEL_ID': 'gemini-test',
         }
         with patch.dict(os.environ, env, clear=True):
             import importlib
             import config
             importlib.reload(config)
 
-            model = config.get_model('flux')
-            assert model.name == 'flux'
-            assert model.api_key == 'test-flux-key'
-            assert model.model_id == 'flux-dev'
+            model = config.get_model('gemini')
+            assert model.name == 'gemini'
+            assert model.api_key == 'test-gemini-key'
+            assert model.model_id == 'gemini-test'
 
     def test_get_model_raises_for_disabled(self):
         """get_model() should raise ValueError for disabled model."""
         env = {
-            'RECRAFT_ENABLED': 'false',
+            'OPENAI_ENABLED': 'false',
         }
         with patch.dict(os.environ, env, clear=True):
             import importlib
@@ -62,7 +57,7 @@ class TestModelConfig:
             importlib.reload(config)
 
             with pytest.raises(ValueError) as excinfo:
-                config.get_model('recraft')
+                config.get_model('openai')
             assert 'disabled' in str(excinfo.value).lower()
 
     def test_get_model_raises_for_unknown(self):
@@ -106,11 +101,7 @@ class TestModelConfig:
 
             # All models default to enabled=True
             enabled = config.get_enabled_models()
-            assert len(enabled) == 4
-
-            # Default model IDs
-            flux = config.MODELS['flux']
-            assert flux.model_id == 'flux-2-pro'
+            assert len(enabled) == 2  # gemini, openai
 
     def test_iteration_limits_defined(self):
         """MAX_ITERATIONS and ITERATION_WARNING_THRESHOLD should be defined."""
