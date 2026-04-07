@@ -69,6 +69,10 @@ prompt_model_provider = os.environ.get("PROMPT_MODEL_PROVIDER", "openai")
 prompt_model_id = os.environ.get("PROMPT_MODEL_ID", "gpt-4o")
 prompt_model_api_key = os.environ.get("PROMPT_MODEL_API_KEY", "")
 
+# Firefly OAuth2 credentials (used by adobe_firefly provider)
+firefly_client_id = os.environ.get("FIREFLY_CLIENT_ID", "")
+firefly_client_secret = os.environ.get("FIREFLY_CLIENT_SECRET", "")
+
 # 4 Fixed Models Configuration
 MODELS: Dict[str, ModelConfig] = {
     "gemini": ModelConfig(
@@ -76,16 +80,32 @@ MODELS: Dict[str, ModelConfig] = {
         provider="google_gemini",
         enabled=os.environ.get("GEMINI_ENABLED", "true").lower() == "true",
         api_key=os.environ.get("GEMINI_API_KEY", ""),
-        model_id=os.environ.get("GEMINI_MODEL_ID", "gemini-2.5-flash-image"),
+        model_id=os.environ.get("GEMINI_MODEL_ID", "gemini-3.1-flash-image-preview"),
         display_name="Gemini",
+    ),
+    "nova": ModelConfig(
+        name="nova",
+        provider="bedrock_nova",
+        enabled=os.environ.get("NOVA_ENABLED", "true").lower() == "true",
+        api_key="",  # Auth via IAM role
+        model_id=os.environ.get("NOVA_MODEL_ID", "amazon.nova-canvas-v1:0"),
+        display_name="Nova Canvas",
     ),
     "openai": ModelConfig(
         name="openai",
         provider="openai",
         enabled=os.environ.get("OPENAI_ENABLED", "true").lower() == "true",
         api_key=os.environ.get("OPENAI_API_KEY", ""),
-        model_id=os.environ.get("OPENAI_MODEL_ID", "gpt-image-1"),
-        display_name="OpenAI",
+        model_id=os.environ.get("OPENAI_MODEL_ID", "dall-e-3"),
+        display_name="DALL-E 3",
+    ),
+    "firefly": ModelConfig(
+        name="firefly",
+        provider="adobe_firefly",
+        enabled=os.environ.get("FIREFLY_ENABLED", "true").lower() == "true",
+        api_key="",  # Auth via OAuth2 client credentials
+        model_id=os.environ.get("FIREFLY_MODEL_ID", "firefly-image-5"),
+        display_name="Firefly",
     ),
 }
 
@@ -137,6 +157,9 @@ def get_model_config_dict(model: ModelConfig) -> Dict:
         "provider": model.provider,
     }
     config["api_key"] = model.api_key
+    if model.provider == "adobe_firefly":
+        config["client_id"] = firefly_client_id
+        config["client_secret"] = firefly_client_secret
     return config
 
 

@@ -101,7 +101,7 @@ class TestModelConfig:
 
             # All models default to enabled=True
             enabled = config.get_enabled_models()
-            assert len(enabled) == 2  # gemini, openai
+            assert len(enabled) == 4  # gemini, nova, openai, firefly
 
     def test_iteration_limits_defined(self):
         """MAX_ITERATIONS and ITERATION_WARNING_THRESHOLD should be defined."""

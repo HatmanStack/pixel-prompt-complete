@@ -9,11 +9,7 @@ import pytest
 import responses
 import base64
 from unittest.mock import Mock, patch, MagicMock
-from models.handlers import (
-    get_iterate_handler,
-    iterate_gemini,
-    iterate_openai,
-)
+from models.providers import get_iterate_handler, iterate_gemini, iterate_openai
 from .fixtures.api_responses import (
     SAMPLE_IMAGE_CONTENT,
     SAMPLE_IMAGE_BASE64
@@ -62,7 +58,7 @@ class TestIterateGemini:
     def test_successful_iteration(self, gemini_config, sample_context):
         """Test successful image iteration with Gemini."""
         with patch('utils.clients.genai.Client') as mock_client_class, \
-             patch('models.handlers.types') as mock_types:
+             patch('models.providers.gemini.types') as mock_types:
             mock_client = Mock()
             mock_client_class.return_value = mock_client
 
@@ -98,7 +94,7 @@ class TestIterateGemini:
     def test_handles_api_error(self, gemini_config, sample_context):
         """Test error handling when Gemini API fails."""
         with patch('utils.clients.genai.Client') as mock_client_class, \
-             patch('models.handlers.types') as mock_types:
+             patch('models.providers.gemini.types') as mock_types:
             mock_client = Mock()
             mock_client_class.return_value = mock_client
 
@@ -123,7 +119,7 @@ class TestIterateGemini:
     def test_handles_empty_candidates(self, gemini_config, sample_context):
         """Test error handling when Gemini returns empty candidates."""
         with patch('utils.clients.genai.Client') as mock_client_class, \
-             patch('models.handlers.types') as mock_types:
+             patch('models.providers.gemini.types') as mock_types:
             mock_client = Mock()
             mock_client_class.return_value = mock_client
 
@@ -149,7 +145,7 @@ class TestIterateGemini:
     def test_handles_no_image_in_response(self, gemini_config, sample_context):
         """Test error handling when Gemini returns no image data."""
         with patch('utils.clients.genai.Client') as mock_client_class, \
-             patch('models.handlers.types') as mock_types:
+             patch('models.providers.gemini.types') as mock_types:
             mock_client = Mock()
             mock_client_class.return_value = mock_client
 

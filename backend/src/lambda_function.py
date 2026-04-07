@@ -35,7 +35,7 @@ from config import (
 )
 from jobs.manager import SessionManager
 from models.context import ContextManager, create_context_entry
-from models.handlers import (
+from models.providers import (
     get_handler,
     get_iterate_handler,
     get_outpaint_handler,

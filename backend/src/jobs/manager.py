@@ -14,7 +14,7 @@ from typing import Dict, List, Optional
 
 from botocore.exceptions import ClientError
 
-from config import MAX_ITERATIONS
+from config import MAX_ITERATIONS, MODELS
 
 # Maximum retries for optimistic locking conflicts
 MAX_RETRIES = 3
@@ -67,7 +67,7 @@ class SessionManager:
 
         # Initialize model states for all 4 models
         models = {}
-        for model_name in ["gemini", "openai"]:
+        for model_name in MODELS.keys():
             models[model_name] = {
                 "enabled": model_name in enabled_models,
                 "status": "pending" if model_name in enabled_models else "disabled",

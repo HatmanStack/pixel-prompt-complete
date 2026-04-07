@@ -4,5 +4,16 @@
     "date": "2026-03-15",
     "plan": "2026-03-15-audit-pixel-prompt",
     "audits": ["health", "eval", "docs"]
+  },
+  {
+    "skill": "audit",
+    "date": "2026-04-06",
+    "plan": "2026-04-06-audit-pixel-prompt",
+    "audits": ["health", "eval", "docs"]
+  },
+  {
+    "skill": "brainstorm",
+    "date": "2026-04-06",
+    "plan": "2026-04-06-audit-pixel-prompt"
   }
 ]
