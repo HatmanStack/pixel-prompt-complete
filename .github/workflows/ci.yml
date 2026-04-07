@@ -99,11 +99,8 @@ jobs:
         env:
           SERVICES: s3
           DEFAULT_REGION: us-east-1
-        options: >-
-          --health-cmd "curl -f http://localhost:4566/_ministack/health"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
+        # No --health-cmd: ministack image has no curl/wget (uvicorn entrypoint only).
+        # Health is polled from the runner host below instead.
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -114,6 +111,17 @@ jobs:
         run: |
           uv pip install --system -r backend/src/requirements.txt
           uv pip install --system -e "backend/.[dev]"
+      - name: Wait for ministack
+        run: |
+          for i in {1..30}; do
+            if curl -fs http://localhost:4566/_ministack/health >/dev/null; then
+              echo "ministack ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "ministack failed to become healthy" >&2
+          exit 1
       - name: Run E2E tests
         run: pytest tests/backend/e2e -v -m e2e
 
