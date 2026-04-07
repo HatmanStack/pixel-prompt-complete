@@ -166,14 +166,14 @@ class TestRetryDecorator:
         assert calls == [0.1, 0.2, 0.2]
 
     def test_correlation_id_logging(self):
-        """Test that correlation ID is included in logs"""
+        """Test that correlation ID is passed to StructuredLogger"""
         mock_func = Mock()
         mock_func.side_effect = [
             ConnectionError("Network error"),
             "success"
         ]
 
-        with patch('utils.retry.logger') as mock_logger:
+        with patch('utils.retry.StructuredLogger') as mock_logger:
             decorated = retry_with_backoff(
                 max_retries=3,
                 base_delay=0.01,
@@ -183,8 +183,6 @@ class TestRetryDecorator:
             result = decorated()
 
             assert result == "success"
-            # Check that warning was logged with correlation ID
             assert mock_logger.warning.called
-            call_args = mock_logger.warning.call_args
-            assert 'correlationId' in call_args[1].get('extra', {})
-            assert call_args[1]['extra']['correlationId'] == "test-correlation-123"
+            call_kwargs = mock_logger.warning.call_args[1]
+            assert call_kwargs.get('correlation_id') == "test-correlation-123"

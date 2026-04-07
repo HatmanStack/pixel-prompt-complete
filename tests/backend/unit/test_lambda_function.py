@@ -139,8 +139,16 @@ class TestRouting:
         assert "gemini" in _body(resp)["models"]
 
     def test_post_iterate(self, mocks):
-        mocks["session_manager"].get_iteration_count.return_value = 1
-        mocks["session_manager"].get_latest_image_key.return_value = "k"
+        mocks["session_manager"].get_session.return_value = {
+            "models": {
+                "gemini": {
+                    "iterationCount": 1,
+                    "iterations": [
+                        {"index": 0, "status": "completed", "imageKey": "k"},
+                    ],
+                }
+            }
+        }
         mocks["session_manager"].add_iteration.return_value = 1
         mocks["image_storage"].get_image.return_value = {"output": "b64"}
         mocks["context_manager"].get_context_for_iteration.return_value = []
@@ -155,8 +163,16 @@ class TestRouting:
         assert _body(resp)["status"] == "completed"
 
     def test_post_outpaint(self, mocks):
-        mocks["session_manager"].get_iteration_count.return_value = 0
-        mocks["session_manager"].get_latest_image_key.return_value = "k"
+        mocks["session_manager"].get_session.return_value = {
+            "models": {
+                "gemini": {
+                    "iterationCount": 0,
+                    "iterations": [
+                        {"index": 0, "status": "completed", "imageKey": "k"},
+                    ],
+                }
+            }
+        }
         mocks["session_manager"].add_iteration.return_value = 1
         mocks["image_storage"].get_image.return_value = {"output": "b64"}
         mocks["get_model"].return_value = MagicMock(provider="google_gemini")
@@ -187,6 +203,24 @@ class TestRouting:
         assert resp["statusCode"] == 200
         assert "galleries" in _body(resp)
 
+    def test_gallery_list_returns_preview_url_not_data(self, mocks):
+        """Gallery list response must contain previewUrl, not previewData."""
+        from concurrent.futures import ThreadPoolExecutor
+
+        mocks["image_storage"].list_galleries.return_value = ["2025-11-15-10-00-00"]
+        mocks["image_storage"].list_gallery_images.return_value = ["sessions/2025-11-15-10-00-00/img.json"]
+        mocks["image_storage"].get_cloudfront_url.return_value = "https://cdn/img"
+
+        real_executor = ThreadPoolExecutor(max_workers=1)
+        mocks["_gallery_executor"].submit.side_effect = real_executor.submit
+
+        resp = lambda_handler(_make_event(method="GET", path="/gallery/list"), None)
+        real_executor.shutdown(wait=True)
+        assert resp["statusCode"] == 200
+        body = _body(resp)
+        assert body["galleries"][0]["previewUrl"] == "https://cdn/img"
+        assert "previewData" not in body["galleries"][0]
+
     def test_get_gallery_detail(self, mocks):
         mocks["image_storage"].list_gallery_images.return_value = []
         resp = lambda_handler(_make_event(method="GET", path="/gallery/2025-01-01"), None)
@@ -197,6 +231,38 @@ class TestRouting:
         mocks["handle_log"].return_value = {"success": True}
         resp = lambda_handler(_make_event(path="/log", body={"level": "ERROR"}), None)
         assert resp["statusCode"] == 200
+
+    def test_post_log_validation_error_returns_400(self, mocks):
+        """Log endpoint should return 400 (not 500) on ValueError from handle_log."""
+        mocks["handle_log"].side_effect = ValueError("Field 'level' is required")
+        resp = lambda_handler(_make_event(path="/log", body={"message": "test"}), None)
+        assert resp["statusCode"] == 400
+
+    def test_iterate_invalid_session_id_returns_400(self, mocks):
+        resp = lambda_handler(
+            _make_event(
+                path="/iterate",
+                body={"sessionId": "../../hack", "model": "gemini", "prompt": "x"},
+            ),
+            None,
+        )
+        assert resp["statusCode"] == 400
+        assert "session" in _body(resp)["error"].lower()
+
+    def test_outpaint_invalid_session_id_returns_400(self, mocks):
+        resp = lambda_handler(
+            _make_event(
+                path="/outpaint",
+                body={
+                    "sessionId": "../../hack",
+                    "model": "gemini",
+                    "preset": "16:9",
+                    "prompt": "x",
+                },
+            ),
+            None,
+        )
+        assert resp["statusCode"] == 400
 
 
 # ============================================================

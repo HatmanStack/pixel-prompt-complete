@@ -90,9 +90,11 @@ class ContextManager:
 
             return entries
 
-        except self.s3.exceptions.NoSuchKey:
-            # No context file exists yet - this is normal for new sessions
-            return []
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "NoSuchKey":
+                # No context file exists yet - this is normal for new sessions
+                return []
+            raise
 
         except json.JSONDecodeError as e:
             StructuredLogger.warning(
@@ -139,8 +141,11 @@ class ContextManager:
                         )
                     except (KeyError, TypeError):
                         pass
-            except self.s3.exceptions.NoSuchKey:
-                entries = []
+            except ClientError as e:
+                if e.response["Error"]["Code"] == "NoSuchKey":
+                    entries = []
+                else:
+                    raise
             except (json.JSONDecodeError, KeyError, TypeError):
                 entries = []
 

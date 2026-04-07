@@ -4,6 +4,8 @@ Image Storage utilities for Pixel Prompt Complete.
 Handles saving generated images to S3 with metadata and gallery management.
 """
 
+from __future__ import annotations
+
 import json
 import re
 from datetime import datetime, timezone
@@ -134,6 +136,18 @@ class ImageStorage:
 
     # Timestamp folder pattern: YYYY-MM-DD-HH-MM-SS
     _GALLERY_FOLDER_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}$")
+
+    def validate_gallery_id(self, gallery_id: str) -> bool:
+        """Return True if ``gallery_id`` matches the gallery timestamp format."""
+        return bool(self._GALLERY_FOLDER_RE.match(gallery_id))
+
+    def get_image_metadata(self, image_key: str) -> Optional[Dict]:
+        """Return image metadata excluding the base64 ``output`` blob."""
+        data = self.get_image(image_key)
+        if data is None:
+            return None
+        data.pop("output", None)
+        return data
 
     def list_galleries(self) -> List[str]:
         """

@@ -20,8 +20,8 @@ warn_unused_ignores = true
 show_error_codes = true
 strict_optional = true
 
-# Gradual typing - start permissive, tighten over time
-disallow_untyped_defs = false
+# Strict typing for new code (Phase 1 hardening)
+disallow_untyped_defs = true
 check_untyped_defs = true
 
 [[tool.mypy.overrides]]

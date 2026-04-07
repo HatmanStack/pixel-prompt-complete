@@ -262,3 +262,38 @@ class TestImageStorage:
 
         assert len(images) == 1
         assert images[0].endswith('.json')
+
+
+class TestGalleryHelpers:
+    """Tests for validate_gallery_id and get_image_metadata helpers."""
+
+    def test_validate_gallery_id_valid(self, mock_s3):
+        s3, bucket = mock_s3
+        storage = ImageStorage(s3, bucket, 'cdn.example.com')
+        assert storage.validate_gallery_id('2025-11-15-14-30-45') is True
+
+    def test_validate_gallery_id_invalid_format(self, mock_s3):
+        s3, bucket = mock_s3
+        storage = ImageStorage(s3, bucket, 'cdn.example.com')
+        assert storage.validate_gallery_id('not-a-timestamp') is False
+        assert storage.validate_gallery_id('') is False
+        assert storage.validate_gallery_id('../../etc/passwd') is False
+
+    def test_get_image_metadata_excludes_output(self, mock_s3):
+        s3, bucket = mock_s3
+        storage = ImageStorage(s3, bucket, 'cdn.example.com')
+        key = 'sessions/2025-11-15-10-00-00/test.json'
+        s3.put_object(
+            Bucket=bucket,
+            Key=key,
+            Body=json.dumps({'output': 'BIG_BASE64_BLOB', 'model': 'gemini', 'prompt': 'p'}),
+        )
+        metadata = storage.get_image_metadata(key)
+        assert metadata is not None
+        assert 'output' not in metadata
+        assert metadata['model'] == 'gemini'
+
+    def test_get_image_metadata_missing(self, mock_s3):
+        s3, bucket = mock_s3
+        storage = ImageStorage(s3, bucket, 'cdn.example.com')
+        assert storage.get_image_metadata('sessions/missing.json') is None

@@ -5,10 +5,25 @@ Uses configured LLM to expand short prompts into detailed image generation promp
 """
 
 import warnings
-from typing import Optional
+from typing import Any, Optional
 
 from config import prompt_model_api_key, prompt_model_id, prompt_model_provider
 from utils.clients import get_genai_client, get_openai_client
+
+# Per-model parameter configuration. First match wins.
+_MODEL_PARAMS: dict[str, dict[str, Any]] = {
+    "gpt-5": {"max_completion_tokens": 1000},
+    "gpt-4o": {"max_completion_tokens": 200, "temperature": 0.7},
+}
+_DEFAULT_PARAMS: dict[str, Any] = {"max_tokens": 200, "temperature": 0.7}
+
+
+def _get_model_params(model_id: str) -> dict[str, Any]:
+    """Return model-specific completion params for the given model ID."""
+    for key, params in _MODEL_PARAMS.items():
+        if key in model_id:
+            return dict(params)
+    return dict(_DEFAULT_PARAMS)
 
 
 class PromptEnhancer:
@@ -21,11 +36,11 @@ class PromptEnhancer:
         # Build prompt model config from config.py values
         if prompt_model_provider and prompt_model_id:
             self.prompt_model = {
-                'provider': prompt_model_provider,
-                'id': prompt_model_id,
+                "provider": prompt_model_provider,
+                "id": prompt_model_id,
             }
             if prompt_model_api_key:
-                self.prompt_model['api_key'] = prompt_model_api_key
+                self.prompt_model["api_key"] = prompt_model_api_key
         else:
             self.prompt_model = None
 
@@ -67,21 +82,19 @@ Enhance the following prompt:"""
             return prompt
 
         try:
-
-            provider = prompt_model['provider']
+            provider = prompt_model["provider"]
 
             # Branch based on provider type
-            if provider == 'google_gemini':
+            if provider == "google_gemini":
                 # Use Google genai client for Gemini
-                api_key = prompt_model.get('api_key', '')
+                api_key = prompt_model.get("api_key", "")
                 if not api_key:
                     return prompt
 
                 client = get_genai_client(api_key)
 
                 response = client.models.generate_content(
-                    model=prompt_model['id'],
-                    contents=f"{self.system_prompt}\n\n{prompt}"
+                    model=prompt_model["id"], contents=f"{self.system_prompt}\n\n{prompt}"
                 )
 
                 # Extract text from Gemini response
@@ -92,47 +105,29 @@ Enhance the following prompt:"""
 
             else:
                 # Use OpenAI client for OpenAI and OpenAI-compatible providers
-                api_key = prompt_model.get('api_key', '')
+                api_key = prompt_model.get("api_key", "")
                 if not api_key:
                     return prompt
 
-                client_kwargs = {
-                    'timeout': 30.0
-                }
+                client_kwargs = {"timeout": 30.0}
 
                 # Support custom base_url for OpenAI-compatible providers
-                if 'base_url' in prompt_model:
-                    client_kwargs['base_url'] = prompt_model['base_url']
+                if "base_url" in prompt_model:
+                    client_kwargs["base_url"] = prompt_model["base_url"]
 
                 client = get_openai_client(api_key, **client_kwargs)
 
-                # Determine model identifier
-                # Use configured model ID from prompt_model
-                model_id = prompt_model['id']
+                # Determine model identifier from prompt_model
+                model_id = prompt_model["id"]
 
-
-                # GPT-5 and newer models have different API requirements
-                completion_params = {
+                completion_params: dict[str, Any] = {
                     "model": model_id,
                     "messages": [
                         {"role": "system", "content": self.system_prompt},
-                        {"role": "user", "content": prompt}
-                    ]
+                        {"role": "user", "content": prompt},
+                    ],
+                    **_get_model_params(model_id),
                 }
-
-                # GPT-5 specific parameters
-                if "gpt-5" in model_id:
-                    # GPT-5 uses reasoning tokens, need more tokens for reasoning + output
-                    completion_params["max_completion_tokens"] = 1000
-                    # GPT-5 only supports temperature=1 (default), so omit it
-                # GPT-4o and newer use max_completion_tokens
-                elif "gpt-4o" in model_id:
-                    completion_params["max_completion_tokens"] = 200
-                    completion_params["temperature"] = 0.7
-                # Older models use max_tokens
-                else:
-                    completion_params["max_tokens"] = 200
-                    completion_params["temperature"] = 0.7
 
                 response = client.chat.completions.create(**completion_params)
 
@@ -142,7 +137,6 @@ Enhance the following prompt:"""
                     enhanced = enhanced.strip()
                 else:
                     enhanced = ""
-
 
             return enhanced
 

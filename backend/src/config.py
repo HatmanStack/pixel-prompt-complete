@@ -3,10 +3,11 @@ Configuration module for Pixel Prompt v2.
 Loads 4 fixed model configurations with enable/disable support.
 """
 
+from __future__ import annotations
+
 import os
 import warnings
 from dataclasses import dataclass
-from typing import Dict, List
 
 
 def _safe_int(env_var: str, default: int) -> int:
@@ -74,7 +75,7 @@ firefly_client_id = os.environ.get("FIREFLY_CLIENT_ID", "")
 firefly_client_secret = os.environ.get("FIREFLY_CLIENT_SECRET", "")
 
 # 4 Fixed Models Configuration
-MODELS: Dict[str, ModelConfig] = {
+MODELS: dict[str, ModelConfig] = {
     "gemini": ModelConfig(
         name="gemini",
         provider="google_gemini",
@@ -117,7 +118,7 @@ MAX_ITERATIONS = 7
 ITERATION_WARNING_THRESHOLD = 5
 
 
-def get_enabled_models() -> List[ModelConfig]:
+def get_enabled_models() -> list[ModelConfig]:
     """Return list of enabled ModelConfig objects."""
     return [model for model in MODELS.values() if model.enabled]
 
@@ -145,7 +146,7 @@ def get_model(name: str) -> ModelConfig:
     return model
 
 
-def get_model_config_dict(model: ModelConfig) -> Dict:
+def get_model_config_dict(model: ModelConfig) -> dict:
     """
     Convert ModelConfig to dict format expected by handlers.
 
