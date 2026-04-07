@@ -94,7 +94,9 @@ async function apiFetch<T>(
 
     // Determine if we should retry
     const isRetryableStatus = apiError.status && RETRYABLE_STATUS_CODES.includes(apiError.status);
-    const isNetworkError = !apiError.status;
+    const isNetworkError =
+      !apiError.status &&
+      (apiError.name === 'TypeError' || Boolean(apiError.message?.includes('fetch')));
     const shouldRetry =
       retryCount < RETRY_CONFIG.maxRetries && (isRetryableStatus || isNetworkError);
 
