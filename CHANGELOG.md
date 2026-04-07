@@ -5,6 +5,51 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-04-07
+
+### Added
+- Amazon Nova Canvas provider (Bedrock, IAM auth)
+- Adobe Firefly provider (Image5, OAuth2 client credentials)
+- Per-provider module structure under `backend/src/models/providers/`
+- Column focus/expand UI: clicking a model column animates to ~60% width with full controls; others compress to ~13%
+- Shared frontend constants in `frontend/src/config/constants.ts` for iteration limits
+- markdownlint config and docs lint job in CI
+- `.devcontainer/` configuration with `uv`-based post-create script
+- `bedrock:InvokeModel` IAM permission in SAM template
+- `astral-sh/setup-uv` action in CI for backend dependency installs
+
+### Changed
+- BREAKING: Provider lineup changed from Flux/Recraft/Gemini/OpenAI to Gemini/Nova/OpenAI/Firefly
+- Gemini updated to `gemini-3.1-flash-image-preview` (Nano Banana 2)
+- OpenAI generation locked to DALL-E 3; iteration/outpaint use `gpt-image-1` (DALL-E 3 lacks `images.edit`)
+- Gallery list/detail responses return CloudFront URLs instead of base64 (fixes Lambda 6MB overflow)
+- Backend coverage gate raised from 60% to 80%
+- mypy `disallow_untyped_defs = true` enabled in backend pyproject
+- Provider enable flags now require credentials (gemini/openai/firefly disabled when keys missing)
+- Dev dependencies pinned in `backend/pyproject.toml [project.optional-dependencies]`
+- CLAUDE.md fully rewritten for the new provider lineup
+
+### Fixed
+- CRITICAL: Gallery list/detail responses exceeding Lambda 6MB payload limit
+- CRITICAL: BFL polling threads blocking `ThreadPoolExecutor` (removed with Flux)
+- Session ID validation missing on `/iterate` and `/outpaint`
+- `/log` endpoint returning 500 for `ValueError` instead of 400
+- `_load_source_image` making redundant S3 reads
+- `_compute_session_status` precedence bug (pending statuses now take precedence over completed)
+- `_error_result` not sanitizing string errors (only Exception)
+- Checkbox click in `ModelColumn` bubbling to column focus toggle
+- ministack GHA healthcheck always failing (image has no curl/wget)
+- Docs lint job never running on markdown-only PRs
+
+### Removed
+- BREAKING: Flux/BFL provider (config, handlers, tests, SAM params)
+- BREAKING: Recraft provider (config, handlers, tests, SAM params)
+- `backend/src/models/handlers.py` (replaced by `providers/` package)
+- Phantom env vars: `VITE_DEBUG`, `VITE_API_TIMEOUT`, unused `VITE_CLOUDFRONT_DOMAIN`/`VITE_S3_BUCKET`/`VITE_ENVIRONMENT`
+- Stale `ModelRegistry` reference in ADR-001
+- All `.jsx` test files (migrated to `.tsx`)
+- Stale `frontend/src/fixtures/apiResponses.ts` referencing old job-based API
+
 ## [1.1.0] - 2026-03-16
 
 ### Added
