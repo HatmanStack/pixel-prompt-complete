@@ -5,6 +5,8 @@
 
 import { useCallback, useEffect, useState, type FC } from 'react';
 import { useAppStore } from '@/stores/useAppStore';
+import { useUIStore } from '@/stores/useUIStore';
+import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { useSessionPolling } from '@/hooks/useSessionPolling';
 import { generateSession } from '@/api/client';
 import { useToast } from '@/stores/useToastStore';
@@ -137,6 +139,9 @@ export const GenerationPanel: FC = () => {
 
   const { error: showError } = useToast();
   const { playSound } = useSound();
+  const focusedModel = useUIStore((s) => s.focusedModel);
+  const toggleFocus = useUIStore((s) => s.toggleFocus);
+  const { isDesktop } = useBreakpoint();
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [expandedImage, setExpandedImage] = useState<{
@@ -329,8 +334,18 @@ export const GenerationPanel: FC = () => {
         </h2>
         {MODELS.map((model) => {
           const column = currentSession?.models[model] ?? createEmptyColumn(model);
+          const isFocused = isDesktop && focusedModel === model;
+          const isCompressed = isDesktop && focusedModel !== null && focusedModel !== model;
+          const widthClass = isFocused
+            ? 'w-[60%] flex-shrink-0'
+            : isCompressed
+              ? 'w-[13%] flex-shrink-0 overflow-hidden'
+              : '';
           return (
-            <div key={model} className="snap-center">
+            <div
+              key={model}
+              className={`snap-center transition-all duration-300 ease-in-out ${widthClass}`}
+            >
               <ErrorBoundary componentName={`ModelColumn-${model}`}>
                 <ModelColumn
                   model={model}
@@ -338,6 +353,9 @@ export const GenerationPanel: FC = () => {
                   isSelected={selectedModels.has(model)}
                   onToggleSelect={() => toggleModelSelection(model)}
                   onImageExpand={handleImageExpand}
+                  isFocused={isFocused}
+                  isCompressed={isCompressed}
+                  onFocusToggle={() => isDesktop && toggleFocus(model)}
                 />
               </ErrorBoundary>
             </div>

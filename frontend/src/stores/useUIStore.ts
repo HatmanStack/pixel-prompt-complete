@@ -15,6 +15,7 @@ export const useUIStore = create<UIStore>((set) => ({
   soundsLoaded: false,
   isGalleryDrawerOpen: false,
   isMobileMenuOpen: false,
+  focusedModel: null,
 
   // Modal actions
   openModal: (content: string) => set({ isModalOpen: true, modalContent: content }),
@@ -34,4 +35,11 @@ export const useUIStore = create<UIStore>((set) => ({
   toggleMobileMenu: () => set((state) => ({ isMobileMenuOpen: !state.isMobileMenuOpen })),
 
   closeMobileMenu: () => set({ isMobileMenuOpen: false }),
+
+  // Column focus actions (desktop only)
+  setFocusedModel: (model) => set({ focusedModel: model }),
+  toggleFocus: (model) =>
+    set((state) => ({
+      focusedModel: state.focusedModel === model ? null : model,
+    })),
 }));
