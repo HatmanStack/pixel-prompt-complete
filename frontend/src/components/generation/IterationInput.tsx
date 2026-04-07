@@ -4,7 +4,8 @@
  */
 
 import { useState, type FC, type KeyboardEvent } from 'react';
-import { useIteration, MAX_ITERATIONS } from '@/hooks/useIteration';
+import { useIteration } from '@/hooks/useIteration';
+import { MAX_ITERATIONS } from '@/config/constants';
 import type { ModelName } from '@/types';
 
 interface IterationInputProps {
