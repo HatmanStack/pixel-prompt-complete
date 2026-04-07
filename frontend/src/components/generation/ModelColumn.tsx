@@ -3,13 +3,14 @@
  * Displays a single model's images vertically with all iterations
  */
 
-import { memo, type FC } from 'react';
+import { memo, type FC, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { IterationCard } from './IterationCard';
 import { IterationInput } from './IterationInput';
 import { OutpaintControls } from './OutpaintControls';
 import type { ModelName, ModelColumn as ModelColumnType, Iteration } from '@/types';
 import { MODEL_DISPLAY_NAMES } from '@/types';
-import { useIteration, MAX_ITERATIONS } from '@/hooks/useIteration';
+import { useIteration } from '@/hooks/useIteration';
+import { MAX_ITERATIONS } from '@/config/constants';
 
 interface ModelColumnProps {
   model: ModelName;
@@ -17,6 +18,9 @@ interface ModelColumnProps {
   isSelected: boolean;
   onToggleSelect: () => void;
   onImageExpand?: (model: ModelName, iteration: Iteration) => void;
+  isFocused?: boolean;
+  isCompressed?: boolean;
+  onFocusToggle?: () => void;
 }
 
 /**
@@ -85,12 +89,26 @@ const DisabledState: FC<{ model: ModelName }> = ({ model }) => (
 );
 
 export const ModelColumn: FC<ModelColumnProps> = memo(
-  ({ model, column, isSelected, onToggleSelect, onImageExpand }) => {
+  ({
+    model,
+    column,
+    isSelected,
+    onToggleSelect,
+    onImageExpand,
+    isFocused = false,
+    isCompressed = false,
+    onFocusToggle,
+  }) => {
     const { isAtLimit } = useIteration(model);
+
+    // When no focus is active, use the default min-w/max-w. When focus is active
+    // the parent wrapper sets widths, so we let the column fill its container.
+    const sizeClass =
+      isFocused || isCompressed ? 'w-full' : 'min-w-[250px] max-w-[300px] flex-shrink-0';
 
     if (!column.enabled) {
       return (
-        <div className="flex flex-col gap-4 min-w-[250px] max-w-[300px] flex-shrink-0">
+        <div className={`flex flex-col gap-4 ${sizeClass}`}>
           {/* Header */}
           <div className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-900 rounded-lg">
             <h3 className="font-semibold text-gray-900 dark:text-gray-100">
@@ -103,23 +121,42 @@ export const ModelColumn: FC<ModelColumnProps> = memo(
       );
     }
 
+    const handleHeaderKeyDown = (e: ReactKeyboardEvent) => {
+      if ((e.key === 'Enter' || e.key === ' ') && onFocusToggle) {
+        e.preventDefault();
+        onFocusToggle();
+      }
+    };
+
     return (
-      <div className="flex flex-col gap-4 min-w-[250px] max-w-[300px] flex-shrink-0">
+      <div className={`flex flex-col gap-4 transition-all duration-300 ease-in-out ${sizeClass}`}>
         {/* Header with model name and checkbox */}
-        <div className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-900 rounded-lg sticky top-0 z-20">
-          <h3 className="font-semibold text-gray-900 dark:text-gray-100">
+        <div
+          className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-900 rounded-lg sticky top-0 z-20 cursor-pointer"
+          onClick={onFocusToggle}
+          onKeyDown={handleHeaderKeyDown}
+          role="button"
+          tabIndex={0}
+          aria-expanded={isFocused}
+          aria-label={`${isFocused ? 'Collapse' : 'Expand'} ${MODEL_DISPLAY_NAMES[model]} column`}
+        >
+          <h3 className="font-semibold text-gray-900 dark:text-gray-100 truncate">
             {MODEL_DISPLAY_NAMES[model]}
           </h3>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-500 dark:text-gray-400">
-              {column.iterations.length}/{MAX_ITERATIONS}
-            </span>
-            <Checkbox
-              checked={isSelected}
-              onChange={onToggleSelect}
-              aria-label={`Select ${MODEL_DISPLAY_NAMES[model]} for batch editing`}
-            />
-          </div>
+          {!isCompressed && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-500 dark:text-gray-400">
+                {column.iterations.length}/{MAX_ITERATIONS}
+              </span>
+              <div onClick={(e) => e.stopPropagation()}>
+                <Checkbox
+                  checked={isSelected}
+                  onChange={onToggleSelect}
+                  aria-label={`Select ${MODEL_DISPLAY_NAMES[model]} for batch editing`}
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Iterations list */}
@@ -132,6 +169,20 @@ export const ModelColumn: FC<ModelColumnProps> = memo(
             <div className="text-sm text-gray-500 dark:text-gray-400 text-center p-4 bg-gray-100 dark:bg-gray-800 rounded-lg">
               No images yet
             </div>
+          ) : isCompressed ? (
+            // Compressed: show only the latest iteration as a thumbnail
+            (() => {
+              const latest = column.iterations[column.iterations.length - 1];
+              return (
+                <div role="listitem">
+                  <IterationCard
+                    model={model}
+                    iteration={latest}
+                    onExpand={() => onImageExpand?.(model, latest)}
+                  />
+                </div>
+              );
+            })()
           ) : (
             column.iterations.map((iteration) => (
               <div key={iteration.index} role="listitem">
@@ -145,11 +196,11 @@ export const ModelColumn: FC<ModelColumnProps> = memo(
           )}
         </div>
 
-        {/* Per-column input */}
+        {/* Per-column input (kept visible when compressed) */}
         {!isAtLimit && column.enabled && <IterationInput model={model} />}
 
-        {/* Outpaint controls */}
-        <OutpaintControls model={model} />
+        {/* Outpaint controls (hidden when compressed) */}
+        {!isCompressed && <OutpaintControls model={model} />}
       </div>
     );
   },

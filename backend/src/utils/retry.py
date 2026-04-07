@@ -4,30 +4,28 @@ Retry Utility with Exponential Backoff.
 Provides retry decorator for handling transient errors in S3 and external API calls.
 """
 
-import logging
 import time
 from functools import wraps
 
 from botocore.exceptions import BotoCoreError, ClientError
 
-logger = logging.getLogger()
-
+from utils.logger import StructuredLogger
 
 # Retryable S3 error codes
 RETRYABLE_S3_ERRORS = {
-    '503',  # SlowDown, Service Unavailable
-    '500',  # InternalError
-    'RequestTimeout',
-    'RequestTimeoutException',
+    "503",  # SlowDown, Service Unavailable
+    "500",  # InternalError
+    "RequestTimeout",
+    "RequestTimeoutException",
 }
 
 # Permanent S3 errors that should not be retried
 PERMANENT_S3_ERRORS = {
-    '403',  # Forbidden
-    '404',  # NotFound
-    '400',  # BadRequest
-    'InvalidBucketName',
-    'NoSuchBucket',
+    "403",  # Forbidden
+    "404",  # NotFound
+    "400",  # BadRequest
+    "InvalidBucketName",
+    "NoSuchBucket",
 }
 
 
@@ -47,8 +45,8 @@ def is_retryable_error(error):
 
     # Check S3 ClientError
     if isinstance(error, ClientError):
-        error_code = error.response.get('Error', {}).get('Code', '')
-        http_status = str(error.response.get('ResponseMetadata', {}).get('HTTPStatusCode', ''))
+        error_code = error.response.get("Error", {}).get("Code", "")
+        http_status = str(error.response.get("ResponseMetadata", {}).get("HTTPStatusCode", ""))
 
         # Don't retry permanent errors
         if error_code in PERMANENT_S3_ERRORS or http_status in PERMANENT_S3_ERRORS:
@@ -74,6 +72,7 @@ def retry_with_backoff(max_retries=3, base_delay=1.0, max_delay=8.0, correlation
     Returns:
         Decorated function with retry logic
     """
+
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -88,27 +87,30 @@ def retry_with_backoff(max_retries=3, base_delay=1.0, max_delay=8.0, correlation
 
                     # Check if error is retryable
                     if not is_retryable_error(e):
-                        func_name = getattr(func, '__name__', 'unknown_function')
-                        logger.warning(f"Non-retryable error in {func_name}: {e}")
+                        func_name = getattr(func, "__name__", "unknown_function")
+                        StructuredLogger.warning(
+                            f"Non-retryable error in {func_name}: {e}",
+                            correlation_id=correlation_id,
+                        )
                         raise
 
                     # Don't retry if this was the last attempt
                     if attempt >= max_retries:
-                        func_name = getattr(func, '__name__', 'unknown_function')
-                        logger.exception(
+                        func_name = getattr(func, "__name__", "unknown_function")
+                        StructuredLogger.error(
                             f"Max retries ({max_retries}) exceeded for {func_name}: {e}",
-                            extra={'correlationId': correlation_id} if correlation_id else {}
+                            correlation_id=correlation_id,
                         )
                         raise
 
                     # Calculate delay with exponential backoff
-                    delay = min(base_delay * (2 ** attempt), max_delay)
+                    delay = min(base_delay * (2**attempt), max_delay)
 
-                    func_name = getattr(func, '__name__', 'unknown_function')
-                    logger.warning(
+                    func_name = getattr(func, "__name__", "unknown_function")
+                    StructuredLogger.warning(
                         f"Retry {attempt + 1}/{max_retries} for {func_name} "
                         f"after {delay}s delay: {e}",
-                        extra={'correlationId': correlation_id} if correlation_id else {}
+                        correlation_id=correlation_id,
                     )
 
                     time.sleep(delay)
@@ -117,4 +119,5 @@ def retry_with_backoff(max_retries=3, base_delay=1.0, max_delay=8.0, correlation
             raise last_exception
 
         return wrapper
+
     return decorator

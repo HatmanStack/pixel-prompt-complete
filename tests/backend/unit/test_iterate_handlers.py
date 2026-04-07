@@ -2,20 +2,14 @@
 Unit tests for iteration handlers.
 
 Tests for get_iterate_handler dispatcher and individual iterate_* functions
-for each provider (bfl, recraft, google_gemini, openai).
+for each provider (google_gemini, openai).
 """
 
 import pytest
 import responses
 import base64
 from unittest.mock import Mock, patch, MagicMock
-from models.handlers import (
-    get_iterate_handler,
-    iterate_flux,
-    iterate_recraft,
-    iterate_gemini,
-    iterate_openai,
-)
+from models.providers import get_iterate_handler, iterate_gemini, iterate_openai
 from .fixtures.api_responses import (
     SAMPLE_IMAGE_CONTENT,
     SAMPLE_IMAGE_BASE64
@@ -24,16 +18,6 @@ from .fixtures.api_responses import (
 
 class TestGetIterateHandler:
     """Tests for get_iterate_handler dispatcher function."""
-
-    def test_returns_flux_handler_for_bfl(self):
-        """Test get_iterate_handler returns correct handler for BFL provider."""
-        handler = get_iterate_handler('bfl')
-        assert handler == iterate_flux
-
-    def test_returns_recraft_handler(self):
-        """Test get_iterate_handler returns correct handler for Recraft provider."""
-        handler = get_iterate_handler('recraft')
-        assert handler == iterate_recraft
 
     def test_returns_gemini_handler(self):
         """Test get_iterate_handler returns correct handler for Google Gemini."""
@@ -51,185 +35,6 @@ class TestGetIterateHandler:
             get_iterate_handler('unknown_provider')
         assert 'No iteration handler' in str(exc_info.value)
         assert 'unknown_provider' in str(exc_info.value)
-
-
-class TestIterateFlux:
-    """Tests for iterate_flux handler."""
-
-    @pytest.fixture
-    def flux_config(self):
-        return {
-            'provider': 'bfl',
-            'id': 'flux-pro-1.1-fill',
-            'api_key': 'test-bfl-key'
-        }
-
-    @pytest.fixture
-    def sample_context(self):
-        return [
-            {'iteration': 0, 'prompt': 'original prompt', 'image_key': 'test/0.png'},
-            {'iteration': 1, 'prompt': 'first edit', 'image_key': 'test/1.png'},
-        ]
-
-    @responses.activate
-    def test_successful_iteration(self, flux_config, sample_context):
-        """Test successful image iteration with Flux Fill API."""
-        # Mock job creation
-        responses.add(
-            responses.POST,
-            "https://api.bfl.ai/v1/flux-pro-1.1-fill",
-            json={"id": "test-job-id"},
-            status=200
-        )
-
-        # Mock polling result (Ready immediately)
-        responses.add(
-            responses.GET,
-            "https://api.bfl.ai/v1/get_result?id=test-job-id",
-            json={
-                "status": "Ready",
-                "result": {"sample": "https://example.com/bfl-image.png"}
-            },
-            status=200
-        )
-
-        # Mock image download
-        responses.add(
-            responses.GET,
-            "https://example.com/bfl-image.png",
-            body=SAMPLE_IMAGE_CONTENT,
-            status=200
-        )
-
-        with patch('models.handlers.time.sleep'):  # Skip actual sleeping
-            result = iterate_flux(
-                flux_config,
-                SAMPLE_IMAGE_BASE64,
-                "make the sky purple",
-                sample_context
-            )
-
-        assert result['status'] == 'success'
-        assert 'image' in result
-        assert result['provider'] == 'bfl'
-
-    @responses.activate
-    def test_handles_api_error(self, flux_config, sample_context):
-        """Test error handling when Flux API fails."""
-        responses.add(
-            responses.POST,
-            "https://api.bfl.ai/v1/flux-pro-1.1-fill",
-            json={"error": "Invalid request"},
-            status=400
-        )
-
-        result = iterate_flux(
-            flux_config,
-            SAMPLE_IMAGE_BASE64,
-            "make the sky purple",
-            sample_context
-        )
-
-        assert result['status'] == 'error'
-        assert 'error' in result
-        assert result['provider'] == 'bfl'
-
-    def test_builds_context_prompt(self, flux_config):
-        """Test that context is incorporated into the prompt."""
-        context = [
-            {'iteration': 0, 'prompt': 'a sunset'},
-            {'iteration': 1, 'prompt': 'add mountains'},
-        ]
-
-        # We can't easily test internal prompt building without mocking,
-        # but we can verify the handler accepts context without error
-        with patch('models.handlers.requests.post') as mock_post:
-            mock_post.return_value.json.return_value = {"id": "test-id"}
-            mock_post.return_value.status_code = 200
-
-            # This will fail at polling but we just want to verify
-            # context is processed without error
-            try:
-                iterate_flux(
-                    flux_config,
-                    SAMPLE_IMAGE_BASE64,
-                    "make it darker",
-                    context
-                )
-            except Exception:
-                pass  # Expected to fail at polling
-
-            # Verify POST was called
-            assert mock_post.called
-
-
-class TestIterateRecraft:
-    """Tests for iterate_recraft handler."""
-
-    @pytest.fixture
-    def recraft_config(self):
-        return {
-            'provider': 'recraft',
-            'id': 'recraftv3',
-            'api_key': 'test-recraft-key'
-        }
-
-    @pytest.fixture
-    def sample_context(self):
-        return [
-            {'iteration': 0, 'prompt': 'a cat', 'image_key': 'test/0.png'},
-        ]
-
-    @responses.activate
-    def test_successful_iteration(self, recraft_config, sample_context):
-        """Test successful image iteration with Recraft imageToImage endpoint."""
-        # Mock the Recraft API endpoint
-        responses.add(
-            responses.POST,
-            "https://external.api.recraft.ai/v1/images/imageToImage",
-            json={"data": [{"url": "https://example.com/recraft-result.png"}]},
-            status=200
-        )
-
-        # Mock image download
-        responses.add(
-            responses.GET,
-            "https://example.com/recraft-result.png",
-            body=SAMPLE_IMAGE_CONTENT,
-            status=200
-        )
-
-        result = iterate_recraft(
-            recraft_config,
-            SAMPLE_IMAGE_BASE64,
-            "make the cat orange",
-            sample_context
-        )
-
-        assert result['status'] == 'success'
-        assert 'image' in result
-        assert result['provider'] == 'recraft'
-
-    @responses.activate
-    def test_handles_api_error(self, recraft_config, sample_context):
-        """Test error handling when Recraft API fails."""
-        responses.add(
-            responses.POST,
-            "https://external.api.recraft.ai/v1/images/imageToImage",
-            json={"error": "API Error"},
-            status=500
-        )
-
-        result = iterate_recraft(
-            recraft_config,
-            SAMPLE_IMAGE_BASE64,
-            "make the cat orange",
-            sample_context
-        )
-
-        assert result['status'] == 'error'
-        assert 'error' in result
-        assert result['provider'] == 'recraft'
 
 
 class TestIterateGemini:
@@ -253,7 +58,7 @@ class TestIterateGemini:
     def test_successful_iteration(self, gemini_config, sample_context):
         """Test successful image iteration with Gemini."""
         with patch('utils.clients.genai.Client') as mock_client_class, \
-             patch('models.handlers.types') as mock_types:
+             patch('models.providers.gemini.types') as mock_types:
             mock_client = Mock()
             mock_client_class.return_value = mock_client
 
@@ -289,7 +94,7 @@ class TestIterateGemini:
     def test_handles_api_error(self, gemini_config, sample_context):
         """Test error handling when Gemini API fails."""
         with patch('utils.clients.genai.Client') as mock_client_class, \
-             patch('models.handlers.types') as mock_types:
+             patch('models.providers.gemini.types') as mock_types:
             mock_client = Mock()
             mock_client_class.return_value = mock_client
 
@@ -314,7 +119,7 @@ class TestIterateGemini:
     def test_handles_empty_candidates(self, gemini_config, sample_context):
         """Test error handling when Gemini returns empty candidates."""
         with patch('utils.clients.genai.Client') as mock_client_class, \
-             patch('models.handlers.types') as mock_types:
+             patch('models.providers.gemini.types') as mock_types:
             mock_client = Mock()
             mock_client_class.return_value = mock_client
 
@@ -340,7 +145,7 @@ class TestIterateGemini:
     def test_handles_no_image_in_response(self, gemini_config, sample_context):
         """Test error handling when Gemini returns no image data."""
         with patch('utils.clients.genai.Client') as mock_client_class, \
-             patch('models.handlers.types') as mock_types:
+             patch('models.providers.gemini.types') as mock_types:
             mock_client = Mock()
             mock_client_class.return_value = mock_client
 
@@ -516,8 +321,6 @@ class TestIterateHandlerIntegration:
     def test_all_handlers_return_consistent_format(self):
         """Test that all iteration handlers return consistent response format."""
         handlers = [
-            ('bfl', iterate_flux),
-            ('recraft', iterate_recraft),
             ('google_gemini', iterate_gemini),
             ('openai', iterate_openai),
         ]

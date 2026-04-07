@@ -60,6 +60,9 @@ export interface UIState {
   // Mobile state
   isGalleryDrawerOpen: boolean;
   isMobileMenuOpen: boolean;
+
+  // Column focus state (desktop only)
+  focusedModel: ModelName | null;
 }
 
 export interface UIActions {
@@ -76,6 +79,10 @@ export interface UIActions {
   toggleGalleryDrawer: () => void;
   toggleMobileMenu: () => void;
   closeMobileMenu: () => void;
+
+  // Column focus actions
+  setFocusedModel: (model: ModelName | null) => void;
+  toggleFocus: (model: ModelName) => void;
 }
 
 export type AppStore = AppState & AppActions;

@@ -18,7 +18,7 @@ const createMockIteration = (overrides: Partial<Iteration> = {}): Iteration => (
 
 describe('IterationCard', () => {
   const defaultProps = {
-    model: 'flux' as ModelName,
+    model: 'gemini' as ModelName,
     iteration: createMockIteration(),
     onExpand: vi.fn(),
   };

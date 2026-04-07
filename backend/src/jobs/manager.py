@@ -5,16 +5,17 @@ Manages session lifecycle with iteration tracking per model column.
 Replaces the previous job-based storage with session-centric storage.
 """
 
+from __future__ import annotations
+
 import json
 import random
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
 
 from botocore.exceptions import ClientError
 
-from config import MAX_ITERATIONS
+from config import MAX_ITERATIONS, MODELS
 
 # Maximum retries for optimistic locking conflicts
 MAX_RETRIES = 3
@@ -51,7 +52,7 @@ class SessionManager:
         self.s3 = s3_client
         self.bucket = bucket_name
 
-    def create_session(self, prompt: str, enabled_models: List[str]) -> str:
+    def create_session(self, prompt: str, enabled_models: list[str]) -> str:
         """
         Create a new session with the given enabled models.
 
@@ -67,7 +68,7 @@ class SessionManager:
 
         # Initialize model states for all 4 models
         models = {}
-        for model_name in ["flux", "recraft", "gemini", "openai"]:
+        for model_name in MODELS.keys():
             models[model_name] = {
                 "enabled": model_name in enabled_models,
                 "status": "pending" if model_name in enabled_models else "disabled",
@@ -88,7 +89,7 @@ class SessionManager:
         self._save_status(session_id, status)
         return session_id
 
-    def get_session(self, session_id: str) -> Optional[Dict]:
+    def get_session(self, session_id: str) -> dict | None:
         """
         Get session status from S3.
 
@@ -113,7 +114,7 @@ class SessionManager:
         model: str,
         prompt: str,
         is_outpaint: bool = False,
-        outpaint_preset: Optional[str] = None,
+        outpaint_preset: str | None = None,
     ) -> int:
         """
         Add a new iteration to a model column.
@@ -186,7 +187,7 @@ class SessionManager:
         model: str,
         index: int,
         image_key: str,
-        duration: Optional[float] = None,
+        duration: float | None = None,
     ) -> None:
         """
         Mark an iteration as completed with image key.
@@ -311,7 +312,7 @@ class SessionManager:
 
         return model_data.get("iterationCount", 0)
 
-    def get_latest_image_key(self, session_id: str, model: str) -> Optional[str]:
+    def get_latest_image_key(self, session_id: str, model: str) -> str | None:
         """
         Get the image key of the latest completed iteration.
 
@@ -344,7 +345,7 @@ class SessionManager:
         latest = max(completed, key=lambda x: x["index"])
         return latest.get("imageKey")
 
-    def _save_status(self, session_id: str, status: Dict) -> None:
+    def _save_status(self, session_id: str, status: dict) -> None:
         """Save session status to S3 (unconditional write for new sessions)."""
         key = f"sessions/{session_id}/status.json"
         self.s3.put_object(
@@ -357,7 +358,7 @@ class SessionManager:
     def _save_status_with_version(
         self,
         session_id: str,
-        status: Dict,
+        status: dict,
     ) -> bool:
         """
         Save with ETag-based conditional write for optimistic locking.
@@ -383,7 +384,7 @@ class SessionManager:
                 return False
             raise
 
-    def _compute_model_status(self, model_data: Dict) -> str:
+    def _compute_model_status(self, model_data: dict) -> str:
         """Compute status for a single model based on its iterations."""
         if not model_data["enabled"]:
             return "disabled"
@@ -407,7 +408,7 @@ class SessionManager:
         else:
             return "completed"
 
-    def _compute_session_status(self, session: Dict) -> str:
+    def _compute_session_status(self, session: dict) -> str:
         """Compute overall session status from model statuses."""
         models = session["models"]
         enabled_models = [m for m in models.values() if m["enabled"]]
@@ -417,13 +418,13 @@ class SessionManager:
 
         statuses = [m["status"] for m in enabled_models]
 
-        if all(s == "pending" for s in statuses):
-            return "pending"
-
         if any(s == "in_progress" for s in statuses):
             return "in_progress"
 
-        # All done
+        if any(s == "pending" for s in statuses):
+            return "pending"
+
+        # All done (no pending or in_progress)
         error_count = sum(1 for s in statuses if s in ["error", "failed"])
 
         if error_count == len(enabled_models):

@@ -13,7 +13,6 @@ import { useSound } from '@/hooks/useSound';
 interface GalleryImage {
   model: string;
   url?: string;
-  blobUrl?: string;
   timestamp?: string;
 }
 

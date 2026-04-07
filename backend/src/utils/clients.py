@@ -8,14 +8,16 @@ the same HTTP connection pool.
 
 from typing import Any, Dict
 
+import boto3
 from google import genai
 from openai import OpenAI
 
-from config import api_client_timeout
+from config import api_client_timeout, aws_region
 
 # Module-level client singletons for Lambda container reuse
 _openai_clients: Dict[Any, OpenAI] = {}
 _genai_clients: Dict[str, genai.Client] = {}
+_bedrock_clients: Dict[str, Any] = {}
 
 
 def get_openai_client(api_key: str, **kwargs) -> OpenAI:
@@ -45,3 +47,14 @@ def get_genai_client(api_key: str) -> genai.Client:
     if cache_key not in _genai_clients:
         _genai_clients[cache_key] = genai.Client(api_key=api_key or None)
     return _genai_clients[cache_key]
+
+
+def get_bedrock_client(region: str | None = None) -> Any:
+    """Get or create a cached Bedrock runtime client keyed by region.
+
+    Auth is via the Lambda execution role; no API key is required.
+    """
+    region_key = region or aws_region
+    if region_key not in _bedrock_clients:
+        _bedrock_clients[region_key] = boto3.client("bedrock-runtime", region_name=region_key)
+    return _bedrock_clients[region_key]

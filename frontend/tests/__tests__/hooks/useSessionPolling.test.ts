@@ -43,10 +43,10 @@ const createMockSession = (
   createdAt: '2024-01-01T00:00:00Z',
   updatedAt: '2024-01-01T00:00:00Z',
   models: {
-    flux: createMockModelColumn('flux'),
-    recraft: createMockModelColumn('recraft'),
     gemini: createMockModelColumn('gemini'),
+    nova: createMockModelColumn('nova'),
     openai: createMockModelColumn('openai'),
+    firefly: createMockModelColumn('firefly'),
   },
 });
 

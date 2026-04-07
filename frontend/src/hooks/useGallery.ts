@@ -3,23 +3,20 @@
  * Manages gallery state and data fetching
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { listSessions, getSessionDetail } from '@/api/client';
-import { base64ToBlobUrl } from '@/utils/imageHelpers';
 
 interface GalleryItem {
   id: string;
   timestamp: string;
   imageCount: number;
-  previewData?: string;
+  previewUrl?: string;
   preview?: string;
 }
 
 interface GalleryImage {
   model: string;
   url?: string;
-  output?: string;
-  blobUrl?: string;
 }
 
 interface SelectedGallery {
@@ -51,10 +48,6 @@ function useGallery(): UseGalleryReturn {
   const [error, setError] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
 
-  // Track blob URLs for cleanup to prevent memory leaks
-  const previewBlobUrlsRef = useRef<string[]>([]);
-  const imageBlobUrlsRef = useRef<string[]>([]);
-
   /**
    * Fetch list of all galleries
    */
@@ -65,36 +58,16 @@ function useGallery(): UseGalleryReturn {
     try {
       const response = await listSessions();
 
-      // Revoke old preview blob URLs to prevent memory leaks
-      previewBlobUrlsRef.current.forEach((url) => {
-        if (url && url.startsWith('blob:')) {
-          URL.revokeObjectURL(url);
-        }
-      });
-      previewBlobUrlsRef.current = [];
-
-      // Map API response to GalleryItem with blob URL previews
-      const galleriesWithPreviews = (response.galleries || []).map((gallery): GalleryItem => {
-        const item: GalleryItem = {
+      // Map API response to GalleryItem using CloudFront preview URLs
+      const galleriesWithPreviews = (response.galleries || []).map(
+        (gallery): GalleryItem => ({
           id: gallery.id,
           timestamp: gallery.timestamp,
           imageCount: gallery.imageCount,
-          previewData: gallery.previewData,
-        };
-
-        if (gallery.previewData) {
-          try {
-            const previewBlob = base64ToBlobUrl(gallery.previewData);
-            if (previewBlob) {
-              previewBlobUrlsRef.current.push(previewBlob);
-              return { ...item, preview: previewBlob };
-            }
-          } catch (err) {
-            console.warn(`Failed to convert preview for gallery ${gallery.id}:`, err);
-          }
-        }
-        return item;
-      });
+          previewUrl: gallery.previewUrl,
+          preview: gallery.previewUrl,
+        }),
+      );
 
       setGalleries(galleriesWithPreviews);
     } catch (err) {
@@ -119,41 +92,16 @@ function useGallery(): UseGalleryReturn {
     setError(null);
 
     try {
-      // Revoke old image blob URLs to prevent memory leaks
-      imageBlobUrlsRef.current.forEach((url) => {
-        if (url && url.startsWith('blob:')) {
-          URL.revokeObjectURL(url);
-        }
-      });
-      imageBlobUrlsRef.current = [];
-
       const detail = await getSessionDetail(galleryId);
 
-      // Convert base64 images to blob URLs
-      const imagesWithBlobs: GalleryImage[] = (detail.images || []).map((img) => {
-        const galleryImage: GalleryImage = {
-          model: img.model,
-          url: img.url,
-          output: img.output,
-        };
-
-        if (img.output) {
-          try {
-            const blobUrl = base64ToBlobUrl(img.output);
-            if (blobUrl) {
-              imageBlobUrlsRef.current.push(blobUrl);
-              return { ...galleryImage, blobUrl };
-            }
-          } catch (err) {
-            console.warn(`Failed to convert image blob for ${img.model}:`, err);
-          }
-        }
-        return galleryImage;
-      });
+      const images: GalleryImage[] = (detail.images || []).map((img) => ({
+        model: img.model,
+        url: img.url,
+      }));
 
       setSelectedGallery({
         id: detail.galleryId,
-        images: imagesWithBlobs,
+        images,
         total: detail.total,
       });
     } catch (err) {
@@ -194,23 +142,6 @@ function useGallery(): UseGalleryReturn {
 
     return () => clearInterval(interval);
   }, [autoRefresh, fetchGalleries]);
-
-  // Cleanup: Revoke all blob URLs on unmount
-  useEffect(() => {
-    return () => {
-      previewBlobUrlsRef.current.forEach((url) => {
-        if (url && url.startsWith('blob:')) {
-          URL.revokeObjectURL(url);
-        }
-      });
-
-      imageBlobUrlsRef.current.forEach((url) => {
-        if (url && url.startsWith('blob:')) {
-          URL.revokeObjectURL(url);
-        }
-      });
-    };
-  }, []);
 
   return {
     galleries,

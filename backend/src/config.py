@@ -3,10 +3,11 @@ Configuration module for Pixel Prompt v2.
 Loads 4 fixed model configurations with enable/disable support.
 """
 
+from __future__ import annotations
+
 import os
 import warnings
 from dataclasses import dataclass
-from typing import Dict, List
 
 
 def _safe_int(env_var: str, default: int) -> int:
@@ -69,39 +70,54 @@ prompt_model_provider = os.environ.get("PROMPT_MODEL_PROVIDER", "openai")
 prompt_model_id = os.environ.get("PROMPT_MODEL_ID", "gpt-4o")
 prompt_model_api_key = os.environ.get("PROMPT_MODEL_API_KEY", "")
 
+# Firefly OAuth2 credentials (used by adobe_firefly provider)
+firefly_client_id = os.environ.get("FIREFLY_CLIENT_ID", "")
+firefly_client_secret = os.environ.get("FIREFLY_CLIENT_SECRET", "")
+
 # 4 Fixed Models Configuration
-MODELS: Dict[str, ModelConfig] = {
-    "flux": ModelConfig(
-        name="flux",
-        provider="bfl",
-        enabled=os.environ.get("FLUX_ENABLED", "true").lower() == "true",
-        api_key=os.environ.get("FLUX_API_KEY", ""),
-        model_id=os.environ.get("FLUX_MODEL_ID", "flux-2-pro"),
-        display_name="Flux",
-    ),
-    "recraft": ModelConfig(
-        name="recraft",
-        provider="recraft",
-        enabled=os.environ.get("RECRAFT_ENABLED", "true").lower() == "true",
-        api_key=os.environ.get("RECRAFT_API_KEY", ""),
-        model_id=os.environ.get("RECRAFT_MODEL_ID", "recraftv3"),
-        display_name="Recraft",
-    ),
+_gemini_api_key = os.environ.get("GEMINI_API_KEY", "")
+_openai_api_key = os.environ.get("OPENAI_API_KEY", "")
+
+MODELS: dict[str, ModelConfig] = {
     "gemini": ModelConfig(
         name="gemini",
         provider="google_gemini",
-        enabled=os.environ.get("GEMINI_ENABLED", "true").lower() == "true",
-        api_key=os.environ.get("GEMINI_API_KEY", ""),
-        model_id=os.environ.get("GEMINI_MODEL_ID", "gemini-2.5-flash-image"),
+        enabled=(
+            os.environ.get("GEMINI_ENABLED", "true").lower() == "true" and bool(_gemini_api_key)
+        ),
+        api_key=_gemini_api_key,
+        model_id=os.environ.get("GEMINI_MODEL_ID", "gemini-3.1-flash-image-preview"),
         display_name="Gemini",
+    ),
+    "nova": ModelConfig(
+        name="nova",
+        provider="bedrock_nova",
+        enabled=os.environ.get("NOVA_ENABLED", "true").lower() == "true",
+        api_key="",  # Auth via IAM role
+        model_id=os.environ.get("NOVA_MODEL_ID", "amazon.nova-canvas-v1:0"),
+        display_name="Nova Canvas",
     ),
     "openai": ModelConfig(
         name="openai",
         provider="openai",
-        enabled=os.environ.get("OPENAI_ENABLED", "true").lower() == "true",
-        api_key=os.environ.get("OPENAI_API_KEY", ""),
-        model_id=os.environ.get("OPENAI_MODEL_ID", "gpt-image-1"),
-        display_name="OpenAI",
+        enabled=(
+            os.environ.get("OPENAI_ENABLED", "true").lower() == "true" and bool(_openai_api_key)
+        ),
+        api_key=_openai_api_key,
+        model_id=os.environ.get("OPENAI_MODEL_ID", "dall-e-3"),
+        display_name="DALL-E 3",
+    ),
+    "firefly": ModelConfig(
+        name="firefly",
+        provider="adobe_firefly",
+        enabled=(
+            os.environ.get("FIREFLY_ENABLED", "true").lower() == "true"
+            and bool(firefly_client_id)
+            and bool(firefly_client_secret)
+        ),
+        api_key="",  # Auth via OAuth2 client credentials
+        model_id=os.environ.get("FIREFLY_MODEL_ID", "firefly-image-5"),
+        display_name="Firefly",
     ),
 }
 
@@ -113,7 +129,7 @@ MAX_ITERATIONS = 7
 ITERATION_WARNING_THRESHOLD = 5
 
 
-def get_enabled_models() -> List[ModelConfig]:
+def get_enabled_models() -> list[ModelConfig]:
     """Return list of enabled ModelConfig objects."""
     return [model for model in MODELS.values() if model.enabled]
 
@@ -141,7 +157,7 @@ def get_model(name: str) -> ModelConfig:
     return model
 
 
-def get_model_config_dict(model: ModelConfig) -> Dict:
+def get_model_config_dict(model: ModelConfig) -> dict:
     """
     Convert ModelConfig to dict format expected by handlers.
 
@@ -153,6 +169,9 @@ def get_model_config_dict(model: ModelConfig) -> Dict:
         "provider": model.provider,
     }
     config["api_key"] = model.api_key
+    if model.provider == "adobe_firefly":
+        config["client_id"] = firefly_client_id
+        config["client_secret"] = firefly_client_secret
     return config
 
 
@@ -160,7 +179,3 @@ def get_model_config_dict(model: ModelConfig) -> Dict:
 api_client_timeout = _safe_float("API_CLIENT_TIMEOUT", 120.0)
 image_download_timeout = _safe_int("IMAGE_DOWNLOAD_TIMEOUT", 30)
 generate_thread_workers = _safe_int("GENERATE_THREAD_WORKERS", 4)
-
-# BFL polling configuration
-bfl_max_poll_attempts = _safe_int("BFL_MAX_POLL_ATTEMPTS", 40)
-bfl_poll_interval = _safe_int("BFL_POLL_INTERVAL", 3)

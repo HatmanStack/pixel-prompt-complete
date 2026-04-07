@@ -10,29 +10,29 @@ Metadata:
         Parameters:
           - Environment
       - Label:
-          default: "Flux Configuration (BFL)"
-        Parameters:
-          - FluxEnabled
-          - FluxApiKey
-          - FluxModelId
-      - Label:
-          default: "Recraft Configuration"
-        Parameters:
-          - RecraftEnabled
-          - RecraftApiKey
-          - RecraftModelId
-      - Label:
           default: "Gemini Configuration (Google)"
         Parameters:
           - GeminiEnabled
           - GeminiApiKey
           - GeminiModelId
       - Label:
-          default: "OpenAI Configuration"
+          default: "Nova Canvas Configuration (AWS Bedrock)"
+        Parameters:
+          - NovaEnabled
+          - NovaModelId
+      - Label:
+          default: "OpenAI (DALL-E 3) Configuration"
         Parameters:
           - OpenaiEnabled
           - OpenaiApiKey
           - OpenaiModelId
+      - Label:
+          default: "Adobe Firefly Configuration"
+        Parameters:
+          - FireflyEnabled
+          - FireflyClientId
+          - FireflyClientSecret
+          - FireflyModelId
       - Label:
           default: "Prompt Enhancement"
         Parameters:
@@ -60,46 +60,6 @@ Parameters:
       - prod
     Description: Environment name for resource tagging
 
-  # Flux (BFL) Configuration
-  FluxEnabled:
-    Type: String
-    Default: "true"
-    AllowedValues:
-      - "true"
-      - "false"
-    Description: Enable Flux model (Black Forest Labs)
-
-  FluxApiKey:
-    Type: String
-    NoEcho: true
-    Default: ""
-    Description: BFL API key for Flux models
-
-  FluxModelId:
-    Type: String
-    Default: "flux-2-pro"
-    Description: Flux model ID (e.g., flux-2-pro, flux-pro-1.1, flux-dev)
-
-  # Recraft Configuration
-  RecraftEnabled:
-    Type: String
-    Default: "true"
-    AllowedValues:
-      - "true"
-      - "false"
-    Description: Enable Recraft v3 model
-
-  RecraftApiKey:
-    Type: String
-    NoEcho: true
-    Default: ""
-    Description: Recraft API key
-
-  RecraftModelId:
-    Type: String
-    Default: "recraftv3"
-    Description: Recraft model ID
-
   # Gemini Configuration
   GeminiEnabled:
     Type: String
@@ -117,17 +77,31 @@ Parameters:
 
   GeminiModelId:
     Type: String
-    Default: "gemini-2.5-flash-image"
-    Description: Gemini model ID for image generation (e.g., gemini-2.5-flash-image, gemini-3-pro-preview)
+    Default: "gemini-3.1-flash-image-preview"
+    Description: Gemini model ID for image generation
 
-  # OpenAI Configuration
+  # Nova Canvas (AWS Bedrock) Configuration
+  NovaEnabled:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Enable Amazon Nova Canvas via Bedrock
+
+  NovaModelId:
+    Type: String
+    Default: "amazon.nova-canvas-v1:0"
+    Description: Nova Canvas Bedrock model identifier
+
+  # OpenAI (DALL-E 3) Configuration
   OpenaiEnabled:
     Type: String
     Default: "true"
     AllowedValues:
       - "true"
       - "false"
-    Description: Enable OpenAI gpt-image-1 model
+    Description: Enable OpenAI DALL-E 3 model
 
   OpenaiApiKey:
     Type: String
@@ -137,8 +111,34 @@ Parameters:
 
   OpenaiModelId:
     Type: String
-    Default: "gpt-image-1"
-    Description: OpenAI image model ID
+    Default: "dall-e-3"
+    Description: OpenAI image generation model ID
+
+  # Adobe Firefly Configuration
+  FireflyEnabled:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Enable Adobe Firefly model
+
+  FireflyClientId:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: Adobe Firefly OAuth2 client ID
+
+  FireflyClientSecret:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: Adobe Firefly OAuth2 client secret
+
+  FireflyModelId:
+    Type: String
+    Default: "firefly-image-5"
+    Description: Adobe Firefly model ID
 
   # Prompt Enhancement Model
   PromptModelProvider:
@@ -203,19 +203,19 @@ Resources:
       ReservedConcurrentExecutions: 10
       Environment:
         Variables:
-          # 4 Fixed Models Configuration
-          FLUX_ENABLED: !Ref FluxEnabled
-          FLUX_API_KEY: !Ref FluxApiKey
-          FLUX_MODEL_ID: !Ref FluxModelId
-          RECRAFT_ENABLED: !Ref RecraftEnabled
-          RECRAFT_API_KEY: !Ref RecraftApiKey
-          RECRAFT_MODEL_ID: !Ref RecraftModelId
+          # Model Configuration
           GEMINI_ENABLED: !Ref GeminiEnabled
           GEMINI_API_KEY: !Ref GeminiApiKey
           GEMINI_MODEL_ID: !Ref GeminiModelId
+          NOVA_ENABLED: !Ref NovaEnabled
+          NOVA_MODEL_ID: !Ref NovaModelId
           OPENAI_ENABLED: !Ref OpenaiEnabled
           OPENAI_API_KEY: !Ref OpenaiApiKey
           OPENAI_MODEL_ID: !Ref OpenaiModelId
+          FIREFLY_ENABLED: !Ref FireflyEnabled
+          FIREFLY_CLIENT_ID: !Ref FireflyClientId
+          FIREFLY_CLIENT_SECRET: !Ref FireflyClientSecret
+          FIREFLY_MODEL_ID: !Ref FireflyModelId
           # Prompt Enhancement
           PROMPT_MODEL_PROVIDER: !Ref PromptModelProvider
           PROMPT_MODEL_ID: !Ref PromptModelId
@@ -248,6 +248,10 @@ Resources:
                 StringLike:
                   s3:prefix:
                     - 'sessions/*'
+            - Sid: BedrockInvokeModel
+              Effect: Allow
+              Action: bedrock:InvokeModel
+              Resource: !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/*'
       Events:
         GenerateApi:
           Type: HttpApi
@@ -277,6 +281,12 @@ Resources:
           Type: HttpApi
           Properties:
             Path: /enhance
+            Method: POST
+            ApiId: !Ref HttpApi
+        LogApi:
+          Type: HttpApi
+          Properties:
+            Path: /log
             Method: POST
             ApiId: !Ref HttpApi
         GalleryListApi:

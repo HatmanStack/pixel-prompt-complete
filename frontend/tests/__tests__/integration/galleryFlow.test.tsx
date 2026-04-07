@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Integration Test: Gallery Browsing Flow
  * Tests the complete gallery browsing workflow
@@ -9,7 +10,20 @@ import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import GalleryBrowser from '@/components/gallery/GalleryBrowser';
 import * as apiClient from '@/api/client';
-import { mockGalleryListResponse, mockGalleryDetailResponse } from '@/fixtures/apiResponses';
+const mockGalleryListResponse = {
+  galleries: [
+    { id: 'gallery-1', timestamp: '2024-01-15T10:30:00Z', imageCount: 4 },
+    { id: 'gallery-2', timestamp: '2024-01-14T15:20:00Z', imageCount: 4 },
+  ],
+  total: 2,
+};
+const mockGalleryDetailResponse = {
+  galleryId: 'gallery-1',
+  images: [
+    { key: 'k1', model: 'gemini', url: 'https://cdn.example.com/i1.png', prompt: 'p' },
+  ],
+  total: 1,
+};
 
 // Mock the API client
 vi.mock('@/api/client');

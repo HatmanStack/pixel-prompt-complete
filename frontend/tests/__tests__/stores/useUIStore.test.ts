@@ -16,6 +16,7 @@ describe('useUIStore', () => {
       soundsLoaded: false,
       isGalleryDrawerOpen: false,
       isMobileMenuOpen: false,
+      focusedModel: null,
     });
   });
 
@@ -30,6 +31,7 @@ describe('useUIStore', () => {
       expect(state.soundsLoaded).toBe(false);
       expect(state.isGalleryDrawerOpen).toBe(false);
       expect(state.isMobileMenuOpen).toBe(false);
+      expect(state.focusedModel).toBeNull();
     });
   });
 
@@ -114,6 +116,35 @@ describe('useUIStore', () => {
 
       useUIStore.getState().closeMobileMenu();
       expect(useUIStore.getState().isMobileMenuOpen).toBe(false);
+    });
+  });
+
+  describe('column focus actions', () => {
+    it('focusedModel defaults to null', () => {
+      expect(useUIStore.getState().focusedModel).toBeNull();
+    });
+
+    it('toggleFocus sets model when unfocused', () => {
+      useUIStore.getState().toggleFocus('gemini');
+      expect(useUIStore.getState().focusedModel).toBe('gemini');
+    });
+
+    it('toggleFocus clears when called twice with same model', () => {
+      useUIStore.getState().toggleFocus('gemini');
+      useUIStore.getState().toggleFocus('gemini');
+      expect(useUIStore.getState().focusedModel).toBeNull();
+    });
+
+    it('toggleFocus switches to another model', () => {
+      useUIStore.getState().toggleFocus('gemini');
+      useUIStore.getState().toggleFocus('nova');
+      expect(useUIStore.getState().focusedModel).toBe('nova');
+    });
+
+    it('setFocusedModel(null) clears focus', () => {
+      useUIStore.getState().setFocusedModel('openai');
+      useUIStore.getState().setFocusedModel(null);
+      expect(useUIStore.getState().focusedModel).toBeNull();
     });
   });
 });
