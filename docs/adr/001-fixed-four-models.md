@@ -10,7 +10,7 @@ The original Pixel Prompt design used a dynamic model registry where operators c
 
 ## Decision
 
-Fix the architecture to exactly four models: Flux (BFL), Recraft, Gemini (Google), and OpenAI. Each can be enabled or disabled via environment variables, but no models can be added or removed without code changes.
+Fix the architecture to exactly four models: Gemini (Google), Nova Canvas (Amazon Bedrock), DALL-E 3 (OpenAI), and Firefly (Adobe). Each can be enabled or disabled via environment variables, but no models can be added or removed without code changes.
 
 ## Consequences
 
@@ -23,10 +23,9 @@ Fix the architecture to exactly four models: Flux (BFL), Recraft, Gemini (Google
 
 ### Negative
 
-- Adding a fifth model requires code changes in `config.py`, `handlers.py`, `SessionManager`, and frontend `ModelColumn` layout
-- The legacy `ModelRegistry` class remains in `models/registry.py` (unused but not yet removed)
+- Adding a fifth model requires code changes in `config.py`, `models/providers/`, `SessionManager`, and frontend `ModelColumn` layout
 
 ### Neutral
 
-- Each model still needs its own generate/iterate/outpaint handler triplet in `handlers.py`
+- Each model has its own generate/iterate/outpaint handler triplet under `backend/src/models/providers/` (one module per provider)
 - Per-model enable/disable flags provide sufficient flexibility for most deployments
