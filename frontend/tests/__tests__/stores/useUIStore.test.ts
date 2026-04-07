@@ -31,6 +31,7 @@ describe('useUIStore', () => {
       expect(state.soundsLoaded).toBe(false);
       expect(state.isGalleryDrawerOpen).toBe(false);
       expect(state.isMobileMenuOpen).toBe(false);
+      expect(state.focusedModel).toBeNull();
     });
   });
 

@@ -92,16 +92,33 @@ class TestModelConfig:
             assert config_dict['provider'] == 'google_gemini'
 
     def test_default_values_when_env_missing(self):
-        """Default values should be used when env vars missing."""
+        """Models requiring credentials are disabled when env vars missing; Nova (IAM auth) stays enabled."""
         env = {}
         with patch.dict(os.environ, env, clear=True):
             import importlib
             import config
             importlib.reload(config)
 
-            # All models default to enabled=True
+            # Nova uses IAM role and stays enabled; others require credentials and are disabled
             enabled = config.get_enabled_models()
-            assert len(enabled) == 4  # gemini, nova, openai, firefly
+            enabled_names = {m.name for m in enabled}
+            assert enabled_names == {"nova"}
+
+    def test_all_models_enabled_with_credentials(self):
+        """All 4 models enabled when credentials are present."""
+        env = {
+            "GEMINI_API_KEY": "test-gemini-key",
+            "OPENAI_API_KEY": "test-openai-key",
+            "FIREFLY_CLIENT_ID": "test-firefly-id",
+            "FIREFLY_CLIENT_SECRET": "test-firefly-secret",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            import importlib
+            import config
+            importlib.reload(config)
+
+            enabled = config.get_enabled_models()
+            assert len(enabled) == 4
 
     def test_iteration_limits_defined(self):
         """MAX_ITERATIONS and ITERATION_WARNING_THRESHOLD should be defined."""

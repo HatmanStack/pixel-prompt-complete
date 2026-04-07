@@ -28,14 +28,14 @@ class TestSessionManager:
 
     def test_create_and_retrieve_session(self, session_manager):
         """create_session() stores data retrievable via get_session()."""
-        sid = session_manager.create_session("sunset", ["gemini", "gemini"])
+        sid = session_manager.create_session("sunset", ["gemini", "nova"])
         session = session_manager.get_session(sid)
 
         assert session is not None
         assert session["prompt"] == "sunset"
         assert session["status"] == "pending"
         assert session["models"]["gemini"]["enabled"] is True
-        assert session["models"]["gemini"]["enabled"] is True
+        assert session["models"]["nova"]["enabled"] is True
 
     def test_create_session_marks_disabled_models(self, session_manager):
         """Models not in enabled list should be marked disabled."""

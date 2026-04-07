@@ -75,12 +75,17 @@ firefly_client_id = os.environ.get("FIREFLY_CLIENT_ID", "")
 firefly_client_secret = os.environ.get("FIREFLY_CLIENT_SECRET", "")
 
 # 4 Fixed Models Configuration
+_gemini_api_key = os.environ.get("GEMINI_API_KEY", "")
+_openai_api_key = os.environ.get("OPENAI_API_KEY", "")
+
 MODELS: dict[str, ModelConfig] = {
     "gemini": ModelConfig(
         name="gemini",
         provider="google_gemini",
-        enabled=os.environ.get("GEMINI_ENABLED", "true").lower() == "true",
-        api_key=os.environ.get("GEMINI_API_KEY", ""),
+        enabled=(
+            os.environ.get("GEMINI_ENABLED", "true").lower() == "true" and bool(_gemini_api_key)
+        ),
+        api_key=_gemini_api_key,
         model_id=os.environ.get("GEMINI_MODEL_ID", "gemini-3.1-flash-image-preview"),
         display_name="Gemini",
     ),
@@ -95,15 +100,21 @@ MODELS: dict[str, ModelConfig] = {
     "openai": ModelConfig(
         name="openai",
         provider="openai",
-        enabled=os.environ.get("OPENAI_ENABLED", "true").lower() == "true",
-        api_key=os.environ.get("OPENAI_API_KEY", ""),
+        enabled=(
+            os.environ.get("OPENAI_ENABLED", "true").lower() == "true" and bool(_openai_api_key)
+        ),
+        api_key=_openai_api_key,
         model_id=os.environ.get("OPENAI_MODEL_ID", "dall-e-3"),
         display_name="DALL-E 3",
     ),
     "firefly": ModelConfig(
         name="firefly",
         provider="adobe_firefly",
-        enabled=os.environ.get("FIREFLY_ENABLED", "true").lower() == "true",
+        enabled=(
+            os.environ.get("FIREFLY_ENABLED", "true").lower() == "true"
+            and bool(firefly_client_id)
+            and bool(firefly_client_secret)
+        ),
         api_key="",  # Auth via OAuth2 client credentials
         model_id=os.environ.get("FIREFLY_MODEL_ID", "firefly-image-5"),
         display_name="Firefly",

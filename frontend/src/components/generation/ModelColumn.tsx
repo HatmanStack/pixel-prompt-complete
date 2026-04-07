@@ -148,11 +148,13 @@ export const ModelColumn: FC<ModelColumnProps> = memo(
               <span className="text-xs text-gray-500 dark:text-gray-400">
                 {column.iterations.length}/{MAX_ITERATIONS}
               </span>
-              <Checkbox
-                checked={isSelected}
-                onChange={onToggleSelect}
-                aria-label={`Select ${MODEL_DISPLAY_NAMES[model]} for batch editing`}
-              />
+              <div onClick={(e) => e.stopPropagation()}>
+                <Checkbox
+                  checked={isSelected}
+                  onChange={onToggleSelect}
+                  aria-label={`Select ${MODEL_DISPLAY_NAMES[model]} for batch editing`}
+                />
+              </div>
             </div>
           )}
         </div>

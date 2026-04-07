@@ -136,10 +136,9 @@ def _error_result(
     error: Exception | str, model_config: ModelConfig, provider: str
 ) -> HandlerResult:
     """Build standardized error response."""
-    msg = sanitize_error_message(error) if isinstance(error, Exception) else error
     return {
         "status": "error",
-        "error": msg,
+        "error": sanitize_error_message(error),
         "model": model_config.get("id", ""),
         "provider": provider,
     }

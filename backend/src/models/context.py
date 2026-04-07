@@ -58,7 +58,7 @@ class ContextManager:
 
         Args:
             session_id: Session identifier
-            model: Model name ('flux', 'recraft', 'gemini', 'openai')
+            model: Model name ('gemini', 'nova', 'openai', 'firefly')
 
         Returns:
             List of ContextEntry objects (empty if no context exists)

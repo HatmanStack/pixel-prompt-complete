@@ -4,7 +4,13 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useAppStore } from '../../../src/stores/useAppStore';
-import type { Session, SessionPreview, ModelName, Iteration, ModelColumn } from '../../../src/types';
+import type {
+  Session,
+  SessionPreview,
+  ModelName,
+  Iteration,
+  ModelColumn,
+} from '../../../src/types';
 
 // Helper to create mock Session
 const createMockSession = (overrides: Partial<Session> = {}): Session => ({
@@ -25,7 +31,7 @@ const createMockSession = (overrides: Partial<Session> = {}): Session => ({
 // Helper to create mock ModelColumn
 const createMockModelColumn = (
   name: ModelName,
-  overrides: Partial<ModelColumn> = {}
+  overrides: Partial<ModelColumn> = {},
 ): ModelColumn => ({
   name,
   enabled: true,
@@ -35,10 +41,7 @@ const createMockModelColumn = (
 });
 
 // Helper to create mock Iteration
-const createMockIteration = (
-  index: number,
-  overrides: Partial<Iteration> = {}
-): Iteration => ({
+const createMockIteration = (index: number, overrides: Partial<Iteration> = {}): Iteration => ({
   index,
   status: 'completed',
   prompt: `iteration ${index} prompt`,
@@ -161,7 +164,7 @@ describe('useAppStore - Session-based state', () => {
       expect(state.selectedModels.size).toBe(4);
       expect(state.selectedModels.has('gemini')).toBe(true);
       expect(state.selectedModels.has('nova')).toBe(true);
-      expect(state.selectedModels.has('gemini')).toBe(true);
+      expect(state.selectedModels.has('firefly')).toBe(true);
       expect(state.selectedModels.has('openai')).toBe(true);
       expect(state.isMultiSelectMode).toBe(true);
     });

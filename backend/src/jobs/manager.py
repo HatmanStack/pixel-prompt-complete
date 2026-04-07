@@ -418,13 +418,13 @@ class SessionManager:
 
         statuses = [m["status"] for m in enabled_models]
 
-        if all(s == "pending" for s in statuses):
-            return "pending"
-
         if any(s == "in_progress" for s in statuses):
             return "in_progress"
 
-        # All done
+        if any(s == "pending" for s in statuses):
+            return "pending"
+
+        # All done (no pending or in_progress)
         error_count = sum(1 for s in statuses if s in ["error", "failed"])
 
         if error_count == len(enabled_models):
