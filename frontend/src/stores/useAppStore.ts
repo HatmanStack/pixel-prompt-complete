@@ -9,10 +9,10 @@ import type { Session, SessionPreview, ModelName, Iteration } from '@/types';
 import { MODELS } from '@/types';
 
 const INITIAL_ITERATION_WARNINGS: Record<ModelName, boolean> = {
-  flux: false,
-  recraft: false,
   gemini: false,
+  nova: false,
   openai: false,
+  firefly: false,
 };
 
 export const useAppStore = create<AppStore>((set) => ({

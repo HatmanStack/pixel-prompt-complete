@@ -14,10 +14,10 @@ const createMockSession = (overrides: Partial<Session> = {}): Session => ({
   createdAt: '2024-01-01T00:00:00Z',
   updatedAt: '2024-01-01T00:00:00Z',
   models: {
-    flux: createMockModelColumn('flux'),
-    recraft: createMockModelColumn('recraft'),
     gemini: createMockModelColumn('gemini'),
+    nova: createMockModelColumn('nova'),
     openai: createMockModelColumn('openai'),
+    firefly: createMockModelColumn('firefly'),
   },
   ...overrides,
 });
@@ -68,10 +68,10 @@ describe('useAppStore - Session-based state', () => {
       sessions: [],
       selectedGallerySession: null,
       iterationWarnings: {
-        flux: false,
-        recraft: false,
         gemini: false,
+        nova: false,
         openai: false,
+        firefly: false,
       },
       currentView: 'generation',
     });
@@ -97,18 +97,18 @@ describe('useAppStore - Session-based state', () => {
       useAppStore.getState().setCurrentSession(session);
 
       const iteration = createMockIteration(0);
-      useAppStore.getState().updateModelIteration('flux', iteration);
+      useAppStore.getState().updateModelIteration('gemini', iteration);
 
       const state = useAppStore.getState();
-      expect(state.currentSession?.models.flux.iterations).toHaveLength(1);
-      expect(state.currentSession?.models.flux.iterations[0]).toEqual(iteration);
+      expect(state.currentSession?.models.gemini.iterations).toHaveLength(1);
+      expect(state.currentSession?.models.gemini.iterations[0]).toEqual(iteration);
     });
 
     it('updateModelIteration updates existing iteration', () => {
       const session = createMockSession({
         models: {
           ...createMockSession().models,
-          flux: createMockModelColumn('flux', {
+          gemini: createMockModelColumn('gemini', {
             iterations: [createMockIteration(0, { status: 'loading' })],
           }),
         },
@@ -116,16 +116,16 @@ describe('useAppStore - Session-based state', () => {
       useAppStore.getState().setCurrentSession(session);
 
       const updatedIteration = createMockIteration(0, { status: 'completed' });
-      useAppStore.getState().updateModelIteration('flux', updatedIteration);
+      useAppStore.getState().updateModelIteration('gemini', updatedIteration);
 
       const state = useAppStore.getState();
-      expect(state.currentSession?.models.flux.iterations[0].status).toBe('completed');
+      expect(state.currentSession?.models.gemini.iterations[0].status).toBe('completed');
     });
 
     it('resetSession clears session state', () => {
       useAppStore.getState().setCurrentSession(createMockSession());
       useAppStore.getState().setIsGenerating(true);
-      useAppStore.getState().toggleModelSelection('flux');
+      useAppStore.getState().toggleModelSelection('gemini');
 
       useAppStore.getState().resetSession();
 
@@ -138,19 +138,19 @@ describe('useAppStore - Session-based state', () => {
 
   describe('selection actions', () => {
     it('toggleModelSelection adds model to selection', () => {
-      useAppStore.getState().toggleModelSelection('flux');
+      useAppStore.getState().toggleModelSelection('gemini');
 
       const state = useAppStore.getState();
-      expect(state.selectedModels.has('flux')).toBe(true);
+      expect(state.selectedModels.has('gemini')).toBe(true);
       expect(state.isMultiSelectMode).toBe(true);
     });
 
     it('toggleModelSelection removes model from selection', () => {
-      useAppStore.getState().toggleModelSelection('flux');
-      useAppStore.getState().toggleModelSelection('flux');
+      useAppStore.getState().toggleModelSelection('gemini');
+      useAppStore.getState().toggleModelSelection('gemini');
 
       const state = useAppStore.getState();
-      expect(state.selectedModels.has('flux')).toBe(false);
+      expect(state.selectedModels.has('gemini')).toBe(false);
       expect(state.isMultiSelectMode).toBe(false);
     });
 
@@ -159,8 +159,8 @@ describe('useAppStore - Session-based state', () => {
 
       const state = useAppStore.getState();
       expect(state.selectedModels.size).toBe(4);
-      expect(state.selectedModels.has('flux')).toBe(true);
-      expect(state.selectedModels.has('recraft')).toBe(true);
+      expect(state.selectedModels.has('gemini')).toBe(true);
+      expect(state.selectedModels.has('nova')).toBe(true);
       expect(state.selectedModels.has('gemini')).toBe(true);
       expect(state.selectedModels.has('openai')).toBe(true);
       expect(state.isMultiSelectMode).toBe(true);
@@ -182,14 +182,14 @@ describe('useAppStore - Session-based state', () => {
       const session = createMockSession({
         models: {
           ...createMockSession().models,
-          flux: createMockModelColumn('flux', { iterations }),
+          gemini: createMockModelColumn('gemini', { iterations }),
         },
       });
       useAppStore.getState().setCurrentSession(session);
 
-      useAppStore.getState().checkIterationWarning('flux');
+      useAppStore.getState().checkIterationWarning('gemini');
 
-      expect(useAppStore.getState().iterationWarnings.flux).toBe(true);
+      expect(useAppStore.getState().iterationWarnings.gemini).toBe(true);
     });
 
     it('checkIterationWarning does not set warning below 5 iterations', () => {
@@ -197,25 +197,25 @@ describe('useAppStore - Session-based state', () => {
       const session = createMockSession({
         models: {
           ...createMockSession().models,
-          flux: createMockModelColumn('flux', { iterations }),
+          gemini: createMockModelColumn('gemini', { iterations }),
         },
       });
       useAppStore.getState().setCurrentSession(session);
 
-      useAppStore.getState().checkIterationWarning('flux');
+      useAppStore.getState().checkIterationWarning('gemini');
 
-      expect(useAppStore.getState().iterationWarnings.flux).toBe(false);
+      expect(useAppStore.getState().iterationWarnings.gemini).toBe(false);
     });
 
     it('clearIterationWarning clears warning', () => {
       useAppStore.setState((state) => ({
         ...state,
-        iterationWarnings: { ...state.iterationWarnings, flux: true },
+        iterationWarnings: { ...state.iterationWarnings, gemini: true },
       }));
 
-      useAppStore.getState().clearIterationWarning('flux');
+      useAppStore.getState().clearIterationWarning('gemini');
 
-      expect(useAppStore.getState().iterationWarnings.flux).toBe(false);
+      expect(useAppStore.getState().iterationWarnings.gemini).toBe(false);
     });
   });
 

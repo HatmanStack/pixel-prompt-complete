@@ -277,17 +277,17 @@ describe('API Client', () => {
   describe('iterateMultiple', () => {
     it('returns only successful results from Promise.allSettled', async () => {
       // First model succeeds, second fails, third succeeds
-      const successResult1 = { sessionId: 's1', model: 'flux', iteration: 1, status: 'success' };
-      const successResult2 = { sessionId: 's1', model: 'gemini', iteration: 1, status: 'success' };
+      const successResult1 = { sessionId: 's1', model: 'gemini', iteration: 1, status: 'success' };
+      const successResult2 = { sessionId: 's1', model: 'openai', iteration: 1, status: 'success' };
 
-      // flux succeeds
-      fetchMock.mockResolvedValueOnce(mockResponse(successResult1, 200));
-      // recraft fails with 500
-      fetchMock.mockResolvedValueOnce(mockResponse({ error: 'Internal error' }, 500, 'Internal Server Error'));
       // gemini succeeds
+      fetchMock.mockResolvedValueOnce(mockResponse(successResult1, 200));
+      // nova fails with 500
+      fetchMock.mockResolvedValueOnce(mockResponse({ error: 'Internal error' }, 500, 'Internal Server Error'));
+      // openai succeeds
       fetchMock.mockResolvedValueOnce(mockResponse(successResult2, 200));
 
-      const result = await iterateMultiple('s1', ['flux', 'recraft', 'gemini'], 'refine this');
+      const result = await iterateMultiple('s1', ['gemini', 'nova', 'openai'], 'refine this');
 
       expect(result).toHaveLength(2);
       expect(result[0]).toEqual(successResult1);
@@ -299,7 +299,7 @@ describe('API Client', () => {
         .mockResolvedValueOnce(mockResponse({ error: 'fail' }, 500, 'Internal Server Error'))
         .mockResolvedValueOnce(mockResponse({ error: 'fail' }, 500, 'Internal Server Error'));
 
-      const result = await iterateMultiple('s1', ['flux', 'recraft'], 'refine');
+      const result = await iterateMultiple('s1', ['gemini', 'nova'], 'refine');
 
       expect(result).toHaveLength(0);
     });

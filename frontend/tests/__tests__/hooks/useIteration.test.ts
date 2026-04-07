@@ -4,14 +4,15 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { renderHook } from '@testing-library/react';
-import { useIteration, useMultiIterate, MAX_ITERATIONS, WARNING_THRESHOLD } from '../../../src/hooks/useIteration';
+import { useIteration, useMultiIterate } from '../../../src/hooks/useIteration';
+import { MAX_ITERATIONS, WARNING_THRESHOLD } from '../../../src/config/constants';
 import { useAppStore } from '../../../src/stores/useAppStore';
 import type { Session, ModelColumn, Iteration, ModelName } from '../../../src/types';
 
 // Mock API client
 vi.mock('../../../src/api/client', () => ({
-  iterateImage: vi.fn().mockResolvedValue({ sessionId: 'test', model: 'flux', iteration: 1, status: 'success' }),
-  iterateMultiple: vi.fn().mockResolvedValue([{ sessionId: 'test', model: 'flux', iteration: 1, status: 'success' }]),
+  iterateImage: vi.fn().mockResolvedValue({ sessionId: 'test', model: 'gemini', iteration: 1, status: 'success' }),
+  iterateMultiple: vi.fn().mockResolvedValue([{ sessionId: 'test', model: 'gemini', iteration: 1, status: 'success' }]),
 }));
 
 // Helper to create mock iteration
@@ -32,8 +33,8 @@ const createMockModelColumn = (name: ModelName, iterationCount = 0, enabled = tr
 
 // Helper to create mock session
 const createMockSession = (
-  fluxIterations = 0,
-  fluxEnabled = true
+  geminiIterations = 0,
+  geminiEnabled = true
 ): Session => ({
   sessionId: 'test-session',
   status: 'completed',
@@ -41,10 +42,10 @@ const createMockSession = (
   createdAt: '2024-01-01T00:00:00Z',
   updatedAt: '2024-01-01T00:00:00Z',
   models: {
-    flux: createMockModelColumn('flux', fluxIterations, fluxEnabled),
-    recraft: createMockModelColumn('recraft', 0, true),
-    gemini: createMockModelColumn('gemini', 0, true),
+    gemini: createMockModelColumn('gemini', geminiIterations, geminiEnabled),
+    nova: createMockModelColumn('nova', 0, true),
     openai: createMockModelColumn('openai', 0, true),
+    firefly: createMockModelColumn('firefly', 0, true),
   },
 });
 
@@ -56,10 +57,10 @@ describe('useIteration', () => {
       selectedModels: new Set(),
       isMultiSelectMode: false,
       iterationWarnings: {
-        flux: false,
-        recraft: false,
         gemini: false,
+        nova: false,
         openai: false,
+        firefly: false,
       },
     });
     vi.clearAllMocks();
@@ -67,7 +68,7 @@ describe('useIteration', () => {
 
   describe('iteration count', () => {
     it('returns 0 when no session', () => {
-      const { result } = renderHook(() => useIteration('flux'));
+      const { result } = renderHook(() => useIteration('gemini'));
 
       expect(result.current.iterationCount).toBe(0);
     });
@@ -75,7 +76,7 @@ describe('useIteration', () => {
     it('returns correct count when session has iterations', () => {
       useAppStore.setState({ currentSession: createMockSession(3) });
 
-      const { result } = renderHook(() => useIteration('flux'));
+      const { result } = renderHook(() => useIteration('gemini'));
 
       expect(result.current.iterationCount).toBe(3);
     });
@@ -85,7 +86,7 @@ describe('useIteration', () => {
     it('returns false when below limit', () => {
       useAppStore.setState({ currentSession: createMockSession(5) });
 
-      const { result } = renderHook(() => useIteration('flux'));
+      const { result } = renderHook(() => useIteration('gemini'));
 
       expect(result.current.isAtLimit).toBe(false);
     });
@@ -93,7 +94,7 @@ describe('useIteration', () => {
     it('returns true when at limit', () => {
       useAppStore.setState({ currentSession: createMockSession(MAX_ITERATIONS) });
 
-      const { result } = renderHook(() => useIteration('flux'));
+      const { result } = renderHook(() => useIteration('gemini'));
 
       expect(result.current.isAtLimit).toBe(true);
     });
@@ -103,7 +104,7 @@ describe('useIteration', () => {
     it('returns false when below threshold', () => {
       useAppStore.setState({ currentSession: createMockSession(3) });
 
-      const { result } = renderHook(() => useIteration('flux'));
+      const { result } = renderHook(() => useIteration('gemini'));
 
       expect(result.current.showWarning).toBe(false);
     });
@@ -111,7 +112,7 @@ describe('useIteration', () => {
     it('returns true when at or above threshold', () => {
       useAppStore.setState({ currentSession: createMockSession(WARNING_THRESHOLD) });
 
-      const { result } = renderHook(() => useIteration('flux'));
+      const { result } = renderHook(() => useIteration('gemini'));
 
       expect(result.current.showWarning).toBe(true);
     });
@@ -119,10 +120,10 @@ describe('useIteration', () => {
     it('returns true when warning flag is set', () => {
       useAppStore.setState({
         currentSession: createMockSession(3),
-        iterationWarnings: { flux: true, recraft: false, gemini: false, openai: false },
+        iterationWarnings: { gemini: true, nova: false, openai: false, firefly: false },
       });
 
-      const { result } = renderHook(() => useIteration('flux'));
+      const { result } = renderHook(() => useIteration('gemini'));
 
       expect(result.current.showWarning).toBe(true);
     });
@@ -132,7 +133,7 @@ describe('useIteration', () => {
     it('calculates remaining correctly', () => {
       useAppStore.setState({ currentSession: createMockSession(3) });
 
-      const { result } = renderHook(() => useIteration('flux'));
+      const { result } = renderHook(() => useIteration('gemini'));
 
       expect(result.current.remainingIterations).toBe(MAX_ITERATIONS - 3);
     });
@@ -140,7 +141,7 @@ describe('useIteration', () => {
     it('returns 0 when at limit', () => {
       useAppStore.setState({ currentSession: createMockSession(MAX_ITERATIONS) });
 
-      const { result } = renderHook(() => useIteration('flux'));
+      const { result } = renderHook(() => useIteration('gemini'));
 
       expect(result.current.remainingIterations).toBe(0);
     });
@@ -150,7 +151,7 @@ describe('useIteration', () => {
     it('returns true when model is enabled', () => {
       useAppStore.setState({ currentSession: createMockSession(0, true) });
 
-      const { result } = renderHook(() => useIteration('flux'));
+      const { result } = renderHook(() => useIteration('gemini'));
 
       expect(result.current.isEnabled).toBe(true);
     });
@@ -158,7 +159,7 @@ describe('useIteration', () => {
     it('returns false when model is disabled', () => {
       useAppStore.setState({ currentSession: createMockSession(0, false) });
 
-      const { result } = renderHook(() => useIteration('flux'));
+      const { result } = renderHook(() => useIteration('gemini'));
 
       expect(result.current.isEnabled).toBe(false);
     });
@@ -183,7 +184,7 @@ describe('useMultiIterate', () => {
     });
 
     it('returns correct count when models selected', () => {
-      useAppStore.setState({ selectedModels: new Set(['flux', 'recraft']) });
+      useAppStore.setState({ selectedModels: new Set(['gemini', 'nova']) });
 
       const { result } = renderHook(() => useMultiIterate());
 
@@ -195,7 +196,7 @@ describe('useMultiIterate', () => {
     it('returns false when no session', () => {
       useAppStore.setState({
         currentSession: null,
-        selectedModels: new Set(['flux']),
+        selectedModels: new Set(['gemini']),
       });
 
       const { result } = renderHook(() => useMultiIterate());
@@ -217,7 +218,7 @@ describe('useMultiIterate', () => {
     it('returns true when session exists and models selected', () => {
       useAppStore.setState({
         currentSession: createMockSession(),
-        selectedModels: new Set(['flux', 'recraft']),
+        selectedModels: new Set(['gemini', 'nova']),
       });
 
       const { result } = renderHook(() => useMultiIterate());

@@ -6,16 +6,16 @@
 // Model Types
 // ====================
 
-export type ModelName = 'flux' | 'recraft' | 'gemini' | 'openai';
+export type ModelName = 'gemini' | 'nova' | 'openai' | 'firefly';
 
 export const MODEL_DISPLAY_NAMES: Record<ModelName, string> = {
-  flux: 'Flux',
-  recraft: 'Recraft',
   gemini: 'Gemini',
-  openai: 'OpenAI',
+  nova: 'Nova Canvas',
+  openai: 'DALL-E 3',
+  firefly: 'Firefly',
 };
 
-export const MODELS: ModelName[] = ['flux', 'recraft', 'gemini', 'openai'];
+export const MODELS: ModelName[] = ['gemini', 'nova', 'openai', 'firefly'];
 
 // ====================
 // Iteration Types
@@ -83,6 +83,8 @@ export interface SessionPreview {
 export interface SessionGenerateResponse {
   sessionId: string;
   status: string;
+  prompt: string;
+  models: Record<string, { status: string; imageKey?: string; imageUrl?: string }>;
 }
 
 export interface IterateResponse {
@@ -112,7 +114,7 @@ export interface EnhanceResponse {
 export interface GalleryListItem {
   id: string;
   timestamp: string;
-  previewData?: string;
+  previewUrl?: string;
   imageCount: number;
 }
 
@@ -128,7 +130,6 @@ export interface GalleryDetailImage {
   model: string;
   prompt: string;
   timestamp?: string;
-  output?: string;
 }
 
 export interface SessionGalleryDetailResponse {
