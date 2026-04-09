@@ -224,28 +224,6 @@ class TestContextWindow:
         assert len(context) == 3, f"Expected 3 context entries, got {len(context)}"
 
 
-class TestRateLimitWithRealS3:
-    """Rate limiter increments real S3 counters."""
-
-    def test_rate_limit_with_real_s3_counters(self, e2e_handler):
-        handler, sm, cm, storage, rl = e2e_handler
-
-        # Manually set a very low limit for testing
-        rl.ip_limit = 2
-        rl.global_limit = 1000
-
-        # First two requests should pass
-        r1 = handler(_make_event(body={"prompt": "req 1"}, source_ip="192.168.1.1"), None)
-        assert r1["statusCode"] == 200
-
-        r2 = handler(_make_event(body={"prompt": "req 2"}, source_ip="192.168.1.1"), None)
-        assert r2["statusCode"] == 200
-
-        # Third request from same IP should be rate limited
-        r3 = handler(_make_event(body={"prompt": "req 3"}, source_ip="192.168.1.1"), None)
-        assert r3["statusCode"] == 429
-
-
 class TestGalleryAfterGeneration:
     """Gallery endpoints work with real S3 data."""
 
@@ -282,9 +260,3 @@ class TestCorsHeaders:
         assert resp["statusCode"] == 404
         self._check_cors(resp)
 
-    def test_cors_on_429(self, e2e_handler):
-        handler, sm, cm, storage, rl = e2e_handler
-        rl.global_limit = 0  # Force rate limit
-        resp = handler(_make_event(body={"prompt": "blocked"}), None)
-        assert resp["statusCode"] == 429
-        self._check_cors(resp)

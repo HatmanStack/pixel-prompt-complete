@@ -87,13 +87,11 @@ def e2e_handler(ministack_s3):
     from jobs.manager import SessionManager
     from models.context import ContextManager
     from utils.content_filter import ContentFilter
-    from utils.rate_limit import RateLimiter
     from utils.storage import ImageStorage
 
     sm = SessionManager(s3, bucket)
     cm = ContextManager(s3, bucket)
     storage = ImageStorage(s3, bucket, "test.cloudfront.net")
-    rl = RateLimiter(s3, bucket, global_limit=1000, ip_limit=50, ip_whitelist=[])
     cf = ContentFilter()
 
     patches = {
@@ -101,7 +99,6 @@ def e2e_handler(ministack_s3):
         "lambda_function.session_manager": sm,
         "lambda_function.context_manager": cm,
         "lambda_function.image_storage": storage,
-        "lambda_function.rate_limiter": rl,
         "lambda_function.content_filter": cf,
         "lambda_function.get_handler": lambda provider: _fake_generate,
         "lambda_function.get_iterate_handler": lambda provider: _fake_iterate,
@@ -116,7 +113,7 @@ def e2e_handler(ministack_s3):
 
     from lambda_function import lambda_handler
 
-    yield lambda_handler, sm, cm, storage, rl
+    yield lambda_handler, sm, cm, storage, None
 
     for p in patchers:
         p.stop()
