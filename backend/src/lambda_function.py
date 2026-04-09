@@ -211,6 +211,11 @@ def extract_correlation_id(event: LambdaEvent) -> str:
     return correlation_id or str(uuid4())
 
 
+def _not_implemented(endpoint: str) -> ApiResponse:
+    """Stub response for routes whose business logic lands in later phases."""
+    return response(501, {"error": f"{endpoint} not implemented"})
+
+
 def lambda_handler(event: LambdaEvent, context: LambdaContext) -> ApiResponse:
     """Main Lambda handler function."""
     correlation_id = extract_correlation_id(event)
@@ -252,6 +257,14 @@ def lambda_handler(event: LambdaEvent, context: LambdaContext) -> ApiResponse:
             return handle_gallery_list(event, correlation_id)
         elif path.startswith("/gallery/") and method == "GET":
             return handle_gallery_detail(event, correlation_id)
+        elif path == "/me" and method == "GET":
+            return _not_implemented("GET /me")
+        elif path == "/billing/checkout" and method == "POST":
+            return _not_implemented("POST /billing/checkout")
+        elif path == "/billing/portal" and method == "POST":
+            return _not_implemented("POST /billing/portal")
+        elif path == "/stripe/webhook" and method == "POST":
+            return _not_implemented("POST /stripe/webhook")
         else:
             return response(404, {"error": "Not found", "path": path, "method": method})
 
