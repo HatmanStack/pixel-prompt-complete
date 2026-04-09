@@ -96,11 +96,11 @@ docs: capture cost-ceiling follow-up from paid-tier plan
 
 ### Verification Checklist
 
-- [ ] All commands succeed.
+- [x] All commands succeed.
 
 ## Phase Verification
 
-- [ ] Tasks 5.1–5.3 committed.
-- [ ] Task 5.4 verification clean.
-- [ ] `grep -r "rate_limit\|RateLimiter\|GLOBAL_LIMIT\|IP_LIMIT" backend/ docs/ CLAUDE.md` returns only planned references (e.g., this plan's brainstorm.md which quotes the old names historically).
-- [ ] `feedback.md` has no OPEN items from any iteration.
+- [x] Tasks 5.1–5.3 committed.
+- [x] Task 5.4 verification clean.
+- [x] `grep -r "rate_limit\|RateLimiter\|GLOBAL_LIMIT\|IP_LIMIT" backend/ docs/ CLAUDE.md` returns only planned references (e.g., this plan's brainstorm.md which quotes the old names historically).
+- [x] `feedback.md` has no OPEN items from any iteration.
