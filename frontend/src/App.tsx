@@ -15,8 +15,37 @@ import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { Suspense, lazy } from 'react';
 
 const GenerationPanel = lazy(() => import('@/components/generation/GenerationPanel'));
+const AuthCallback = lazy(() => import('@/pages/AuthCallback'));
+const BillingSuccess = lazy(() => import('@/pages/BillingSuccess'));
+const BillingCancel = lazy(() => import('@/pages/BillingCancel'));
 
 export const App: FC = () => {
+  const pathname = typeof window !== 'undefined' ? window.location.pathname : '/';
+  if (pathname === '/auth/callback') {
+    return (
+      <Suspense fallback={<LoadingSpinner size="lg" />}>
+        <AuthCallback />
+      </Suspense>
+    );
+  }
+  if (pathname === '/billing/success') {
+    return (
+      <Suspense fallback={<LoadingSpinner size="lg" />}>
+        <BillingSuccess />
+      </Suspense>
+    );
+  }
+  if (pathname === '/billing/cancel') {
+    return (
+      <Suspense fallback={<LoadingSpinner size="lg" />}>
+        <BillingCancel />
+      </Suspense>
+    );
+  }
+  return <AppMain />;
+};
+
+const AppMain: FC = () => {
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
 
   // Global keyboard shortcuts
