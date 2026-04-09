@@ -297,11 +297,17 @@ def lambda_handler(event: LambdaEvent, context: LambdaContext) -> ApiResponse:
         elif path == "/me" and method == "GET":
             return handle_me(event, correlation_id)
         elif path == "/billing/checkout" and method == "POST":
-            return _not_implemented("POST /billing/checkout")
+            from billing.checkout import handle_billing_checkout
+
+            return handle_billing_checkout(event, _user_repo, correlation_id)
         elif path == "/billing/portal" and method == "POST":
-            return _not_implemented("POST /billing/portal")
+            from billing.portal import handle_billing_portal
+
+            return handle_billing_portal(event, _user_repo, correlation_id)
         elif path == "/stripe/webhook" and method == "POST":
-            return _not_implemented("POST /stripe/webhook")
+            from billing.webhook import handle_stripe_webhook
+
+            return handle_stripe_webhook(event, _user_repo, correlation_id)
         else:
             return response(404, {"error": "Not found", "path": path, "method": method})
 

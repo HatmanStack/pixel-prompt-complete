@@ -18,17 +18,23 @@ def _event(method: str, path: str) -> dict:
     }
 
 
+def test_me_stub_returns_501():
+    resp = lambda_handler(_event("GET", "/me"), None)
+    assert resp["statusCode"] == 501
+    body = json.loads(resp["body"])
+    assert body["error"] == "GET /me not implemented"
+
+
 @pytest.mark.parametrize(
-    "method,path,endpoint",
+    "method,path",
     [
-        ("GET", "/me", "GET /me"),
-        ("POST", "/billing/checkout", "POST /billing/checkout"),
-        ("POST", "/billing/portal", "POST /billing/portal"),
-        ("POST", "/stripe/webhook", "POST /stripe/webhook"),
+        ("POST", "/billing/checkout"),
+        ("POST", "/billing/portal"),
+        ("POST", "/stripe/webhook"),
     ],
 )
-def test_route_stub_returns_501(method, path, endpoint):
+def test_billing_routes_return_501_when_disabled(method, path):
     resp = lambda_handler(_event(method, path), None)
     assert resp["statusCode"] == 501
     body = json.loads(resp["body"])
-    assert body["error"] == f"{endpoint} not implemented"
+    assert "billing" in body.get("error", "").lower() or "disabled" in body.get("error", "").lower()
