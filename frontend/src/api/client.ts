@@ -3,8 +3,16 @@
  * Handles all communication with the backend Lambda function
  */
 
-import { API_BASE_URL, API_ROUTES, REQUEST_TIMEOUT, RETRY_CONFIG } from './config';
+import {
+  API_BASE_URL,
+  API_ROUTES,
+  REQUEST_TIMEOUT,
+  RETRY_CONFIG,
+  hostedUiLoginUrl,
+} from './config';
 import { generateCorrelationId } from '../utils/correlation';
+import { useAuthStore } from '../stores/useAuthStore';
+import { useToastStore } from '../stores/useToastStore';
 import type {
   EnhanceResponse,
   ApiError,
@@ -54,11 +62,21 @@ async function apiFetch<T>(
   const correlationId = options.correlationId || generateCorrelationId();
 
   try {
+    // Attach Authorization header when signed in
+    const authHeaders: Record<string, string> = {};
+    try {
+      const idToken = useAuthStore.getState().idToken;
+      if (idToken) authHeaders.Authorization = `Bearer ${idToken}`;
+    } catch {
+      // store unavailable (e.g. during tests) — ignore
+    }
+
     const response = await fetch(`${API_BASE_URL}${endpoint}`, {
       ...options,
       headers: {
         'Content-Type': 'application/json',
         'X-Correlation-ID': correlationId,
+        ...authHeaders,
         ...options.headers,
       },
       signal: controller.signal,
@@ -74,6 +92,33 @@ async function apiFetch<T>(
       );
       error.status = response.status;
       error.code = errorData.code;
+
+      // Auth/billing response interceptors
+      if (response.status === 401) {
+        try {
+          useAuthStore.getState().clearTokens();
+        } catch {
+          // ignore
+        }
+        if (typeof window !== 'undefined') {
+          window.location.assign(hostedUiLoginUrl());
+        }
+      } else if (response.status === 402) {
+        try {
+          useToastStore.getState().warning(error.message || 'Upgrade required to continue.');
+        } catch {
+          // ignore
+        }
+      } else if (response.status === 429) {
+        try {
+          useToastStore
+            .getState()
+            .warning(error.message || 'Quota exceeded. Please try again later.');
+        } catch {
+          // ignore
+        }
+      }
+
       throw error;
     }
 

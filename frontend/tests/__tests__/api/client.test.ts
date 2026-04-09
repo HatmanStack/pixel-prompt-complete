@@ -28,6 +28,7 @@ vi.mock('../../../src/api/config', () => ({
     initialDelay: 1000,
     maxDelay: 4000,
   },
+  hostedUiLoginUrl: () => 'https://auth.test.com/login',
 }));
 
 import {
@@ -324,6 +325,73 @@ describe('API Client', () => {
       expect(options.method).toBe('POST');
       expect(JSON.parse(options.body)).toEqual({ prompt: 'landscape' });
       expect(result).toEqual(responseBody);
+    });
+  });
+
+  // =============================================
+  // Auth/billing interceptors
+  // =============================================
+  describe('auth and billing interceptors', () => {
+    it('attaches Authorization header when idToken is present', async () => {
+      const { useAuthStore } = await import('../../../src/stores/useAuthStore');
+      useAuthStore.setState({
+        idToken: 'jwt-abc',
+        accessToken: 'at',
+        refreshToken: null,
+        expiresAt: Date.now() + 60_000,
+        user: { sub: 's', email: 'e@e' },
+      });
+      fetchMock.mockResolvedValueOnce(mockResponse({ sessionId: 'x', status: 'created' }, 200));
+
+      await generateSession('hi');
+
+      const [, options] = fetchMock.mock.calls[0];
+      expect((options.headers as Record<string, string>).Authorization).toBe('Bearer jwt-abc');
+      useAuthStore.getState().clearTokens();
+    });
+
+    it('on 401 clears tokens and redirects to hosted UI login', async () => {
+      const { useAuthStore } = await import('../../../src/stores/useAuthStore');
+      useAuthStore.setState({
+        idToken: 'jwt-abc',
+        accessToken: 'at',
+        refreshToken: null,
+        expiresAt: Date.now() + 60_000,
+        user: { sub: 's', email: 'e@e' },
+      });
+      const assignMock = vi.fn();
+      vi.stubGlobal('window', {
+        ...window,
+        location: { ...window.location, assign: assignMock },
+      } as unknown as Window);
+      fetchMock.mockResolvedValueOnce(mockResponse({ error: 'unauthorized' }, 401));
+
+      await expect(generateSession('hi')).rejects.toThrow();
+      expect(useAuthStore.getState().idToken).toBeNull();
+      expect(assignMock).toHaveBeenCalledWith('https://auth.test.com/login');
+    });
+
+    it('on 402 surfaces an upgrade warning toast', async () => {
+      const { useToastStore } = await import('../../../src/stores/useToastStore');
+      const warnSpy = vi.spyOn(useToastStore.getState(), 'warning');
+      fetchMock.mockResolvedValueOnce(
+        mockResponse({ error: 'subscription required', code: 'subscription_required' }, 402),
+      );
+
+      await expect(generateSession('hi')).rejects.toThrow();
+      expect(warnSpy).toHaveBeenCalled();
+    });
+
+    it('on final 429 surfaces a quota warning toast', async () => {
+      const { useToastStore } = await import('../../../src/stores/useToastStore');
+      const warnSpy = vi.spyOn(useToastStore.getState(), 'warning');
+      // 4 retries will all be 429, eventually rejecting
+      fetchMock.mockResolvedValue(mockResponse({ error: 'quota exceeded' }, 429));
+
+      const p = generateSession('hi').catch(() => null);
+      await vi.advanceTimersByTimeAsync(10_000);
+      await p;
+      expect(warnSpy).toHaveBeenCalled();
     });
   });
 });
