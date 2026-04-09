@@ -11,7 +11,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
-from fixtures.stripe_events import build_event, sign_payload
+from .fixtures.stripe_events import build_event, sign_payload
 
 os.environ.setdefault("S3_BUCKET", "test-bucket")
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
