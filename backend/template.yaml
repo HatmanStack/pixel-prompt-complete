@@ -49,6 +49,10 @@ Metadata:
           default: "CORS"
         Parameters:
           - CorsAllowedOrigin
+      - Label:
+          default: "Tier System (DynamoDB)"
+        Parameters:
+          - UsersTableName
 
 Parameters:
   Environment:
@@ -182,6 +186,12 @@ Parameters:
     Default: "*"
     Description: Allowed CORS origin (set to your frontend domain in production)
 
+  # Tier System
+  UsersTableName:
+    Type: String
+    Default: "pixel-prompt-users"
+    Description: DynamoDB table name for tier and quota state
+
 
 Globals:
   Function:
@@ -229,7 +239,11 @@ Resources:
           # S3 and CloudFront
           S3_BUCKET: !Ref PixelPromptBucket
           CLOUDFRONT_DOMAIN: !GetAtt CloudFrontDistribution.DomainName
+          # Tier system
+          USERS_TABLE_NAME: !Ref UsersTable
       Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UsersTable
         - Version: '2012-10-17'
           Statement:
             - Sid: S3ReadWriteImages
@@ -323,6 +337,21 @@ Resources:
       DefaultRouteSettings:
         ThrottlingBurstLimit: 100
         ThrottlingRateLimit: 50
+
+  UsersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref UsersTableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: userId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: userId
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
 
   PixelPromptBucket:
     Type: AWS::S3::Bucket
@@ -443,3 +472,7 @@ Outputs:
   S3BucketName:
     Description: S3 bucket name
     Value: !Ref PixelPromptBucket
+
+  UsersTableName:
+    Description: DynamoDB users table name
+    Value: !Ref UsersTable
