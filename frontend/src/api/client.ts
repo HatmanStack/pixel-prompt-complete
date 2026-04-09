@@ -3,8 +3,17 @@
  * Handles all communication with the backend Lambda function
  */
 
-import { API_BASE_URL, API_ROUTES, REQUEST_TIMEOUT, RETRY_CONFIG } from './config';
+import {
+  API_BASE_URL,
+  API_ROUTES,
+  AUTH_ENABLED,
+  REQUEST_TIMEOUT,
+  RETRY_CONFIG,
+  hostedUiLoginUrl,
+} from './config';
 import { generateCorrelationId } from '../utils/correlation';
+import { useAuthStore } from '../stores/useAuthStore';
+import { useToastStore } from '../stores/useToastStore';
 import type {
   EnhanceResponse,
   ApiError,
@@ -31,6 +40,9 @@ interface ApiErrorWithMeta extends Error {
 // HTTP status codes that are safe to retry
 const RETRYABLE_STATUS_CODES = [429, 502, 503, 504];
 
+// In-flight redirect promise to prevent duplicate PKCE/state creation on concurrent 401s
+let redirectPromise: Promise<void> | null = null;
+
 /**
  * Sleep utility for retry backoff
  */
@@ -54,11 +66,22 @@ async function apiFetch<T>(
   const correlationId = options.correlationId || generateCorrelationId();
 
   try {
+    // Attach Authorization header when signed in
+    const authHeaders: Record<string, string> = {};
+    try {
+      const idToken = useAuthStore.getState().idToken;
+      if (idToken) authHeaders.Authorization = `Bearer ${idToken}`;
+    } catch {
+      // store unavailable (e.g. during tests) — ignore
+    }
+
     const response = await fetch(`${API_BASE_URL}${endpoint}`, {
       ...options,
+      credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
         'X-Correlation-ID': correlationId,
+        ...authHeaders,
         ...options.headers,
       },
       signal: controller.signal,
@@ -74,6 +97,30 @@ async function apiFetch<T>(
       );
       error.status = response.status;
       error.code = errorData.code;
+
+      // Auth/billing response interceptors
+      if (response.status === 401) {
+        try {
+          useAuthStore.getState().clearTokens();
+        } catch {
+          // ignore
+        }
+        if (AUTH_ENABLED && typeof window !== 'undefined' && !redirectPromise) {
+          redirectPromise = hostedUiLoginUrl()
+            .then((url) => window.location.assign(url))
+            .catch((err) => console.error('Failed to generate login URL:', err))
+            .finally(() => {
+              redirectPromise = null;
+            });
+        }
+      } else if (response.status === 402) {
+        try {
+          useToastStore.getState().warning(error.message || 'Upgrade required to continue.');
+        } catch {
+          // ignore
+        }
+      }
+
       throw error;
     }
 
@@ -115,6 +162,17 @@ async function apiFetch<T>(
 
       // Pass correlation ID to retry
       return apiFetch<T>(endpoint, { ...options, correlationId }, retryCount + 1);
+    }
+
+    // Show 429 toast only after retries are exhausted
+    if (apiError.status === 429) {
+      try {
+        useToastStore
+          .getState()
+          .warning(apiError.message || 'Quota exceeded. Please try again later.');
+      } catch {
+        // ignore
+      }
     }
 
     // Add correlation ID to error for logging

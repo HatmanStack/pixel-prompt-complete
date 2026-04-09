@@ -16,8 +16,10 @@ from uuid import uuid4
 
 import boto3
 
+import config
 from api.enhance import PromptEnhancer
 from api.log import handle_log
+from auth.guest_token import get_guest_token_service
 from config import (
     ITERATION_WARNING_THRESHOLD,
     MAX_ITERATIONS,
@@ -28,9 +30,6 @@ from config import (
     get_enabled_models,
     get_model,
     get_model_config_dict,
-    global_limit,
-    ip_include,
-    ip_limit,
     s3_bucket,
 )
 from jobs.manager import SessionManager
@@ -41,10 +40,12 @@ from models.providers import (
     get_outpaint_handler,
     sanitize_error_message,
 )
+from users.quota import enforce_quota
+from users.repository import UserRepository
+from users.tier import TierContext, resolve_tier
 from utils import error_responses
 from utils.content_filter import ContentFilter
 from utils.logger import StructuredLogger
-from utils.rate_limit import RateLimiter
 from utils.storage import ImageStorage
 
 # Type aliases for Lambda events and responses
@@ -78,8 +79,11 @@ context_manager = ContextManager(s3_client, s3_bucket)
 # Image storage
 image_storage = ImageStorage(s3_client, s3_bucket, cloudfront_domain)
 
-# Rate limiter
-rate_limiter = RateLimiter(s3_client, s3_bucket, global_limit, ip_limit, ip_include)
+# User repository (DynamoDB) and guest token service.
+# Safe to construct when AUTH_ENABLED=false; neither is touched in that case
+# because resolve_tier() / enforce_quota() short-circuit.
+_user_repo = UserRepository(config.users_table_name)
+_guest_service = get_guest_token_service() if config.guest_token_secret else None
 
 # Content filter
 content_filter = ContentFilter()
@@ -100,6 +104,18 @@ class ValidatedRequest:
     body: dict[str, Any]
     ip: str
     prompt: str
+    tier: TierContext | None = None
+
+
+def _anon_tier() -> TierContext:
+    return TierContext(
+        tier="paid",
+        user_id="anon",
+        email=None,
+        is_authenticated=False,
+        guest_token_id=None,
+        issue_guest_cookie=False,
+    )
 
 
 def _parse_and_validate_request(
@@ -108,11 +124,15 @@ def _parse_and_validate_request(
     default_prompt: str = "",
     max_body_size: int = MAX_BODY_SIZE,
     max_prompt_length: int = 1000,
+    endpoint_kind: str = "none",
 ) -> tuple[ValidatedRequest | None, ApiResponse | None]:
     """Shared request validation for POST handlers.
 
-    Performs: body size check, JSON parsing, IP extraction, rate limiting,
-    prompt validation, and content filtering.
+    Performs: body size check, JSON parsing, IP extraction, tier resolution,
+    quota enforcement, prompt validation, and content filtering.
+
+    ``endpoint_kind`` is one of ``"generate"``, ``"refine"``, or ``"none"``
+    (skip quota enforcement).
 
     Returns:
         (ValidatedRequest, None) on success, or (None, error_response) on failure.
@@ -131,9 +151,18 @@ def _parse_and_validate_request(
         "ip", "unknown"
     )
 
-    # Rate limit
-    if rate_limiter.check_rate_limit(ip):
-        return None, response(429, error_responses.rate_limit_exceeded(retry_after=3600))
+    # Tier resolution
+    if config.auth_enabled:
+        if _guest_service is None:
+            return None, response(
+                500,
+                {
+                    "error": "Server misconfigured: GUEST_TOKEN_SECRET is required when AUTH_ENABLED=true"
+                },
+            )
+        tier_ctx = resolve_tier(event, _user_repo, _guest_service)
+    else:
+        tier_ctx = _anon_tier()
 
     # Extract prompt
     prompt = body.get("prompt", default_prompt)
@@ -150,7 +179,21 @@ def _parse_and_validate_request(
     if prompt and content_filter.check_prompt(prompt):
         return None, response(400, error_responses.inappropriate_content())
 
-    return ValidatedRequest(body=body, ip=ip, prompt=prompt), None
+    # Quota enforcement (after validation so invalid requests don't consume quota)
+    if endpoint_kind in ("generate", "refine") and config.auth_enabled:
+        # Guests blocked from refine immediately (no auth).
+        if tier_ctx.tier == "guest" and endpoint_kind == "refine":
+            return None, response(402, error_responses.auth_required())
+        result = enforce_quota(tier_ctx, endpoint_kind, _user_repo, int(time.time()))
+        if not result.allowed:
+            if result.reason == "guest_global":
+                return None, response(429, error_responses.guest_global_limit())
+            return None, response(
+                429,
+                error_responses.tier_quota_exceeded(tier_ctx.tier, result.reset_at),
+            )
+
+    return ValidatedRequest(body=body, ip=ip, prompt=prompt, tier=tier_ctx), None
 
 
 def _handle_successful_result(
@@ -213,6 +256,11 @@ def extract_correlation_id(event: LambdaEvent) -> str:
     return correlation_id or str(uuid4())
 
 
+def _not_implemented(endpoint: str) -> ApiResponse:
+    """Stub response for routes whose business logic lands in later phases."""
+    return response(501, {"error": f"{endpoint} not implemented"})
+
+
 def lambda_handler(event: LambdaEvent, context: LambdaContext) -> ApiResponse:
     """Main Lambda handler function."""
     correlation_id = extract_correlation_id(event)
@@ -254,6 +302,20 @@ def lambda_handler(event: LambdaEvent, context: LambdaContext) -> ApiResponse:
             return handle_gallery_list(event, correlation_id)
         elif path.startswith("/gallery/") and method == "GET":
             return handle_gallery_detail(event, correlation_id)
+        elif path == "/me" and method == "GET":
+            return handle_me(event, correlation_id)
+        elif path == "/billing/checkout" and method == "POST":
+            from billing.checkout import handle_billing_checkout
+
+            return handle_billing_checkout(event, _user_repo, correlation_id)
+        elif path == "/billing/portal" and method == "POST":
+            from billing.portal import handle_billing_portal
+
+            return handle_billing_portal(event, _user_repo, correlation_id)
+        elif path == "/stripe/webhook" and method == "POST":
+            from billing.webhook import handle_stripe_webhook
+
+            return handle_stripe_webhook(event, _user_repo, correlation_id)
         else:
             return response(404, {"error": "Not found", "path": path, "method": method})
 
@@ -276,7 +338,9 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
     Returns:
         {"sessionId": "uuid", "models": {...}}
     """
-    validated, err = _parse_and_validate_request(event, require_prompt=True)
+    validated, err = _parse_and_validate_request(
+        event, require_prompt=True, endpoint_kind="generate"
+    )
     if err:
         return err
 
@@ -358,7 +422,21 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
             model_name, result = future.result()
             results[model_name] = result
 
-        return response(200, {"sessionId": session_id, "prompt": prompt, "models": results})
+        set_cookie = None
+        if (
+            validated.tier
+            and validated.tier.issue_guest_cookie
+            and validated.tier.new_guest_token
+            and _guest_service is not None
+        ):
+            set_cookie = _guest_service.set_cookie_header(
+                validated.tier.new_guest_token, config.guest_window_seconds
+            )
+        return response(
+            200,
+            {"sessionId": session_id, "prompt": prompt, "models": results},
+            set_cookie=set_cookie,
+        )
 
     except Exception as e:
         StructuredLogger.error(
@@ -567,7 +645,7 @@ def _handle_refinement(
 
 def handle_iterate(event: LambdaEvent, correlation_id: str | None = None) -> ApiResponse:
     """POST /iterate - Iterate on existing image with new prompt."""
-    validated, err = _parse_and_validate_request(event, require_prompt=True)
+    validated, err = _parse_and_validate_request(event, require_prompt=True, endpoint_kind="refine")
     if err:
         return err
 
@@ -590,6 +668,7 @@ def handle_outpaint(event: LambdaEvent, correlation_id: str | None = None) -> Ap
         event,
         require_prompt=False,
         default_prompt="continue the scene naturally",
+        endpoint_kind="refine",
     )
     if err:
         return err
@@ -658,6 +737,7 @@ def handle_enhance(event: LambdaEvent, correlation_id: str | None = None) -> Api
         event,
         require_prompt=True,
         max_prompt_length=500,
+        endpoint_kind="none",
     )
     if err:
         return err
@@ -738,8 +818,7 @@ def handle_log_endpoint(event: LambdaEvent) -> ApiResponse:
         body = json.loads(raw_body or "{}")
         ip = event.get("requestContext", {}).get("http", {}).get("sourceIp", "unknown")
 
-        if rate_limiter.check_rate_limit(ip):
-            return response(429, {"error": "Rate limit exceeded"})
+        # /log relies on API Gateway throttling (not per-tier quotas).
 
         # Sanitize metadata: remove reserved keys that could overwrite structured log fields
         if "metadata" in body and isinstance(body["metadata"], dict):
@@ -823,15 +902,82 @@ def handle_gallery_detail(event: LambdaEvent, correlation_id: str | None = None)
         return response(500, {"error": "Internal server error"})
 
 
-def response(status_code: int, body: dict[str, Any]) -> ApiResponse:
-    """Helper function to create API Gateway response."""
-    return {
-        "statusCode": status_code,
-        "headers": {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": cors_allowed_origin,
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, X-Correlation-ID",
+def handle_me(event: LambdaEvent, correlation_id: str | None = None) -> ApiResponse:
+    """GET /me - Return tier, quota, and billing status for the caller."""
+    if not config.auth_enabled:
+        return response(501, {"error": "GET /me not implemented"})
+
+    if _guest_service is None:
+        return response(500, error_responses.internal_server_error())
+
+    ctx = resolve_tier(event, _user_repo, _guest_service)
+    if not ctx.is_authenticated:
+        return response(401, error_responses.auth_required())
+
+    window_seconds = (
+        config.paid_window_seconds if ctx.tier == "paid" else config.free_window_seconds
+    )
+    item = _user_repo.touch_quota_window(ctx.user_id, window_seconds, int(time.time()))
+    window_start = int(item.get("windowStart", 0) or 0)
+
+    if ctx.tier == "paid":
+        quota = {
+            "windowSeconds": config.paid_window_seconds,
+            "windowStart": int(item.get("dailyResetAt", 0) or 0),
+            "refine": {
+                "used": int(item.get("dailyCount", 0) or 0),
+                "limit": config.paid_daily_limit,
+            },
+        }
+    else:
+        quota = {
+            "windowSeconds": config.free_window_seconds,
+            "windowStart": window_start,
+            "generate": {
+                "used": int(item.get("generateCount", 0) or 0),
+                "limit": config.free_generate_limit,
+            },
+            "refine": {
+                "used": int(item.get("refineCount", 0) or 0),
+                "limit": config.free_refine_limit,
+            },
+        }
+
+    billing = {
+        "subscriptionStatus": item.get("subscriptionStatus"),
+        "portalAvailable": bool(item.get("stripeCustomerId")),
+    }
+
+    return response(
+        200,
+        {
+            "userId": ctx.user_id,
+            "email": ctx.email,
+            "tier": ctx.tier,
+            "quota": quota,
+            "billing": billing,
         },
+    )
+
+
+def response(
+    status_code: int,
+    body: dict[str, Any],
+    set_cookie: str | None = None,
+) -> ApiResponse:
+    """Helper function to create API Gateway response."""
+    headers = {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": cors_allowed_origin,
+        "Access-Control-Allow-Credentials": "true",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, X-Correlation-ID",
+    }
+    resp: ApiResponse = {
+        "statusCode": status_code,
+        "headers": headers,
         "body": json.dumps(body),
     }
+    if set_cookie:
+        resp["cookies"] = [set_cookie]
+    return resp

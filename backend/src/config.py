@@ -59,11 +59,55 @@ if s3_bucket is None:
 if cloudfront_domain is None:
     warnings.warn("CLOUDFRONT_DOMAIN not set — CDN URLs will be malformed", stacklevel=1)
 
-# Rate limiting
-global_limit = _safe_int("GLOBAL_LIMIT", 1000)
-ip_limit = _safe_int("IP_LIMIT", 50)
-ip_include_str = os.environ.get("IP_INCLUDE", "")
-ip_include = [ip.strip() for ip in ip_include_str.split(",") if ip.strip()]
+# Feature flags (tier system)
+auth_enabled = os.environ.get("AUTH_ENABLED", "false").lower() == "true"
+billing_enabled = os.environ.get("BILLING_ENABLED", "false").lower() == "true"
+if billing_enabled and not auth_enabled:
+    raise RuntimeError("BILLING_ENABLED=true requires AUTH_ENABLED=true")
+
+# Cognito
+cognito_user_pool_id = os.environ.get("COGNITO_USER_POOL_ID", "")
+cognito_user_pool_client_id = os.environ.get("COGNITO_USER_POOL_CLIENT_ID", "")
+cognito_domain = os.environ.get("COGNITO_DOMAIN", "")
+cognito_region = os.environ.get("COGNITO_REGION", "us-west-2")
+
+# DynamoDB
+users_table_name = os.environ.get("USERS_TABLE_NAME", "pixel-prompt-users")
+
+# Guest tracking
+guest_token_secret = os.environ.get("GUEST_TOKEN_SECRET", "")
+if auth_enabled and not guest_token_secret:
+    raise RuntimeError(
+        "AUTH_ENABLED=true requires GUEST_TOKEN_SECRET to be set. "
+        "Without it, guest tracking is disabled and unauthenticated requests "
+        "will bypass quota enforcement."
+    )
+guest_generate_limit = _safe_int("GUEST_GENERATE_LIMIT", 1)
+guest_window_seconds = _safe_int("GUEST_WINDOW_SECONDS", 3600)
+guest_global_limit = _safe_int("GUEST_GLOBAL_LIMIT", 5)
+guest_global_window_seconds = _safe_int("GUEST_GLOBAL_WINDOW_SECONDS", 3600)
+
+# Free tier
+free_generate_limit = _safe_int("FREE_GENERATE_LIMIT", 1)
+free_refine_limit = _safe_int("FREE_REFINE_LIMIT", 2)
+free_window_seconds = _safe_int("FREE_WINDOW_SECONDS", 3600)
+
+# Paid tier
+paid_daily_limit = _safe_int("PAID_DAILY_LIMIT", 200)
+paid_window_seconds = _safe_int("PAID_WINDOW_SECONDS", 86400)
+
+# Stripe
+stripe_secret_key = os.environ.get("STRIPE_SECRET_KEY", "")
+stripe_webhook_secret = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+if billing_enabled:
+    if not stripe_secret_key:
+        raise RuntimeError("BILLING_ENABLED=true requires STRIPE_SECRET_KEY to be set")
+    if not stripe_webhook_secret:
+        raise RuntimeError("BILLING_ENABLED=true requires STRIPE_WEBHOOK_SECRET to be set")
+stripe_price_id = os.environ.get("STRIPE_PRICE_ID", "")
+stripe_success_url = os.environ.get("STRIPE_SUCCESS_URL", "")
+stripe_cancel_url = os.environ.get("STRIPE_CANCEL_URL", "")
+stripe_portal_return_url = os.environ.get("STRIPE_PORTAL_RETURN_URL", "")
 
 # Prompt enhancement model configuration
 prompt_model_provider = os.environ.get("PROMPT_MODEL_PROVIDER", "openai")

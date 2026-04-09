@@ -74,10 +74,20 @@ backend/src/
 ├── api/
 │   ├── enhance.py           # PromptEnhancer: LLM-based prompt improvement
 │   └── log.py               # Client-side logging endpoint
+├── auth/
+│   ├── claims.py            # Extract + validate JWT claims from API Gateway event
+│   └── guest_token.py       # HMAC sign/verify guest cookie
+├── billing/
+│   ├── stripe_client.py     # Cached Stripe client
+│   ├── checkout.py          # /billing/checkout handler
+│   ├── portal.py            # /billing/portal handler
+│   └── webhook.py           # /stripe/webhook handler + event dispatch
+├── users/
+│   ├── repository.py        # UserRepository: DynamoDB CRUD, atomic quota updates
+│   └── tier.py              # resolve_tier(event) -> TierContext
 └── utils/
     ├── clients.py           # Cached API client factories (OpenAI, Gemini, Bedrock)
     ├── storage.py           # ImageStorage: S3 upload, CloudFront URLs, gallery listing
-    ├── rate_limit.py        # RateLimiter: Global hourly + per-IP daily, S3-backed
     ├── content_filter.py    # ContentFilter: keyword-based pre-filtering
     ├── error_responses.py   # Standardized error response factories
     ├── retry.py             # Exponential backoff decorator
@@ -90,13 +100,17 @@ backend/src/
 | Method | Path | Handler | Description |
 |--------|------|---------|-------------|
 | POST | /generate | `handle_generate` | Create session, generate initial images for all enabled models |
-| POST | /iterate | `handle_iterate` | Refine one model's image with new prompt (needs sessionId + model) |
-| POST | /outpaint | `handle_outpaint` | Expand image to new aspect ratio (presets: 16:9, 9:16, 1:1, 4:3, expand_all) |
+| POST | /iterate | `handle_iterate` | Refine one model's image (JWT required when `AUTH_ENABLED=true`) |
+| POST | /outpaint | `handle_outpaint` | Expand image to new aspect ratio (JWT required when `AUTH_ENABLED=true`) |
 | GET | /status/{sessionId} | `handle_status` | Get session state with all model iterations |
 | POST | /enhance | `handle_enhance` | LLM prompt improvement |
 | GET | /gallery/list | `handle_gallery_list` | List galleries with CloudFront preview URLs |
 | GET | /gallery/{sessionId} | `handle_gallery_detail` | Get all images (CloudFront URLs) from a gallery |
 | POST | /log | `handle_log_endpoint` | Client error logging |
+| GET | /me | `handle_me` | User info + tier + current quota (JWT required) |
+| POST | /billing/checkout | `handle_checkout` | Create Stripe Checkout session (JWT required) |
+| POST | /billing/portal | `handle_portal` | Create Stripe Customer Portal session (JWT required) |
+| POST | /stripe/webhook | `handle_stripe_webhook` | Stripe event webhook (signature-verified, no JWT) |
 
 ### Model Configuration (Fixed 4 Models)
 
@@ -158,13 +172,37 @@ Prompt enhancement uses separate config: `PROMPT_MODEL_PROVIDER`, `PROMPT_MODEL_
 | `PROMPT_MODEL_ID` | No | `gpt-4o` | Model ID for prompt enhancement |
 | `PROMPT_MODEL_API_KEY` | Yes | `""` | API key for prompt enhancement model |
 
-**Rate Limiting**:
+**Tier System (Auth + Billing + Quotas)**:
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `GLOBAL_LIMIT` | No | `1000` | Global hourly request limit |
-| `IP_LIMIT` | No | `50` | Per-IP daily request limit |
-| `IP_INCLUDE` | No | `""` | Comma-separated IPs exempt from rate limiting |
+| `AUTH_ENABLED` | No | `false` | Enable Cognito auth + tier resolution |
+| `BILLING_ENABLED` | No | `false` | Enable Stripe billing (requires `AUTH_ENABLED=true`) |
+| `COGNITO_USER_POOL_ID` | Yes* | `""` | Cognito User Pool ID |
+| `COGNITO_USER_POOL_CLIENT_ID` | Yes* | `""` | Cognito App Client ID |
+| `COGNITO_DOMAIN` | Yes* | `""` | Cognito Hosted UI domain prefix |
+| `COGNITO_REGION` | No | `us-west-2` | Cognito region |
+| `USERS_TABLE_NAME` | No | `pixel-prompt-users` | DynamoDB table for tier and quota state |
+| `GUEST_TOKEN_SECRET` | Yes* | `""` | HMAC secret for signing guest cookies |
+| `GUEST_GENERATE_LIMIT` | No | `1` | `/generate` calls per guest per window |
+| `GUEST_WINDOW_SECONDS` | No | `3600` | Guest rolling window length |
+| `GUEST_GLOBAL_LIMIT` | No | `5` | Global cap on guest `/generate` calls per window |
+| `GUEST_GLOBAL_WINDOW_SECONDS` | No | `3600` | Global guest window length |
+| `FREE_GENERATE_LIMIT` | No | `1` | `/generate` calls per free user per window |
+| `FREE_REFINE_LIMIT` | No | `2` | `/iterate` + `/outpaint` calls per free user per window |
+| `FREE_WINDOW_SECONDS` | No | `3600` | Free tier rolling window length |
+| `PAID_DAILY_LIMIT` | No | `200` | Refinement calls per paid user per day (operator-tuned) |
+| `PAID_WINDOW_SECONDS` | No | `86400` | Paid tier rolling window length |
+| `STRIPE_SECRET_KEY` | Yes** | `""` | Stripe API secret key |
+| `STRIPE_WEBHOOK_SECRET` | Yes** | `""` | Stripe webhook signing secret |
+| `STRIPE_PRICE_ID` | Yes** | `""` | Stripe price ID for paid subscription |
+| `STRIPE_SUCCESS_URL` | Yes** | `""` | Redirect URL after successful checkout |
+| `STRIPE_CANCEL_URL` | Yes** | `""` | Redirect URL after cancelled checkout |
+| `STRIPE_PORTAL_RETURN_URL` | Yes** | `""` | Return URL from Stripe customer portal |
+
+*Required when `AUTH_ENABLED=true`. **Required when `BILLING_ENABLED=true`.
+
+**Open-Source Mode**: the default `AUTH_ENABLED=false, BILLING_ENABLED=false` disables auth, quotas, and billing entirely. The app behaves exactly like the pre-tier version: no Cognito, no DynamoDB reads, no Stripe. Contributors can run the full stack without any paid-tier setup.
 
 **CORS**:
 
@@ -285,6 +323,8 @@ Same pattern for outpaint: add `outpaint_<provider>()`, register in `_OUTPAINT_H
 - **DALL-E 3 iteration**: The `iterate_openai`/`outpaint_openai` handlers use `gpt-image-1` for `images.edit` regardless of `OPENAI_MODEL_ID`, because DALL-E 3 does not support image edits (see ADR-5)
 - **Firefly auth**: OAuth2 access tokens are fetched per request (no caching) via Adobe IMS client credentials
 - **Nova Canvas auth**: Uses the Lambda IAM role with `bedrock:InvokeModel` permission (no API key)
+- **Tier storage**: DynamoDB `USERS_TABLE_NAME` (default `pixel-prompt-users`), on-demand billing, TTL-backed guest records. Created by SAM even when `AUTH_ENABLED=false` (empty, no cost)
+- **JWT authorizer**: API Gateway HttpApi built-in JWT authorizer gates `/iterate`, `/outpaint`, `/me`, `/billing/checkout`, `/billing/portal` when `AUTH_ENABLED=true`. Lambda reads claims from `event.requestContext.authorizer.jwt.claims` and never re-verifies signatures
 
 ## Repository Context
 
