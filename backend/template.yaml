@@ -53,6 +53,12 @@ Metadata:
           default: "Tier System (DynamoDB)"
         Parameters:
           - UsersTableName
+      - Label:
+          default: "Cognito (Auth)"
+        Parameters:
+          - CognitoDomainPrefix
+          - CognitoCallbackUrl
+          - CognitoLogoutUrl
 
 Parameters:
   Environment:
@@ -192,6 +198,22 @@ Parameters:
     Default: "pixel-prompt-users"
     Description: DynamoDB table name for tier and quota state
 
+  # Cognito
+  CognitoDomainPrefix:
+    Type: String
+    Default: ""
+    Description: Cognito Hosted UI domain prefix (must be globally unique within region)
+
+  CognitoCallbackUrl:
+    Type: String
+    Default: "http://localhost:5173/auth/callback"
+    Description: OAuth2 callback URL for Cognito Hosted UI
+
+  CognitoLogoutUrl:
+    Type: String
+    Default: "http://localhost:5173/"
+    Description: OAuth2 logout redirect URL for Cognito Hosted UI
+
 
 Globals:
   Function:
@@ -241,6 +263,10 @@ Resources:
           CLOUDFRONT_DOMAIN: !GetAtt CloudFrontDistribution.DomainName
           # Tier system
           USERS_TABLE_NAME: !Ref UsersTable
+          COGNITO_USER_POOL_ID: !Ref UserPool
+          COGNITO_USER_POOL_CLIENT_ID: !Ref UserPoolClient
+          COGNITO_DOMAIN: !Ref CognitoDomainPrefix
+          COGNITO_REGION: !Ref AWS::Region
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref UsersTable
@@ -337,6 +363,39 @@ Resources:
       DefaultRouteSettings:
         ThrottlingBurstLimit: 100
         ThrottlingRateLimit: 50
+
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub "${AWS::StackName}-users"
+      AutoVerifiedAttributes: [email]
+      UsernameAttributes: [email]
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 10
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+          RequireUppercase: true
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref UserPool
+      ClientName: !Sub "${AWS::StackName}-web"
+      GenerateSecret: false
+      AllowedOAuthFlows: [code]
+      AllowedOAuthScopes: [openid, email, profile]
+      AllowedOAuthFlowsUserPoolClient: true
+      CallbackURLs: [!Ref CognitoCallbackUrl]
+      LogoutURLs: [!Ref CognitoLogoutUrl]
+      SupportedIdentityProviders: [COGNITO]
+
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Ref CognitoDomainPrefix
+      UserPoolId: !Ref UserPool
 
   UsersTable:
     Type: AWS::DynamoDB::Table
@@ -476,3 +535,15 @@ Outputs:
   UsersTableName:
     Description: DynamoDB users table name
     Value: !Ref UsersTable
+
+  UserPoolId:
+    Description: Cognito User Pool ID
+    Value: !Ref UserPool
+
+  UserPoolClientId:
+    Description: Cognito User Pool Client ID
+    Value: !Ref UserPoolClient
+
+  UserPoolDomain:
+    Description: Cognito User Pool Hosted UI domain prefix
+    Value: !Ref CognitoDomainPrefix
