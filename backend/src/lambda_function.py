@@ -28,9 +28,6 @@ from config import (
     get_enabled_models,
     get_model,
     get_model_config_dict,
-    global_limit,
-    ip_include,
-    ip_limit,
     s3_bucket,
 )
 from jobs.manager import SessionManager
@@ -79,7 +76,8 @@ context_manager = ContextManager(s3_client, s3_bucket)
 image_storage = ImageStorage(s3_client, s3_bucket, cloudfront_domain)
 
 # Rate limiter
-rate_limiter = RateLimiter(s3_client, s3_bucket, global_limit, ip_limit, ip_include)
+# Transitional: rate_limit.py is deleted in Phase 2
+rate_limiter = RateLimiter(s3_client, s3_bucket, 1000, 50, [])
 
 # Content filter
 content_filter = ContentFilter()
