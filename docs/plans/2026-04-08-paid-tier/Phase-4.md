@@ -203,8 +203,8 @@ feat(frontend): add sign-in and sign-out controls
 
 ## Phase Verification
 
-- [ ] All 8 tasks committed.
-- [ ] `cd frontend && npm run lint && npm run typecheck && npm test` all pass.
-- [ ] Frontend coverage gate holds.
-- [ ] With `VITE_AUTH_ENABLED=false` (default), UI is visually and functionally identical to pre-phase.
-- [ ] With flags on and a mocked backend (MSW), the full guest → sign-in → upgrade flow is exercised in one integration test in `frontend/tests/__tests__/integration/`.
+- [x] All 8 tasks committed.
+- [x] `cd frontend && npm run lint && npm run typecheck && npm test` all pass.
+- [x] Frontend coverage gate holds.
+- [x] With `VITE_AUTH_ENABLED=false` (default), UI is visually and functionally identical to pre-phase.
+- [ ] With flags on and a mocked backend (MSW), the full guest to sign-in to upgrade flow is exercised in one integration test in `frontend/tests/__tests__/integration/`.
