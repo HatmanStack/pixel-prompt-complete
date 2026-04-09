@@ -117,7 +117,7 @@ export const Header: FC<HeaderProps> = ({ className = '' }) => {
                   onClick={() =>
                     hostedUiLoginUrl()
                       .then((url) => window.location.assign(url))
-                      .catch(() => {})
+                      .catch((err) => console.error('Failed to generate login URL:', err))
                   }
                   className="px-3 py-1.5 rounded text-sm bg-accent text-white"
                 >

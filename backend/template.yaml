@@ -167,8 +167,8 @@ Parameters:
   # CORS
   CorsAllowedOrigin:
     Type: String
-    Default: "*"
-    Description: Allowed CORS origin (set to your frontend domain in production)
+    Default: "http://localhost:5173"
+    Description: Allowed CORS origin -- must be an exact URL (not *) because credentials (cookies) are required. Set to your frontend domain in production.
 
   # Tier System
   UsersTableName:
@@ -346,9 +346,9 @@ Resources:
           BILLING_ENABLED: !Ref BillingEnabled
           GUEST_TOKEN_SECRET: !Ref GuestTokenSecret
           USERS_TABLE_NAME: !Ref UsersTable
-          COGNITO_USER_POOL_ID: !Ref UserPool
-          COGNITO_USER_POOL_CLIENT_ID: !Ref UserPoolClient
-          COGNITO_DOMAIN: !Sub "https://${CognitoDomainPrefix}.auth.${AWS::Region}.amazoncognito.com"
+          COGNITO_USER_POOL_ID: !If [AuthEnabledCondition, !Ref UserPool, ""]
+          COGNITO_USER_POOL_CLIENT_ID: !If [AuthEnabledCondition, !Ref UserPoolClient, ""]
+          COGNITO_DOMAIN: !If [AuthEnabledCondition, !Sub "https://${CognitoDomainPrefix}.auth.${AWS::Region}.amazoncognito.com", ""]
           COGNITO_REGION: !Ref AWS::Region
           # Guest limits
           GUEST_GENERATE_LIMIT: !Ref GuestGenerateLimit
@@ -509,17 +509,20 @@ Resources:
       DefaultRouteSettings:
         ThrottlingBurstLimit: 100
         ThrottlingRateLimit: 50
-      Auth:
-        Authorizers:
-          CognitoJwt:
-            JwtConfiguration:
-              issuer: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}"
-              audience:
-                - !Ref UserPoolClient
-            IdentitySource: "$request.header.Authorization"
+      Auth: !If
+        - AuthEnabledCondition
+        - Authorizers:
+            CognitoJwt:
+              JwtConfiguration:
+                issuer: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}"
+                audience:
+                  - !Ref UserPoolClient
+              IdentitySource: "$request.header.Authorization"
+        - {}
 
   UserPool:
     Type: AWS::Cognito::UserPool
+    Condition: AuthEnabledCondition
     Properties:
       UserPoolName: !Sub "${AWS::StackName}-users"
       AutoVerifiedAttributes: [email]
@@ -534,6 +537,7 @@ Resources:
 
   UserPoolClient:
     Type: AWS::Cognito::UserPoolClient
+    Condition: AuthEnabledCondition
     Properties:
       UserPoolId: !Ref UserPool
       ClientName: !Sub "${AWS::StackName}-web"
@@ -547,6 +551,7 @@ Resources:
 
   UserPoolDomain:
     Type: AWS::Cognito::UserPoolDomain
+    Condition: AuthEnabledCondition
     Properties:
       Domain: !Ref CognitoDomainPrefix
       UserPoolId: !Ref UserPool
@@ -565,6 +570,8 @@ Resources:
       TimeToLiveSpecification:
         AttributeName: ttl
         Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
 
   PixelPromptBucket:
     Type: AWS::S3::Bucket

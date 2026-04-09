@@ -28,6 +28,7 @@ vi.mock('../../../src/api/config', () => ({
     initialDelay: 1000,
     maxDelay: 4000,
   },
+  AUTH_ENABLED: true,
   hostedUiLoginUrl: () => Promise.resolve('https://auth.test.com/login'),
 }));
 

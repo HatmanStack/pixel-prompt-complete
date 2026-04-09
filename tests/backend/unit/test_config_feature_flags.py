@@ -13,6 +13,16 @@ def _reload_config():
     return importlib.reload(config)
 
 
+@pytest.fixture(autouse=True)
+def _reset_auth_billing_env(monkeypatch):
+    """Ensure auth/billing flags are cleared before each test for hermetic runs."""
+    for var in ("AUTH_ENABLED", "BILLING_ENABLED", "GUEST_TOKEN_SECRET",
+                "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"):
+        monkeypatch.delenv(var, raising=False)
+    yield
+    _reload_config()
+
+
 def test_default_flags_false(monkeypatch):
     for var in ("AUTH_ENABLED", "BILLING_ENABLED"):
         monkeypatch.delenv(var, raising=False)

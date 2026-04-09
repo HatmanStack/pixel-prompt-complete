@@ -21,7 +21,7 @@ export const TierBanner: FC = () => {
     const handleSignIn = () => {
       hostedUiLoginUrl()
         .then((url) => window.location.assign(url))
-        .catch(() => {});
+        .catch((err) => console.error('Failed to generate login URL:', err));
     };
     return (
       <div className="w-full text-center py-2 px-4 bg-secondary/60 text-sm">

@@ -6,6 +6,7 @@
 import {
   API_BASE_URL,
   API_ROUTES,
+  AUTH_ENABLED,
   REQUEST_TIMEOUT,
   RETRY_CONFIG,
   hostedUiLoginUrl,
@@ -38,6 +39,9 @@ interface ApiErrorWithMeta extends Error {
 
 // HTTP status codes that are safe to retry
 const RETRYABLE_STATUS_CODES = [429, 502, 503, 504];
+
+// In-flight redirect promise to prevent duplicate PKCE/state creation on concurrent 401s
+let redirectPromise: Promise<void> | null = null;
 
 /**
  * Sleep utility for retry backoff
@@ -101,10 +105,13 @@ async function apiFetch<T>(
         } catch {
           // ignore
         }
-        if (typeof window !== 'undefined') {
-          hostedUiLoginUrl()
+        if (AUTH_ENABLED && typeof window !== 'undefined' && !redirectPromise) {
+          redirectPromise = hostedUiLoginUrl()
             .then((url) => window.location.assign(url))
-            .catch(() => {});
+            .catch((err) => console.error('Failed to generate login URL:', err))
+            .finally(() => {
+              redirectPromise = null;
+            });
         }
       } else if (response.status === 402) {
         try {

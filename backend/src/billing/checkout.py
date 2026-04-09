@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import time
 import traceback
 from typing import Any
 
@@ -52,10 +54,14 @@ def handle_billing_checkout(
             customer = stripe_mod.Customer.create(
                 email=email,
                 metadata={"userId": user_id},
+                idempotency_key=f"customer-create-{user_id}",
             )
             customer_id = customer["id"]
             repo.set_stripe_customer_id(user_id, customer_id)
 
+        checkout_key = hashlib.sha256(
+            f"checkout-{user_id}-{int(time.time()) // 300}".encode()
+        ).hexdigest()[:40]
         session = stripe_mod.checkout.Session.create(
             mode="subscription",
             customer=customer_id,
@@ -63,6 +69,7 @@ def handle_billing_checkout(
             success_url=config.stripe_success_url,
             cancel_url=config.stripe_cancel_url,
             client_reference_id=user_id,
+            idempotency_key=checkout_key,
         )
         return _response(200, {"url": session["url"]})
     except stripe.error.StripeError as e:
