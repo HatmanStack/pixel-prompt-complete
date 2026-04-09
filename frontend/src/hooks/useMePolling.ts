@@ -1,7 +1,7 @@
 /**
  * useMePolling hook.
- * Refreshes `/me` on mount (if signed in) and whenever the session changes
- * (i.e. after a successful generate/iterate/outpaint).
+ * Refreshes `/me` on mount (if signed in) and whenever the session ID changes
+ * (i.e. after a successful generate creates a new session).
  */
 
 import { useEffect } from 'react';
@@ -12,10 +12,10 @@ import { useAppStore } from '@/stores/useAppStore';
 export function useMePolling(): void {
   const isAuthed = useAuthStore((s) => s.isAuthenticated());
   const refresh = useBillingStore((s) => s.refresh);
-  const session = useAppStore((s) => s.currentSession);
+  const sessionId = useAppStore((s) => s.currentSession?.sessionId);
 
   useEffect(() => {
     if (!isAuthed) return;
     void refresh();
-  }, [isAuthed, refresh, session]);
+  }, [isAuthed, refresh, sessionId]);
 }

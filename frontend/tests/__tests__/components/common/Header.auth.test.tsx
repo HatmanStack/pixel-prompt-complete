@@ -11,7 +11,7 @@ vi.mock('../../../../src/api/config', () => ({
   get AUTH_ENABLED() {
     return AUTH_ENABLED_MOCK;
   },
-  hostedUiLoginUrl: () => 'https://auth.test.com/login',
+  hostedUiLoginUrl: () => Promise.resolve('https://auth.test.com/login'),
   hostedUiLogoutUrl: () => 'https://auth.test.com/logout',
 }));
 
@@ -54,10 +54,20 @@ describe('Header auth controls', () => {
     expect(screen.queryByTestId('auth-controls')).toBeNull();
   });
 
-  it('shows Sign in link when signed out', () => {
+  it('shows Sign in button when signed out', async () => {
+    const assignMock = vi.fn();
+    Object.defineProperty(window, 'location', {
+      writable: true,
+      value: { ...window.location, assign: assignMock },
+    });
     render(<Header />);
-    const link = screen.getByRole('link', { name: /sign in/i });
-    expect(link).toHaveAttribute('href', 'https://auth.test.com/login');
+    const btn = screen.getByRole('button', { name: /sign in/i });
+    expect(btn).toBeInTheDocument();
+    await userEvent.click(btn);
+    // Allow the async hostedUiLoginUrl promise to resolve
+    await vi.waitFor(() => {
+      expect(assignMock).toHaveBeenCalledWith('https://auth.test.com/login');
+    });
   });
 
   it('shows email and Sign out when signed in', async () => {

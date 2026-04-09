@@ -26,6 +26,7 @@ def billing_on(monkeypatch):
     monkeypatch.setenv("BILLING_ENABLED", "true")
     monkeypatch.setenv("GUEST_TOKEN_SECRET", "secret")
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_dummy")
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_test_dummy")
     monkeypatch.setenv("STRIPE_PORTAL_RETURN_URL", "https://example.com/return")
     monkeypatch.setenv("USERS_TABLE_NAME", TABLE_NAME)
     import config

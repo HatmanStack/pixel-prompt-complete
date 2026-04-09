@@ -82,7 +82,8 @@ class UserRepository:
                 Key={"userId": user_id},
                 UpdateExpression="SET " + ", ".join(update_parts),
                 ConditionExpression=(
-                    f"attribute_not_exists({field_window}) OR {field_window} <= :stale"
+                    "attribute_exists(userId) AND "
+                    f"(attribute_not_exists({field_window}) OR {field_window} <= :stale)"
                 ),
                 ExpressionAttributeValues={
                     ":now": now,
@@ -104,6 +105,14 @@ class UserRepository:
             window_seconds,
             now,
         )
+        # Also reset the daily quota window (paid users use dailyCount).
+        self._reset_if_stale(
+            user_id,
+            "dailyResetAt",
+            ["dailyCount"],
+            86400,
+            now,
+        )
         return self.get_user(user_id) or {}
 
     def _atomic_increment(
@@ -120,9 +129,16 @@ class UserRepository:
         if create_if_missing:
             self.get_or_create_user(user_id, now=now)
 
+        # Determine sibling counters to zero on window reset.
+        _SIBLING_COUNTERS = {
+            ("windowStart", "generateCount"): ["generateCount", "refineCount"],
+            ("windowStart", "refineCount"): ["generateCount", "refineCount"],
+        }
+        fields_to_zero = _SIBLING_COUNTERS.get((window_field, counter), [counter])
+
         for _ in range(_MAX_RETRIES):
             # Reset window if stale (no-op otherwise).
-            self._reset_if_stale(user_id, window_field, [counter], window_seconds, now)
+            self._reset_if_stale(user_id, window_field, fields_to_zero, window_seconds, now)
             try:
                 resp = self._table.update_item(
                     Key={"userId": user_id},

@@ -112,12 +112,17 @@ export const Header: FC<HeaderProps> = ({ className = '' }) => {
                   </button>
                 </>
               ) : (
-                <a
-                  href={hostedUiLoginUrl()}
+                <button
+                  type="button"
+                  onClick={() =>
+                    hostedUiLoginUrl()
+                      .then((url) => window.location.assign(url))
+                      .catch(() => {})
+                  }
                   className="px-3 py-1.5 rounded text-sm bg-accent text-white"
                 >
                   Sign in
-                </a>
+                </button>
               )}
             </div>
           )}

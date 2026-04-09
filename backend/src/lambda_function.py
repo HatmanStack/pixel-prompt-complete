@@ -151,24 +151,18 @@ def _parse_and_validate_request(
         "ip", "unknown"
     )
 
-    # Tier resolution + quota enforcement
-    if config.auth_enabled and _guest_service is not None:
+    # Tier resolution
+    if config.auth_enabled:
+        if _guest_service is None:
+            return None, response(
+                500,
+                {
+                    "error": "Server misconfigured: GUEST_TOKEN_SECRET is required when AUTH_ENABLED=true"
+                },
+            )
         tier_ctx = resolve_tier(event, _user_repo, _guest_service)
     else:
         tier_ctx = _anon_tier()
-
-    if endpoint_kind in ("generate", "refine") and config.auth_enabled:
-        # Guests blocked from refine immediately (no auth).
-        if tier_ctx.tier == "guest" and endpoint_kind == "refine":
-            return None, response(402, error_responses.auth_required())
-        result = enforce_quota(tier_ctx, endpoint_kind, _user_repo, int(time.time()))
-        if not result.allowed:
-            if result.reason == "guest_global":
-                return None, response(429, error_responses.guest_global_limit())
-            return None, response(
-                429,
-                error_responses.tier_quota_exceeded(tier_ctx.tier, result.reset_at),
-            )
 
     # Extract prompt
     prompt = body.get("prompt", default_prompt)
@@ -184,6 +178,20 @@ def _parse_and_validate_request(
     # Content filter
     if prompt and content_filter.check_prompt(prompt):
         return None, response(400, error_responses.inappropriate_content())
+
+    # Quota enforcement (after validation so invalid requests don't consume quota)
+    if endpoint_kind in ("generate", "refine") and config.auth_enabled:
+        # Guests blocked from refine immediately (no auth).
+        if tier_ctx.tier == "guest" and endpoint_kind == "refine":
+            return None, response(402, error_responses.auth_required())
+        result = enforce_quota(tier_ctx, endpoint_kind, _user_repo, int(time.time()))
+        if not result.allowed:
+            if result.reason == "guest_global":
+                return None, response(429, error_responses.guest_global_limit())
+            return None, response(
+                429,
+                error_responses.tier_quota_exceeded(tier_ctx.tier, result.reset_at),
+            )
 
     return ValidatedRequest(body=body, ip=ip, prompt=prompt, tier=tier_ctx), None
 
@@ -961,6 +969,7 @@ def response(
     headers = {
         "Content-Type": "application/json",
         "Access-Control-Allow-Origin": cors_allowed_origin,
+        "Access-Control-Allow-Credentials": "true",
         "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, X-Correlation-ID",
     }

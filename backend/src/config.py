@@ -76,6 +76,12 @@ users_table_name = os.environ.get("USERS_TABLE_NAME", "pixel-prompt-users")
 
 # Guest tracking
 guest_token_secret = os.environ.get("GUEST_TOKEN_SECRET", "")
+if auth_enabled and not guest_token_secret:
+    raise RuntimeError(
+        "AUTH_ENABLED=true requires GUEST_TOKEN_SECRET to be set. "
+        "Without it, guest tracking is disabled and unauthenticated requests "
+        "will bypass quota enforcement."
+    )
 guest_generate_limit = _safe_int("GUEST_GENERATE_LIMIT", 1)
 guest_window_seconds = _safe_int("GUEST_WINDOW_SECONDS", 3600)
 guest_global_limit = _safe_int("GUEST_GLOBAL_LIMIT", 5)
@@ -93,6 +99,11 @@ paid_window_seconds = _safe_int("PAID_WINDOW_SECONDS", 86400)
 # Stripe
 stripe_secret_key = os.environ.get("STRIPE_SECRET_KEY", "")
 stripe_webhook_secret = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+if billing_enabled:
+    if not stripe_secret_key:
+        raise RuntimeError("BILLING_ENABLED=true requires STRIPE_SECRET_KEY to be set")
+    if not stripe_webhook_secret:
+        raise RuntimeError("BILLING_ENABLED=true requires STRIPE_WEBHOOK_SECRET to be set")
 stripe_price_id = os.environ.get("STRIPE_PRICE_ID", "")
 stripe_success_url = os.environ.get("STRIPE_SUCCESS_URL", "")
 stripe_cancel_url = os.environ.get("STRIPE_CANCEL_URL", "")

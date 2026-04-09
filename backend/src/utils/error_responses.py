@@ -109,7 +109,7 @@ def auth_required(**kwargs) -> Dict[str, Any]:
     """401 Authentication required."""
     return error_response(
         status_code=401,
-        error_code="auth_required",
+        error_code="AUTH_REQUIRED",
         message="Authentication required",
         **kwargs,
     )
@@ -119,7 +119,7 @@ def tier_quota_exceeded(tier: str, reset_at: int, **kwargs) -> Dict[str, Any]:
     """429 Quota exceeded for a tier."""
     return error_response(
         status_code=429,
-        error_code="tier_quota_exceeded",
+        error_code="TIER_QUOTA_EXCEEDED",
         message=f"Quota exceeded for {tier} tier",
         tier=tier,
         resetAt=reset_at,
@@ -131,7 +131,7 @@ def subscription_required(**kwargs) -> Dict[str, Any]:
     """402 Paid subscription required."""
     return error_response(
         status_code=402,
-        error_code="subscription_required",
+        error_code="SUBSCRIPTION_REQUIRED",
         message="Paid subscription required",
         **kwargs,
     )
@@ -141,7 +141,7 @@ def guest_global_limit(**kwargs) -> Dict[str, Any]:
     """429 Global guest traffic limit reached."""
     return error_response(
         status_code=429,
-        error_code="guest_global_limit",
+        error_code="GUEST_GLOBAL_LIMIT",
         message="Guest traffic limit reached, please sign in",
         **kwargs,
     )

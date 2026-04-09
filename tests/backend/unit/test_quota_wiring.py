@@ -124,7 +124,7 @@ def test_guest_iterate_blocked_402(wired):
         None,
     )
     assert resp["statusCode"] == 402
-    assert _body(resp)["error"] == "auth_required"
+    assert _body(resp)["error"] == "AUTH_REQUIRED"
 
 
 def test_free_user_exceeds_refine_quota_429(wired):
@@ -169,7 +169,7 @@ def test_free_user_exceeds_refine_quota_429(wired):
     assert r1["statusCode"] == 200
     assert r2["statusCode"] == 200
     assert r3["statusCode"] == 429
-    assert _body(r3)["error"] == "tier_quota_exceeded"
+    assert _body(r3)["error"] == "TIER_QUOTA_EXCEEDED"
 
 
 def test_paid_generate_unlimited(wired):

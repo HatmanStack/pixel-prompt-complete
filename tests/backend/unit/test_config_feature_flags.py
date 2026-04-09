@@ -23,10 +23,20 @@ def test_default_flags_false(monkeypatch):
 
 def test_auth_only_valid(monkeypatch):
     monkeypatch.setenv("AUTH_ENABLED", "true")
+    monkeypatch.setenv("GUEST_TOKEN_SECRET", "test-secret")
     monkeypatch.delenv("BILLING_ENABLED", raising=False)
     config = _reload_config()
     assert config.auth_enabled is True
     assert config.billing_enabled is False
+
+
+def test_auth_without_guest_secret_raises(monkeypatch):
+    monkeypatch.setenv("AUTH_ENABLED", "true")
+    monkeypatch.setenv("GUEST_TOKEN_SECRET", "")
+    with pytest.raises(RuntimeError, match="GUEST_TOKEN_SECRET"):
+        _reload_config()
+    monkeypatch.delenv("AUTH_ENABLED", raising=False)
+    _reload_config()
 
 
 def test_billing_without_auth_raises(monkeypatch):

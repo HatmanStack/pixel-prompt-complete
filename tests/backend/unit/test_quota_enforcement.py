@@ -14,6 +14,7 @@ from users.tier import TierContext
 @pytest.fixture
 def env(monkeypatch):
     monkeypatch.setenv("AUTH_ENABLED", "true")
+    monkeypatch.setenv("GUEST_TOKEN_SECRET", "test-secret")
     monkeypatch.setenv("FREE_GENERATE_LIMIT", "1")
     monkeypatch.setenv("FREE_REFINE_LIMIT", "2")
     monkeypatch.setenv("GUEST_GENERATE_LIMIT", "1")
@@ -24,6 +25,7 @@ def env(monkeypatch):
     yield
     for v in (
         "AUTH_ENABLED",
+        "GUEST_TOKEN_SECRET",
         "FREE_GENERATE_LIMIT",
         "FREE_REFINE_LIMIT",
         "GUEST_GENERATE_LIMIT",

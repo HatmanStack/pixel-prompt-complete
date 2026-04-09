@@ -18,12 +18,17 @@ export const TierBanner: FC = () => {
   if (!AUTH_ENABLED) return null;
 
   if (!isAuthed) {
+    const handleSignIn = () => {
+      hostedUiLoginUrl()
+        .then((url) => window.location.assign(url))
+        .catch(() => {});
+    };
     return (
       <div className="w-full text-center py-2 px-4 bg-secondary/60 text-sm">
         You're using your free taste.{' '}
-        <a href={hostedUiLoginUrl()} className="underline text-accent">
+        <button type="button" onClick={handleSignIn} className="underline text-accent">
           Sign in for more
-        </a>
+        </button>
         .
       </div>
     );

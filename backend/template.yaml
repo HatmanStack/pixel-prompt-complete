@@ -40,12 +40,6 @@ Metadata:
           - PromptModelId
           - PromptModelApiKey
       - Label:
-          default: "Rate Limiting"
-        Parameters:
-          - GlobalRateLimit
-          - IPRateLimit
-          - IPWhitelist
-      - Label:
           default: "CORS"
         Parameters:
           - CorsAllowedOrigin
@@ -170,22 +164,6 @@ Parameters:
     Default: ""
     Description: API key for prompt enhancement model
 
-  # Rate Limiting
-  GlobalRateLimit:
-    Type: Number
-    Default: 1000
-    Description: Maximum requests per hour globally
-
-  IPRateLimit:
-    Type: Number
-    Default: 50
-    Description: Maximum requests per day per IP address
-
-  IPWhitelist:
-    Type: String
-    Default: ""
-    Description: Comma-separated IP addresses to bypass rate limits
-
   # CORS
   CorsAllowedOrigin:
     Type: String
@@ -213,6 +191,112 @@ Parameters:
     Type: String
     Default: "http://localhost:5173/"
     Description: OAuth2 logout redirect URL for Cognito Hosted UI
+
+  # Feature Flags
+  AuthEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Enable Cognito auth and tier-based quotas
+
+  BillingEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Enable Stripe billing (requires AuthEnabled=true)
+
+  GuestTokenSecret:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: HMAC secret for signing guest cookies (required when AuthEnabled=true)
+
+  # Tier Limits
+  GuestGenerateLimit:
+    Type: Number
+    Default: 1
+    Description: Generations per guest per window
+
+  GuestWindowSeconds:
+    Type: Number
+    Default: 3600
+    Description: Guest rolling window length in seconds
+
+  GuestGlobalLimit:
+    Type: Number
+    Default: 5
+    Description: Global guest generation cap per window
+
+  GuestGlobalWindowSeconds:
+    Type: Number
+    Default: 3600
+    Description: Global guest window length in seconds
+
+  FreeGenerateLimit:
+    Type: Number
+    Default: 1
+    Description: Generations per free user per window
+
+  FreeRefineLimit:
+    Type: Number
+    Default: 2
+    Description: Refinements per free user per window
+
+  FreeWindowSeconds:
+    Type: Number
+    Default: 3600
+    Description: Free tier rolling window length in seconds
+
+  PaidDailyLimit:
+    Type: Number
+    Default: 200
+    Description: Refinements per paid user per day
+
+  PaidWindowSeconds:
+    Type: Number
+    Default: 86400
+    Description: Paid tier rolling window length in seconds
+
+  # Stripe
+  StripeSecretKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: Stripe API secret key (required when BillingEnabled=true)
+
+  StripeWebhookSecret:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: Stripe webhook signing secret (required when BillingEnabled=true)
+
+  StripePriceId:
+    Type: String
+    Default: ""
+    Description: Stripe Price ID for the paid subscription
+
+  StripeSuccessUrl:
+    Type: String
+    Default: "http://localhost:5173/billing/success"
+    Description: Redirect URL after successful Stripe checkout
+
+  StripeCancelUrl:
+    Type: String
+    Default: "http://localhost:5173/billing/cancel"
+    Description: Redirect URL after cancelled Stripe checkout
+
+  StripePortalReturnUrl:
+    Type: String
+    Default: "http://localhost:5173/"
+    Description: Return URL from Stripe Customer Portal
+
+
+Conditions:
+  AuthEnabledCondition: !Equals [!Ref AuthEnabled, "true"]
 
 
 Globals:
@@ -252,21 +336,39 @@ Resources:
           PROMPT_MODEL_PROVIDER: !Ref PromptModelProvider
           PROMPT_MODEL_ID: !Ref PromptModelId
           PROMPT_MODEL_API_KEY: !Ref PromptModelApiKey
-          # Rate Limiting
-          GLOBAL_LIMIT: !Ref GlobalRateLimit
-          IP_LIMIT: !Ref IPRateLimit
-          IP_INCLUDE: !Ref IPWhitelist
           # CORS
           CORS_ALLOWED_ORIGIN: !Ref CorsAllowedOrigin
           # S3 and CloudFront
           S3_BUCKET: !Ref PixelPromptBucket
           CLOUDFRONT_DOMAIN: !GetAtt CloudFrontDistribution.DomainName
           # Tier system
+          AUTH_ENABLED: !Ref AuthEnabled
+          BILLING_ENABLED: !Ref BillingEnabled
+          GUEST_TOKEN_SECRET: !Ref GuestTokenSecret
           USERS_TABLE_NAME: !Ref UsersTable
           COGNITO_USER_POOL_ID: !Ref UserPool
           COGNITO_USER_POOL_CLIENT_ID: !Ref UserPoolClient
-          COGNITO_DOMAIN: !Ref CognitoDomainPrefix
+          COGNITO_DOMAIN: !Sub "https://${CognitoDomainPrefix}.auth.${AWS::Region}.amazoncognito.com"
           COGNITO_REGION: !Ref AWS::Region
+          # Guest limits
+          GUEST_GENERATE_LIMIT: !Ref GuestGenerateLimit
+          GUEST_WINDOW_SECONDS: !Ref GuestWindowSeconds
+          GUEST_GLOBAL_LIMIT: !Ref GuestGlobalLimit
+          GUEST_GLOBAL_WINDOW_SECONDS: !Ref GuestGlobalWindowSeconds
+          # Free tier limits
+          FREE_GENERATE_LIMIT: !Ref FreeGenerateLimit
+          FREE_REFINE_LIMIT: !Ref FreeRefineLimit
+          FREE_WINDOW_SECONDS: !Ref FreeWindowSeconds
+          # Paid tier limits
+          PAID_DAILY_LIMIT: !Ref PaidDailyLimit
+          PAID_WINDOW_SECONDS: !Ref PaidWindowSeconds
+          # Stripe
+          STRIPE_SECRET_KEY: !Ref StripeSecretKey
+          STRIPE_WEBHOOK_SECRET: !Ref StripeWebhookSecret
+          STRIPE_PRICE_ID: !Ref StripePriceId
+          STRIPE_SUCCESS_URL: !Ref StripeSuccessUrl
+          STRIPE_CANCEL_URL: !Ref StripeCancelUrl
+          STRIPE_PORTAL_RETURN_URL: !Ref StripePortalReturnUrl
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref UsersTable
@@ -305,40 +407,50 @@ Resources:
             Path: /iterate
             Method: POST
             ApiId: !Ref HttpApi
-            Auth:
-              Authorizer: CognitoJwt
+            Auth: !If
+              - AuthEnabledCondition
+              - Authorizer: CognitoJwt
+              - {}
         OutpaintApi:
           Type: HttpApi
           Properties:
             Path: /outpaint
             Method: POST
             ApiId: !Ref HttpApi
-            Auth:
-              Authorizer: CognitoJwt
+            Auth: !If
+              - AuthEnabledCondition
+              - Authorizer: CognitoJwt
+              - {}
         GetMe:
           Type: HttpApi
           Properties:
             Path: /me
             Method: GET
             ApiId: !Ref HttpApi
-            Auth:
-              Authorizer: CognitoJwt
+            Auth: !If
+              - AuthEnabledCondition
+              - Authorizer: CognitoJwt
+              - {}
         PostBillingCheckout:
           Type: HttpApi
           Properties:
             Path: /billing/checkout
             Method: POST
             ApiId: !Ref HttpApi
-            Auth:
-              Authorizer: CognitoJwt
+            Auth: !If
+              - AuthEnabledCondition
+              - Authorizer: CognitoJwt
+              - {}
         PostBillingPortal:
           Type: HttpApi
           Properties:
             Path: /billing/portal
             Method: POST
             ApiId: !Ref HttpApi
-            Auth:
-              Authorizer: CognitoJwt
+            Auth: !If
+              - AuthEnabledCondition
+              - Authorizer: CognitoJwt
+              - {}
         PostStripeWebhook:
           Type: HttpApi
           Properties:
@@ -393,7 +505,7 @@ Resources:
           - POST
           - OPTIONS
         MaxAge: 86400
-        AllowCredentials: false
+        AllowCredentials: true
       DefaultRouteSettings:
         ThrottlingBurstLimit: 100
         ThrottlingRateLimit: 50

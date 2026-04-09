@@ -11,7 +11,7 @@ import stripe
 import config
 from billing.stripe_client import get_stripe
 from users.repository import UserRepository
-from users.tier import _extract_claims
+from users.tier import extract_claims
 from utils import error_responses
 from utils.logger import StructuredLogger
 
@@ -22,6 +22,7 @@ def _response(status: int, body: dict[str, Any]) -> dict[str, Any]:
         "headers": {
             "Content-Type": "application/json",
             "Access-Control-Allow-Origin": config.cors_allowed_origin,
+            "Access-Control-Allow-Credentials": "true",
         },
         "body": json.dumps(body),
     }
@@ -36,13 +37,13 @@ def handle_billing_portal(
     if not config.billing_enabled:
         return _response(501, {"error": "billing disabled"})
 
-    claims = _extract_claims(event)
+    claims = extract_claims(event)
     if not claims:
         return _response(401, error_responses.auth_required())
 
     user_id = claims["sub"]
     try:
-        user = repo.get_or_create_user(user_id, email=claims.get("email"))
+        user = repo.get_user(user_id) or {}
         customer_id = user.get("stripeCustomerId")
         if not customer_id:
             return _response(

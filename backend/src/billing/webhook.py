@@ -103,8 +103,10 @@ def _on_payment_failed(obj: dict[str, Any], repo: UserRepository) -> None:
     user_id = _user_id_from_object(obj)
     if not user_id:
         return
-    user = repo.get_user(user_id) or {}
-    current_tier = user.get("tier", "paid")
+    user = repo.get_user(user_id)
+    if user is None:
+        return
+    current_tier = user.get("tier", "free")
     # Keep tier as-is; only mark status as past_due.
     repo.set_tier(user_id, current_tier, subscriptionStatus="past_due")
 
@@ -154,8 +156,8 @@ def handle_stripe_webhook(
             raw_obj = stripe_event["data"]["object"]
             # Normalize StripeObject to a plain dict so handlers can use
             # ``.get()`` without tripping StripeObject's custom __getattr__.
-            if hasattr(raw_obj, "_to_dict_recursive"):
-                obj = raw_obj._to_dict_recursive()
+            if hasattr(raw_obj, "to_dict_recursive"):
+                obj = raw_obj.to_dict_recursive()
             elif hasattr(raw_obj, "to_dict"):
                 obj = raw_obj.to_dict()
             else:

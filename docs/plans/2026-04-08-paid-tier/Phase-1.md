@@ -16,8 +16,8 @@ Land all infrastructure definitions (SAM template resources, IAM, API routes) an
 ## Prerequisites
 
 - Read `Phase-0.md` in full.
-- Read `/home/christophergalliart/projects/pixel-prompt-complete/backend/template.yaml` to understand the existing resource graph.
-- Read `/home/christophergalliart/projects/pixel-prompt-complete/backend/src/config.py` to understand the env-var loading pattern.
+- Read `backend/template.yaml` to understand the existing resource graph.
+- Read `backend/src/config.py` to understand the env-var loading pattern.
 
 ## Task 1.1: Add Feature Flags and Tier Env Vars to config.py
 

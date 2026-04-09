@@ -37,15 +37,61 @@ export const COGNITO_REDIRECT_URI: string =
 export const COGNITO_LOGOUT_URI: string =
   (import.meta.env.VITE_COGNITO_LOGOUT_URI as string | undefined) ?? '';
 
+// Validate required Cognito vars when auth is enabled
+if (AUTH_ENABLED) {
+  const missing = [
+    ['VITE_COGNITO_DOMAIN', COGNITO_DOMAIN],
+    ['VITE_COGNITO_CLIENT_ID', COGNITO_CLIENT_ID],
+    ['VITE_COGNITO_REDIRECT_URI', COGNITO_REDIRECT_URI],
+    ['VITE_COGNITO_LOGOUT_URI', COGNITO_LOGOUT_URI],
+  ]
+    .filter(([, v]) => !v)
+    .map(([k]) => k);
+  if (missing.length > 0) {
+    throw new Error(
+      `AUTH_ENABLED is true but the following Cognito env vars are missing: ${missing.join(', ')}`,
+    );
+  }
+}
+
 /**
- * Build the Cognito Hosted UI login URL for the authorization-code flow.
+ * Generate a random state nonce, store it in sessionStorage, and return it.
  */
-export function hostedUiLoginUrl(): string {
+function generateStateNonce(): string {
+  const array = new Uint8Array(24);
+  crypto.getRandomValues(array);
+  const nonce = Array.from(array, (b) => b.toString(16).padStart(2, '0')).join('');
+  sessionStorage.setItem('oauth_state', nonce);
+  return nonce;
+}
+
+/**
+ * Verify and consume the state nonce from sessionStorage.
+ * Returns true if valid, false otherwise.
+ */
+export function verifyStateNonce(state: string | null): boolean {
+  if (!state) return false;
+  const expected = sessionStorage.getItem('oauth_state');
+  sessionStorage.removeItem('oauth_state');
+  return expected !== null && expected === state;
+}
+
+/**
+ * Build the Cognito Hosted UI login URL for the authorization-code flow
+ * with PKCE and a CSRF state nonce.
+ */
+export async function hostedUiLoginUrl(): Promise<string> {
+  const { generatePkceChallenge } = await import('./cognito');
+  const state = generateStateNonce();
+  const codeChallenge = await generatePkceChallenge();
   const params = new URLSearchParams({
     response_type: 'code',
     client_id: COGNITO_CLIENT_ID,
     redirect_uri: COGNITO_REDIRECT_URI,
     scope: 'openid email profile',
+    state,
+    code_challenge: codeChallenge,
+    code_challenge_method: 'S256',
   });
   return `${COGNITO_DOMAIN}/login?${params.toString()}`;
 }

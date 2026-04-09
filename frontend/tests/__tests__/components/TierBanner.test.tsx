@@ -10,7 +10,7 @@ vi.mock('../../../src/api/config', () => ({
   get AUTH_ENABLED() {
     return AUTH_ENABLED_MOCK;
   },
-  hostedUiLoginUrl: () => 'https://auth.test.com/login',
+  hostedUiLoginUrl: () => Promise.resolve('https://auth.test.com/login'),
 }));
 
 let authed = false;

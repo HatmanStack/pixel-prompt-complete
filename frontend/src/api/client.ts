@@ -73,6 +73,7 @@ async function apiFetch<T>(
 
     const response = await fetch(`${API_BASE_URL}${endpoint}`, {
       ...options,
+      credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
         'X-Correlation-ID': correlationId,
@@ -101,19 +102,13 @@ async function apiFetch<T>(
           // ignore
         }
         if (typeof window !== 'undefined') {
-          window.location.assign(hostedUiLoginUrl());
+          hostedUiLoginUrl()
+            .then((url) => window.location.assign(url))
+            .catch(() => {});
         }
       } else if (response.status === 402) {
         try {
           useToastStore.getState().warning(error.message || 'Upgrade required to continue.');
-        } catch {
-          // ignore
-        }
-      } else if (response.status === 429) {
-        try {
-          useToastStore
-            .getState()
-            .warning(error.message || 'Quota exceeded. Please try again later.');
         } catch {
           // ignore
         }
@@ -160,6 +155,17 @@ async function apiFetch<T>(
 
       // Pass correlation ID to retry
       return apiFetch<T>(endpoint, { ...options, correlationId }, retryCount + 1);
+    }
+
+    // Show 429 toast only after retries are exhausted
+    if (apiError.status === 429) {
+      try {
+        useToastStore
+          .getState()
+          .warning(apiError.message || 'Quota exceeded. Please try again later.');
+      } catch {
+        // ignore
+      }
     }
 
     // Add correlation ID to error for logging

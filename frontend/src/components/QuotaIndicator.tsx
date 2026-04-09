@@ -26,7 +26,15 @@ export const QuotaIndicator: FC = () => {
         </span>
       </div>
       <div className="h-1 bg-primary/40 rounded">
-        <div className="h-1 bg-accent rounded" style={{ width: `${pct}%` }} />
+        <div
+          className="h-1 bg-accent rounded"
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(pct)}
+          aria-label={`${used} of ${limit} refinements used`}
+          style={{ width: `${pct}%` }}
+        />
       </div>
     </div>
   );

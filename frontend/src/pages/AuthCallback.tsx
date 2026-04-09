@@ -6,6 +6,7 @@
 
 import { useEffect, useState, type FC } from 'react';
 import { exchangeCodeForTokens } from '@/api/cognito';
+import { verifyStateNonce } from '@/api/config';
 import { useAuthStore } from '@/stores/useAuthStore';
 
 export const AuthCallback: FC = () => {
@@ -15,8 +16,13 @@ export const AuthCallback: FC = () => {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const code = params.get('code');
+    const state = params.get('state');
     if (!code) {
       setError('Missing authorization code.');
+      return;
+    }
+    if (!verifyStateNonce(state)) {
+      setError('Invalid OAuth state. Possible CSRF attack.');
       return;
     }
     exchangeCodeForTokens(code)

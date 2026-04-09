@@ -28,7 +28,7 @@ class TierContext:
     new_guest_token: str | None = None
 
 
-def _extract_claims(event: dict[str, Any]) -> dict[str, Any] | None:
+def extract_claims(event: dict[str, Any]) -> dict[str, Any] | None:
     rc = event.get("requestContext") or {}
     auth = rc.get("authorizer") or {}
     jwt = auth.get("jwt") or {}
@@ -67,7 +67,7 @@ def resolve_tier(
             issue_guest_cookie=False,
         )
 
-    claims = _extract_claims(event)
+    claims = extract_claims(event)
     if claims:
         sub = claims["sub"]
         email = claims.get("email")
@@ -100,7 +100,11 @@ def resolve_tier(
 
     new_token = guest_service.issue()
     new_token_id = guest_service.verify(new_token)
-    assert new_token_id is not None
+    if new_token_id is None:
+        raise ValueError(
+            "Failed to verify newly issued guest token. "
+            "GUEST_TOKEN_SECRET may have changed between issue and verify."
+        )
     ip_hash = hashlib.sha256(_source_ip(event).encode()).hexdigest()[:16]
     now = int(time.time())
     repo.upsert_guest(new_token_id, ip_hash, now + config.guest_window_seconds + 300)

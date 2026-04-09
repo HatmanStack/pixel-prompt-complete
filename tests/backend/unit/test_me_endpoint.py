@@ -69,7 +69,7 @@ def _body(r):
 def test_me_unauthenticated_returns_401(wired):
     r = wired.lambda_handler(_event(), None)
     assert r["statusCode"] == 401
-    assert _body(r)["error"] == "auth_required"
+    assert _body(r)["error"] == "AUTH_REQUIRED"
 
 
 def test_me_free_tier(wired):

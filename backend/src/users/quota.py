@@ -38,7 +38,29 @@ def enforce_quota(
     if ctx.tier == "guest":
         if endpoint == "refine":
             return QuotaResult(allowed=False, reason="guest_per_user", reset_at=0, usage={})
-        # Global cap first.
+        # Per-guest first so denied guests don't consume the global pool.
+        assert ctx.guest_token_id is not None
+        ok, item = repo.increment_guest_generate(
+            ctx.guest_token_id,
+            config.guest_generate_limit,
+            config.guest_window_seconds,
+            now,
+        )
+        if not ok:
+            usage, reset = _usage(
+                item,
+                "generateCount",
+                config.guest_generate_limit,
+                "windowStart",
+                config.guest_window_seconds,
+            )
+            return QuotaResult(
+                allowed=False,
+                reason="guest_per_user",
+                reset_at=reset,
+                usage=usage,
+            )
+        # Global cap (only reached if per-guest succeeded).
         ok_global, gitem = repo.increment_global_guest(
             config.guest_global_limit, config.guest_global_window_seconds, now
         )
@@ -56,14 +78,6 @@ def enforce_quota(
                 reset_at=reset,
                 usage=usage,
             )
-        # Per-guest.
-        assert ctx.guest_token_id is not None
-        ok, item = repo.increment_guest_generate(
-            ctx.guest_token_id,
-            config.guest_generate_limit,
-            config.guest_window_seconds,
-            now,
-        )
         usage, reset = _usage(
             item,
             "generateCount",
@@ -72,8 +86,8 @@ def enforce_quota(
             config.guest_window_seconds,
         )
         return QuotaResult(
-            allowed=ok,
-            reason=None if ok else "guest_per_user",
+            allowed=True,
+            reason=None,
             reset_at=reset,
             usage=usage,
         )

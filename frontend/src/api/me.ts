@@ -14,7 +14,7 @@ export interface QuotaCounter {
 export interface MeQuota {
   windowSeconds: number;
   windowStart: number;
-  generate: QuotaCounter;
+  generate?: QuotaCounter;
   refine: QuotaCounter;
 }
 
@@ -33,7 +33,7 @@ export interface MeResponse {
 
 export async function fetchMe(): Promise<MeResponse> {
   const token = useAuthStore.getState().idToken;
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const headers: Record<string, string> = {};
   if (token) headers.Authorization = `Bearer ${token}`;
   const response = await fetch(`${API_BASE_URL}${API_ROUTES.ME}`, {
     method: 'GET',

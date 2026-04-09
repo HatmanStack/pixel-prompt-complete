@@ -26,6 +26,7 @@ def billing_on(monkeypatch):
     monkeypatch.setenv("BILLING_ENABLED", "true")
     monkeypatch.setenv("GUEST_TOKEN_SECRET", "secret")
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_dummy")
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_test_dummy")
     monkeypatch.setenv("STRIPE_PRICE_ID", "price_123")
     monkeypatch.setenv("STRIPE_SUCCESS_URL", "https://example.com/ok")
     monkeypatch.setenv("STRIPE_CANCEL_URL", "https://example.com/cancel")
@@ -101,7 +102,7 @@ def test_flags_off_returns_501(monkeypatch):
 def test_unauthenticated_returns_401(wired):
     r = wired.lambda_handler(_event(), None)
     assert r["statusCode"] == 401
-    assert _body(r)["error"] == "auth_required"
+    assert _body(r)["error"] == "AUTH_REQUIRED"
 
 
 def test_creates_customer_if_missing(wired):

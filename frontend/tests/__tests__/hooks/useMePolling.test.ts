@@ -47,7 +47,7 @@ describe('useMePolling', () => {
   it('refreshes again when session changes', () => {
     const { rerender } = renderHook(() => useMePolling());
     expect(refreshMock).toHaveBeenCalledTimes(1);
-    currentSession = { id: 'new' };
+    currentSession = { sessionId: 'new' };
     rerender();
     expect(refreshMock).toHaveBeenCalledTimes(2);
   });
