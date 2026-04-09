@@ -229,9 +229,9 @@ feat(me): include billing status in /me response
 
 ## Phase Verification
 
-- [ ] All 6 tasks committed.
-- [ ] `ruff check backend/src/` passes.
-- [ ] `PYTHONPATH=backend/src pytest tests/backend/unit/ -v --cov=backend/src --cov-fail-under=80` passes.
-- [ ] Coverage on `backend/src/billing/` specifically ≥ 90%.
+- [x] All 6 tasks committed.
+- [x] `ruff check backend/src/` passes.
+- [x] `PYTHONPATH=backend/src pytest tests/backend/unit/ -v --cov=backend/src --cov-fail-under=80` passes.
+- [x] Coverage on `backend/src/billing/` specifically >= 90%.
 - [ ] `sam build` still succeeds.
 - [ ] Smoke path with Stripe test keys documented in feedback note for the reviewer (actual Stripe call not run in CI).
