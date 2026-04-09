@@ -6,6 +6,7 @@
 import { useState, type FC, type KeyboardEvent } from 'react';
 import { useIteration } from '@/hooks/useIteration';
 import { MAX_ITERATIONS } from '@/config/constants';
+import { QuotaIndicator } from '@/components/QuotaIndicator';
 import type { ModelName } from '@/types';
 
 interface IterationInputProps {
@@ -58,6 +59,7 @@ export const IterationInput: FC<IterationInputProps> = ({ model }) => {
 
   return (
     <div className="flex flex-col gap-2">
+      <QuotaIndicator />
       {/* Warning message */}
       {showWarning && (
         <div className="text-sm text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 p-2 rounded border border-amber-200 dark:border-amber-800">

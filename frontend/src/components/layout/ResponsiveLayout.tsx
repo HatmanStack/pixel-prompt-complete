@@ -7,6 +7,7 @@ import type { FC, ReactNode } from 'react';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { DesktopLayout } from './DesktopLayout';
 import { MobileLayout } from './MobileLayout';
+import { TierBanner } from '@/components/TierBanner';
 
 interface ResponsiveLayoutProps {
   gallery: ReactNode;
@@ -21,11 +22,16 @@ export const ResponsiveLayout: FC<ResponsiveLayoutProps> = ({
 }) => {
   const { isDesktop } = useBreakpoint();
 
-  if (isDesktop) {
-    return <DesktopLayout gallery={gallery} generation={generation} className={className} />;
-  }
-
-  return <MobileLayout gallery={gallery} generation={generation} className={className} />;
+  return (
+    <>
+      <TierBanner />
+      {isDesktop ? (
+        <DesktopLayout gallery={gallery} generation={generation} className={className} />
+      ) : (
+        <MobileLayout gallery={gallery} generation={generation} className={className} />
+      )}
+    </>
+  );
 };
 
 export default ResponsiveLayout;
