@@ -5,7 +5,9 @@
 
 import type { FC } from 'react';
 import { useAppStore } from '@/stores/useAppStore';
+import { useAuthStore } from '@/stores/useAuthStore';
 import { useSound } from '@/hooks/useSound';
+import { AUTH_ENABLED, hostedUiLoginUrl, hostedUiLogoutUrl } from '@/api/config';
 import { BreathingHeader } from './BreathingHeader';
 import { SoundToggle } from './SoundToggle';
 
@@ -15,12 +17,22 @@ interface HeaderProps {
 
 export const Header: FC<HeaderProps> = ({ className = '' }) => {
   const { currentView, setCurrentView } = useAppStore();
+  const isAuthed = useAuthStore((s) => s.isAuthenticated());
+  const user = useAuthStore((s) => s.user);
+  const clearTokens = useAuthStore((s) => s.clearTokens);
   const { playSound } = useSound();
 
   const handleNavClick = (view: 'generation' | 'gallery') => {
     if (view !== currentView) {
       playSound('switch');
       setCurrentView(view);
+    }
+  };
+
+  const handleSignOut = () => {
+    clearTokens();
+    if (typeof window !== 'undefined') {
+      window.location.assign(hostedUiLogoutUrl());
     }
   };
 
@@ -82,6 +94,33 @@ export const Header: FC<HeaderProps> = ({ className = '' }) => {
 
           {/* Sound toggle */}
           <SoundToggle />
+
+          {/* Auth controls */}
+          {AUTH_ENABLED && (
+            <div className="flex items-center gap-2" data-testid="auth-controls">
+              {isAuthed ? (
+                <>
+                  <span className="text-xs text-text-secondary hidden sm:inline">
+                    {user?.email}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleSignOut}
+                    className="px-3 py-1.5 rounded text-sm border border-primary/50 text-text-secondary hover:text-text"
+                  >
+                    Sign out
+                  </button>
+                </>
+              ) : (
+                <a
+                  href={hostedUiLoginUrl()}
+                  className="px-3 py-1.5 rounded text-sm bg-accent text-white"
+                >
+                  Sign in
+                </a>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </header>
