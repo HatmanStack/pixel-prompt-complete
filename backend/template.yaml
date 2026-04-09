@@ -305,10 +305,44 @@ Resources:
             Path: /iterate
             Method: POST
             ApiId: !Ref HttpApi
+            Auth:
+              Authorizer: CognitoJwt
         OutpaintApi:
           Type: HttpApi
           Properties:
             Path: /outpaint
+            Method: POST
+            ApiId: !Ref HttpApi
+            Auth:
+              Authorizer: CognitoJwt
+        GetMe:
+          Type: HttpApi
+          Properties:
+            Path: /me
+            Method: GET
+            ApiId: !Ref HttpApi
+            Auth:
+              Authorizer: CognitoJwt
+        PostBillingCheckout:
+          Type: HttpApi
+          Properties:
+            Path: /billing/checkout
+            Method: POST
+            ApiId: !Ref HttpApi
+            Auth:
+              Authorizer: CognitoJwt
+        PostBillingPortal:
+          Type: HttpApi
+          Properties:
+            Path: /billing/portal
+            Method: POST
+            ApiId: !Ref HttpApi
+            Auth:
+              Authorizer: CognitoJwt
+        PostStripeWebhook:
+          Type: HttpApi
+          Properties:
+            Path: /stripe/webhook
             Method: POST
             ApiId: !Ref HttpApi
         StatusApi:
@@ -363,6 +397,14 @@ Resources:
       DefaultRouteSettings:
         ThrottlingBurstLimit: 100
         ThrottlingRateLimit: 50
+      Auth:
+        Authorizers:
+          CognitoJwt:
+            JwtConfiguration:
+              issuer: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}"
+              audience:
+                - !Ref UserPoolClient
+            IdentitySource: "$request.header.Authorization"
 
   UserPool:
     Type: AWS::Cognito::UserPool
