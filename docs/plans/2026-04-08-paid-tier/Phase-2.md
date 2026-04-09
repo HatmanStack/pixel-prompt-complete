@@ -18,7 +18,7 @@ Replace the IP-based `RateLimiter` with the new tier system. Add guest token han
 - Phase 1 committed and verified.
 - Phase-0 ADRs 1–4, 7, 9, 10 understood.
 
-## Task 2.1: Add New Error Response Factories
+## Task 2.1: Add New Error Response Factories [x]
 
 ### Goal
 
@@ -59,7 +59,7 @@ Add standard error bodies for auth/tier failures so handlers can return consiste
 feat(errors): add tier/auth error response factories
 ```
 
-## Task 2.2: Implement Guest Token Module
+## Task 2.2: Implement Guest Token Module [x]
 
 ### Goal
 
@@ -99,7 +99,7 @@ Self-contained HMAC cookie module with no AWS dependencies.
 feat(auth): add HMAC-signed guest token service
 ```
 
-## Task 2.3: Implement UserRepository (DynamoDB)
+## Task 2.3: Implement UserRepository (DynamoDB) [x]
 
 ### Goal
 
@@ -174,7 +174,7 @@ Atomic CRUD for the users table with rolling-window counter updates in a single 
 feat(users): add DynamoDB user repository with atomic quota updates
 ```
 
-## Task 2.4: Implement Tier Resolution
+## Task 2.4: Implement Tier Resolution [x]
 
 ### Goal
 
@@ -218,7 +218,7 @@ Single function that reads the Lambda event, returns a `TierContext` describing 
 feat(users): add tier resolution from JWT claims and guest cookie
 ```
 
-## Task 2.5: Implement Quota Enforcement Layer
+## Task 2.5: Implement Quota Enforcement Layer [x]
 
 ### Goal
 
@@ -262,7 +262,7 @@ Single function `enforce_quota(tier_ctx, endpoint, repo) -> QuotaResult` that ca
 feat(users): add tier-based quota enforcement layer
 ```
 
-## Task 2.6: Wire Tier + Quota into lambda_function.py
+## Task 2.6: Wire Tier + Quota into lambda_function.py [x]
 
 ### Goal
 
@@ -313,7 +313,7 @@ Replace `RateLimiter` with the new layer in `_parse_and_validate_request`. Threa
 feat(lambda): wire tier resolution and quota enforcement
 ```
 
-## Task 2.7: Implement /me Endpoint
+## Task 2.7: Implement /me Endpoint [x]
 
 ### Goal
 
@@ -339,7 +339,7 @@ feat(lambda): wire tier resolution and quota enforcement
 feat(lambda): implement /me tier and quota endpoint
 ```
 
-## Task 2.8: Delete utils/rate_limit.py
+## Task 2.8: Delete utils/rate_limit.py [x]
 
 ### Goal
 
