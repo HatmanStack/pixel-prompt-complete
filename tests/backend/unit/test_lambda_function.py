@@ -63,7 +63,6 @@ _TARGETS = [
     f"{_MOD}.session_manager",
     f"{_MOD}.context_manager",
     f"{_MOD}.image_storage",
-    f"{_MOD}.rate_limiter",
     f"{_MOD}.content_filter",
     f"{_MOD}.prompt_enhancer",
     f"{_MOD}._executor",
@@ -89,7 +88,6 @@ def mocks():
         m[target.split(".")[-1]] = obj
 
     # Sane defaults
-    m["rate_limiter"].check_rate_limit.return_value = False
     m["content_filter"].check_prompt.return_value = False
     m["get_enabled_models"].return_value = []
 
@@ -284,16 +282,6 @@ class TestErrorCases:
         assert resp["statusCode"] == 200
         assert _body(resp)["message"] == "CORS preflight"
 
-    def test_rate_limit_generate(self, mocks):
-        mocks["rate_limiter"].check_rate_limit.return_value = True
-        resp = lambda_handler(_make_event(body={"prompt": "hi"}), None)
-        assert resp["statusCode"] == 429
-
-    def test_rate_limit_iterate(self, mocks):
-        mocks["rate_limiter"].check_rate_limit.return_value = True
-        resp = lambda_handler(_make_event(path="/iterate", body={"sessionId": "s", "model": "gemini", "prompt": "x"}), None)
-        assert resp["statusCode"] == 429
-
     def test_content_filter_generate(self, mocks):
         mocks["content_filter"].check_prompt.return_value = True
         resp = lambda_handler(_make_event(body={"prompt": "bad"}), None)
@@ -306,17 +294,6 @@ class TestErrorCases:
             None,
         )
         assert resp["statusCode"] == 400
-
-    def test_rate_limit_outpaint(self, mocks):
-        mocks["rate_limiter"].check_rate_limit.return_value = True
-        resp = lambda_handler(
-            _make_event(path="/outpaint", body={
-                "sessionId": "s", "model": "gemini", "preset": "16:9",
-                "prompt": "expand the scene",
-            }),
-            None,
-        )
-        assert resp["statusCode"] == 429
 
     def test_empty_prompt_400(self, mocks):
         resp = lambda_handler(_make_event(body={"prompt": ""}), None)
@@ -418,11 +395,6 @@ class TestCorsHeaders:
 
     def test_cors_on_404(self, mocks):
         resp = lambda_handler(_make_event(method="GET", path="/nope"), None)
-        self._check_cors(resp)
-
-    def test_cors_on_429(self, mocks):
-        mocks["rate_limiter"].check_rate_limit.return_value = True
-        resp = lambda_handler(_make_event(body={"prompt": "hi"}), None)
         self._check_cors(resp)
 
     def test_cors_origin_configurable(self, mocks):
