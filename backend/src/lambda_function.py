@@ -295,7 +295,7 @@ def lambda_handler(event: LambdaEvent, context: LambdaContext) -> ApiResponse:
         elif path.startswith("/gallery/") and method == "GET":
             return handle_gallery_detail(event, correlation_id)
         elif path == "/me" and method == "GET":
-            return _not_implemented("GET /me")
+            return handle_me(event, correlation_id)
         elif path == "/billing/checkout" and method == "POST":
             return _not_implemented("POST /billing/checkout")
         elif path == "/billing/portal" and method == "POST":
@@ -886,6 +886,64 @@ def handle_gallery_detail(event: LambdaEvent, correlation_id: str | None = None)
             traceback=traceback.format_exc(),
         )
         return response(500, {"error": "Internal server error"})
+
+
+def handle_me(event: LambdaEvent, correlation_id: str | None = None) -> ApiResponse:
+    """GET /me - Return tier, quota, and billing status for the caller."""
+    if not config.auth_enabled:
+        return response(501, {"error": "GET /me not implemented"})
+
+    if _guest_service is None:
+        return response(500, error_responses.internal_server_error())
+
+    ctx = resolve_tier(event, _user_repo, _guest_service)
+    if not ctx.is_authenticated:
+        return response(401, error_responses.auth_required())
+
+    window_seconds = (
+        config.paid_window_seconds if ctx.tier == "paid" else config.free_window_seconds
+    )
+    item = _user_repo.touch_quota_window(ctx.user_id, window_seconds, int(time.time()))
+    window_start = int(item.get("windowStart", 0) or 0)
+
+    if ctx.tier == "paid":
+        quota = {
+            "windowSeconds": config.paid_window_seconds,
+            "windowStart": int(item.get("dailyResetAt", 0) or 0),
+            "refine": {
+                "used": int(item.get("dailyCount", 0) or 0),
+                "limit": config.paid_daily_limit,
+            },
+        }
+    else:
+        quota = {
+            "windowSeconds": config.free_window_seconds,
+            "windowStart": window_start,
+            "generate": {
+                "used": int(item.get("generateCount", 0) or 0),
+                "limit": config.free_generate_limit,
+            },
+            "refine": {
+                "used": int(item.get("refineCount", 0) or 0),
+                "limit": config.free_refine_limit,
+            },
+        }
+
+    billing = {
+        "subscriptionStatus": item.get("subscriptionStatus"),
+        "portalAvailable": bool(item.get("stripeCustomerId")),
+    }
+
+    return response(
+        200,
+        {
+            "userId": ctx.user_id,
+            "email": ctx.email,
+            "tier": ctx.tier,
+            "quota": quota,
+            "billing": billing,
+        },
+    )
 
 
 def response(
