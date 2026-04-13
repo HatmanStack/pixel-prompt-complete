@@ -196,6 +196,33 @@ class UserRepository:
             user_id, "dailyCount", "dailyResetAt", window_seconds, limit, now
         )
 
+    # ---------- suspension ----------
+
+    def suspend_user(self, user_id: str) -> None:
+        """Set isSuspended=true on a user record."""
+        now = int(time.time())
+        self._table.update_item(
+            Key={"userId": user_id},
+            UpdateExpression="SET isSuspended = :t, updatedAt = :now",
+            ExpressionAttributeValues={":t": True, ":now": now},
+        )
+
+    def unsuspend_user(self, user_id: str) -> None:
+        """Set isSuspended=false on a user record."""
+        now = int(time.time())
+        self._table.update_item(
+            Key={"userId": user_id},
+            UpdateExpression="SET isSuspended = :f, updatedAt = :now",
+            ExpressionAttributeValues={":f": False, ":now": now},
+        )
+
+    def is_suspended(self, user_id: str) -> bool:
+        """Return True if the user exists and is suspended."""
+        item = self.get_user(user_id)
+        if not item:
+            return False
+        return bool(item.get("isSuspended", False))
+
     # ---------- tier / stripe ----------
 
     def set_tier(self, user_id: str, tier: str, **stripe_fields: Any) -> None:

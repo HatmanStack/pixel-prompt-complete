@@ -156,3 +156,43 @@ def invalid_json(**kwargs) -> Dict[str, Any]:
         details="The request body contains invalid JSON. Please check the format and try again.",
         **kwargs,
     )
+
+
+def account_suspended(**kwargs) -> Dict[str, Any]:
+    """403 Account suspended."""
+    return error_response(
+        status_code=403,
+        error_code="ACCOUNT_SUSPENDED",
+        message="Your account has been suspended. Contact support for assistance.",
+        **kwargs,
+    )
+
+
+def model_cost_ceiling(**kwargs) -> Dict[str, Any]:
+    """429 All models have reached their daily generation cap."""
+    return error_response(
+        status_code=429,
+        error_code="MODEL_COST_CEILING",
+        message="All models have reached their daily generation cap. Please try again tomorrow.",
+        **kwargs,
+    )
+
+
+def captcha_required(**kwargs) -> Dict[str, Any]:
+    """403 CAPTCHA verification required."""
+    return error_response(
+        status_code=403,
+        error_code="CAPTCHA_REQUIRED",
+        message="CAPTCHA verification required",
+        **kwargs,
+    )
+
+
+def captcha_failed(**kwargs) -> Dict[str, Any]:
+    """403 CAPTCHA verification failed."""
+    return error_response(
+        status_code=403,
+        error_code="CAPTCHA_FAILED",
+        message="CAPTCHA verification failed. Please try again.",
+        **kwargs,
+    )

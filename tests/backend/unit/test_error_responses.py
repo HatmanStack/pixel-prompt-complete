@@ -25,3 +25,24 @@ def test_guest_global_limit():
     body = error_responses.guest_global_limit()
     assert body["error"] == "GUEST_GLOBAL_LIMIT"
     assert "sign in" in body["message"]
+
+
+def test_account_suspended():
+    body = error_responses.account_suspended()
+    assert body["error"] == "ACCOUNT_SUSPENDED"
+    assert "suspended" in body["message"].lower()
+
+
+def test_model_cost_ceiling():
+    body = error_responses.model_cost_ceiling()
+    assert body["error"] == "MODEL_COST_CEILING"
+
+
+def test_captcha_required():
+    body = error_responses.captcha_required()
+    assert body["error"] == "CAPTCHA_REQUIRED"
+
+
+def test_captcha_failed():
+    body = error_responses.captcha_failed()
+    assert body["error"] == "CAPTCHA_FAILED"

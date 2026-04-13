@@ -35,6 +35,10 @@ def enforce_quota(
     if not config.auth_enabled:
         return QuotaResult(allowed=True, reason=None, reset_at=0, usage={})
 
+    # Suspension check: non-guest users with isSuspended=true are blocked.
+    if ctx.tier != "guest" and repo.is_suspended(ctx.user_id):
+        return QuotaResult(allowed=False, reason="suspended", reset_at=0)
+
     if ctx.tier == "guest":
         if endpoint == "refine":
             return QuotaResult(allowed=False, reason="guest_per_user", reset_at=0, usage={})

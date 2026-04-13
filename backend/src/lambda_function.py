@@ -186,6 +186,8 @@ def _parse_and_validate_request(
             return None, response(402, error_responses.auth_required())
         result = enforce_quota(tier_ctx, endpoint_kind, _user_repo, int(time.time()))
         if not result.allowed:
+            if result.reason == "suspended":
+                return None, response(403, error_responses.account_suspended())
             if result.reason == "guest_global":
                 return None, response(429, error_responses.guest_global_limit())
             return None, response(

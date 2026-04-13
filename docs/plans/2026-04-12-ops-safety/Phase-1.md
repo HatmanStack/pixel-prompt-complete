@@ -160,13 +160,13 @@ feat(ops): add per-model daily generation counters
 
 **Verification Checklist:**
 
-- [ ] `suspend_user` sets `isSuspended=true` in DynamoDB
-- [ ] `unsuspend_user` sets `isSuspended=false`
-- [ ] `is_suspended` returns False for users without the field
-- [ ] `enforce_quota` returns `allowed=False, reason="suspended"` for suspended users
-- [ ] Suspended users get 403 on `/generate` and `/iterate`
-- [ ] Unsuspending restores normal quota enforcement
-- [ ] Guests are not affected by suspension logic
+- [x] `suspend_user` sets `isSuspended=true` in DynamoDB
+- [x] `unsuspend_user` sets `isSuspended=false`
+- [x] `is_suspended` returns False for users without the field
+- [x] `enforce_quota` returns `allowed=False, reason="suspended"` for suspended users
+- [x] Suspended users get 403 on `/generate` and `/iterate`
+- [x] Unsuspending restores normal quota enforcement
+- [x] Guests are not affected by suspension logic
 
 **Testing Instructions:**
 
