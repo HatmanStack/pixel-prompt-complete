@@ -579,13 +579,13 @@ feat(captcha): add Turnstile CAPTCHA widget for guest generation
 
 **Verification Checklist:**
 
-- [ ] `recharts` installed and importable
-- [ ] All frontend tests pass
-- [ ] Frontend builds without errors
-- [ ] Admin code is in a separate chunk (code splitting works)
-- [ ] Lint passes
-- [ ] Typecheck passes
-- [ ] No new console warnings
+- [x] `recharts` installed and importable
+- [x] All frontend tests pass
+- [x] Frontend builds without errors
+- [x] Admin code is in a separate chunk (code splitting works)
+- [x] Lint passes
+- [x] Typecheck passes
+- [x] No new console warnings
 
 **Testing Instructions:**
 
