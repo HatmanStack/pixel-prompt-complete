@@ -498,6 +498,10 @@ Resources:
               Effect: Allow
               Action: cloudwatch:PutMetricData
               Resource: "*"
+            - Sid: SesSendEmail
+              Effect: Allow
+              Action: ses:SendEmail
+              Resource: "*"
       Events:
         GenerateApi:
           Type: HttpApi

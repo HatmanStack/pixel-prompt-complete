@@ -336,7 +336,7 @@ feat(ops): add CloudWatch custom metrics for request tracking
 - [x] Monthly churn counter resets on first of month
 - [x] EventBridge rule triggers at 00:00 UTC daily
 - [x] `lambda_handler` routes scheduled event to snapshot handler
-- [ ] `sam build` succeeds with the new event source
+- [x] `sam build` succeeds with the new event source
 
 **Testing Instructions:**
 
@@ -390,9 +390,9 @@ feat(ops): add daily snapshot Lambda for operational metrics
 
 **Verification Checklist:**
 
-- [ ] `sam build` succeeds
-- [ ] SES and CloudWatch permissions present in Lambda policy
-- [ ] EventBridge schedule event is defined
+- [x] `sam build` succeeds
+- [x] SES and CloudWatch permissions present in Lambda policy
+- [x] EventBridge schedule event is defined
 
 **Testing Instructions:**
 
