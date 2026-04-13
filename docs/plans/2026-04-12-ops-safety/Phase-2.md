@@ -97,10 +97,10 @@ feat(notifications): add SES client and email sender with feature flag
 
 **Verification Checklist:**
 
-- [ ] Each template function returns a 3-tuple of (subject, html, text)
-- [ ] HTML output contains the email address or relevant parameters
-- [ ] Plain-text output is readable without HTML tags
-- [ ] All 7 template functions exist and are callable
+- [x] Each template function returns a 3-tuple of (subject, html, text)
+- [x] HTML output contains the email address or relevant parameters
+- [x] Plain-text output is readable without HTML tags
+- [x] All 7 template functions exist and are callable
 
 **Testing Instructions:**
 
