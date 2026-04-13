@@ -556,3 +556,88 @@ class TestGenerateForModelErrorHandling:
         assert "gemini" in result_body["models"]
         assert result_body["models"]["gemini"]["status"] == "error"
         assert "sk-abcdefghijklmnopqrstuvwxyz" not in result_body["models"]["gemini"]["error"]
+
+
+# ---------- Admin Route Dispatch Tests ----------
+
+
+class TestAdminRouting:
+    """Test that admin paths dispatch to the correct handlers."""
+
+    def test_admin_users_list_routes(self, mocks):
+        from lambda_function import lambda_handler
+
+        with patch("lambda_function._route_admin") as mock_route:
+            mock_route.return_value = {"statusCode": 200, "body": "{}"}
+            resp = lambda_handler(
+                _make_event(method="GET", path="/admin/users"), None
+            )
+            mock_route.assert_called_once()
+
+    def test_admin_models_list_routes(self, mocks):
+        from lambda_function import lambda_handler
+
+        with patch("lambda_function._route_admin") as mock_route:
+            mock_route.return_value = {"statusCode": 200, "body": "{}"}
+            lambda_handler(
+                _make_event(method="GET", path="/admin/models"), None
+            )
+            mock_route.assert_called_once()
+
+    def test_admin_metrics_routes(self, mocks):
+        from lambda_function import lambda_handler
+
+        with patch("lambda_function._route_admin") as mock_route:
+            mock_route.return_value = {"statusCode": 200, "body": "{}"}
+            lambda_handler(
+                _make_event(method="GET", path="/admin/metrics"), None
+            )
+            mock_route.assert_called_once()
+
+    def test_admin_revenue_routes(self, mocks):
+        from lambda_function import lambda_handler
+
+        with patch("lambda_function._route_admin") as mock_route:
+            mock_route.return_value = {"statusCode": 200, "body": "{}"}
+            lambda_handler(
+                _make_event(method="GET", path="/admin/revenue"), None
+            )
+            mock_route.assert_called_once()
+
+    def test_unknown_admin_path_returns_404(self, mocks):
+        from lambda_function import lambda_handler
+
+        resp = lambda_handler(
+            _make_event(method="GET", path="/admin/nonexistent"), None
+        )
+        assert resp["statusCode"] == 404
+
+    def test_admin_user_detail_routes(self, mocks):
+        from lambda_function import lambda_handler
+
+        with patch("lambda_function._route_admin") as mock_route:
+            mock_route.return_value = {"statusCode": 200, "body": "{}"}
+            lambda_handler(
+                _make_event(method="GET", path="/admin/users/user-123"), None
+            )
+            mock_route.assert_called_once()
+
+    def test_admin_suspend_routes(self, mocks):
+        from lambda_function import lambda_handler
+
+        with patch("lambda_function._route_admin") as mock_route:
+            mock_route.return_value = {"statusCode": 200, "body": "{}"}
+            lambda_handler(
+                _make_event(method="POST", path="/admin/users/user-123/suspend"), None
+            )
+            mock_route.assert_called_once()
+
+    def test_admin_model_disable_routes(self, mocks):
+        from lambda_function import lambda_handler
+
+        with patch("lambda_function._route_admin") as mock_route:
+            mock_route.return_value = {"statusCode": 200, "body": "{}"}
+            lambda_handler(
+                _make_event(method="POST", path="/admin/models/gemini/disable"), None
+            )
+            mock_route.assert_called_once()

@@ -400,11 +400,11 @@ feat(admin): add metrics and revenue API endpoints
 
 **Verification Checklist:**
 
-- [ ] All 10 admin routes are registered in `lambda_handler`
-- [ ] All admin HttpApi events have JWT auth conditional
-- [ ] Path parameter extraction works for variable segments
-- [ ] `sam build` succeeds
-- [ ] Unknown admin paths return 404
+- [x] All 10 admin routes are registered in `lambda_handler`
+- [x] All admin HttpApi events have JWT auth conditional
+- [x] Path parameter extraction works for variable segments
+- [x] `sam build` succeeds
+- [x] Unknown admin paths return 404
 
 **Testing Instructions:**
 

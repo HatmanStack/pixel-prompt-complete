@@ -595,6 +595,107 @@ Resources:
             Path: /gallery/{sessionId}
             Method: GET
             ApiId: !Ref HttpApi
+        # Admin API routes (JWT auth gated)
+        AdminUsersListApi:
+          Type: HttpApi
+          Properties:
+            Path: /admin/users
+            Method: GET
+            ApiId: !Ref HttpApi
+            Auth: !If
+              - AuthEnabledCondition
+              - Authorizer: CognitoJwt
+              - {}
+        AdminUserDetailApi:
+          Type: HttpApi
+          Properties:
+            Path: /admin/users/{userId}
+            Method: GET
+            ApiId: !Ref HttpApi
+            Auth: !If
+              - AuthEnabledCondition
+              - Authorizer: CognitoJwt
+              - {}
+        AdminUserSuspendApi:
+          Type: HttpApi
+          Properties:
+            Path: /admin/users/{userId}/suspend
+            Method: POST
+            ApiId: !Ref HttpApi
+            Auth: !If
+              - AuthEnabledCondition
+              - Authorizer: CognitoJwt
+              - {}
+        AdminUserUnsuspendApi:
+          Type: HttpApi
+          Properties:
+            Path: /admin/users/{userId}/unsuspend
+            Method: POST
+            ApiId: !Ref HttpApi
+            Auth: !If
+              - AuthEnabledCondition
+              - Authorizer: CognitoJwt
+              - {}
+        AdminUserNotifyApi:
+          Type: HttpApi
+          Properties:
+            Path: /admin/users/{userId}/notify
+            Method: POST
+            ApiId: !Ref HttpApi
+            Auth: !If
+              - AuthEnabledCondition
+              - Authorizer: CognitoJwt
+              - {}
+        AdminModelsListApi:
+          Type: HttpApi
+          Properties:
+            Path: /admin/models
+            Method: GET
+            ApiId: !Ref HttpApi
+            Auth: !If
+              - AuthEnabledCondition
+              - Authorizer: CognitoJwt
+              - {}
+        AdminModelDisableApi:
+          Type: HttpApi
+          Properties:
+            Path: /admin/models/{model}/disable
+            Method: POST
+            ApiId: !Ref HttpApi
+            Auth: !If
+              - AuthEnabledCondition
+              - Authorizer: CognitoJwt
+              - {}
+        AdminModelEnableApi:
+          Type: HttpApi
+          Properties:
+            Path: /admin/models/{model}/enable
+            Method: POST
+            ApiId: !Ref HttpApi
+            Auth: !If
+              - AuthEnabledCondition
+              - Authorizer: CognitoJwt
+              - {}
+        AdminMetricsApi:
+          Type: HttpApi
+          Properties:
+            Path: /admin/metrics
+            Method: GET
+            ApiId: !Ref HttpApi
+            Auth: !If
+              - AuthEnabledCondition
+              - Authorizer: CognitoJwt
+              - {}
+        AdminRevenueApi:
+          Type: HttpApi
+          Properties:
+            Path: /admin/revenue
+            Method: GET
+            ApiId: !Ref HttpApi
+            Auth: !If
+              - AuthEnabledCondition
+              - Authorizer: CognitoJwt
+              - {}
         DailySnapshotSchedule:
           Type: Schedule
           Properties:

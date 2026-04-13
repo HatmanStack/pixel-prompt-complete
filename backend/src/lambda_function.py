@@ -278,6 +278,67 @@ def _not_implemented(endpoint: str) -> ApiResponse:
     return response(501, {"error": f"{endpoint} not implemented"})
 
 
+def _route_admin(path: str, method: str, event: LambdaEvent, correlation_id: str) -> ApiResponse:
+    """Dispatch admin API routes.
+
+    All ``/admin/*`` paths are routed through this function.
+    Each handler performs its own admin auth check.
+    """
+    from admin.metrics import handle_admin_metrics, handle_admin_revenue
+    from admin.models import (
+        handle_admin_model_disable,
+        handle_admin_model_enable,
+        handle_admin_models_list,
+    )
+    from admin.users import (
+        handle_admin_notify,
+        handle_admin_suspend,
+        handle_admin_unsuspend,
+        handle_admin_user_detail,
+        handle_admin_users_list,
+    )
+
+    parts = path.strip("/").split("/")
+    # parts[0] == "admin", parts[1] == resource, ...
+
+    if len(parts) < 2:
+        return response(404, {"error": "Not found", "path": path})
+
+    resource = parts[1]
+
+    if resource == "users":
+        if len(parts) == 2 and method == "GET":
+            return handle_admin_users_list(event, _user_repo, correlation_id)
+        if len(parts) == 3 and method == "GET":
+            return handle_admin_user_detail(event, _user_repo, correlation_id)
+        if len(parts) == 4:
+            action = parts[3]
+            if action == "suspend" and method == "POST":
+                return handle_admin_suspend(event, _user_repo, correlation_id)
+            if action == "unsuspend" and method == "POST":
+                return handle_admin_unsuspend(event, _user_repo, correlation_id)
+            if action == "notify" and method == "POST":
+                return handle_admin_notify(event, _user_repo, correlation_id)
+
+    elif resource == "models":
+        if len(parts) == 2 and method == "GET":
+            return handle_admin_models_list(event, _model_counter_service, correlation_id)
+        if len(parts) == 4:
+            action = parts[3]
+            if action == "disable" and method == "POST":
+                return handle_admin_model_disable(event, _user_repo, correlation_id)
+            if action == "enable" and method == "POST":
+                return handle_admin_model_enable(event, _user_repo, correlation_id)
+
+    elif resource == "metrics" and len(parts) == 2 and method == "GET":
+        return handle_admin_metrics(event, _user_repo, _model_counter_service, correlation_id)
+
+    elif resource == "revenue" and len(parts) == 2 and method == "GET":
+        return handle_admin_revenue(event, _user_repo, correlation_id)
+
+    return response(404, {"error": "Not found", "path": path})
+
+
 def lambda_handler(event: LambdaEvent, context: LambdaContext) -> ApiResponse:
     """Main Lambda handler function."""
     # Handle scheduled events (EventBridge)
@@ -339,6 +400,8 @@ def lambda_handler(event: LambdaEvent, context: LambdaContext) -> ApiResponse:
             from billing.webhook import handle_stripe_webhook
 
             return handle_stripe_webhook(event, _user_repo, correlation_id)
+        elif path.startswith("/admin/"):
+            return _route_admin(path, method, event, correlation_id)
         else:
             return response(404, {"error": "Not found", "path": path, "method": method})
 
