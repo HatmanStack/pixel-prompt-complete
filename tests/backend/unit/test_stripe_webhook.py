@@ -381,6 +381,62 @@ def test_payment_failed_sends_warning_email(wired, monkeypatch):
     assert "Payment" in calls[0]["subject"]
 
 
+def test_subscription_upsert_active_sends_activated_email(wired, monkeypatch):
+    """When SES is enabled, subscription upsert with status 'active' sends activated email."""
+    import config as cfg
+
+    monkeypatch.setattr(cfg, "ses_enabled", True)
+    wired._user_repo.get_or_create_user("u_email_act", email="activated@example.com")
+    wired._user_repo.set_tier("u_email_act", "paid", stripeCustomerId="cus_act")
+    obj = {
+        "id": "sub_act",
+        "status": "active",
+        "customer": "cus_act",
+        "metadata": {"userId": "u_email_act"},
+    }
+    calls = []
+    from notifications import sender
+
+    def mock_send(to, subject, html, text):
+        calls.append({"to": to, "subject": subject})
+        return True
+
+    monkeypatch.setattr(sender, "send_email", mock_send)
+    payload = build_event("customer.subscription.updated", obj)
+    r = _send(wired, payload)
+    assert r["statusCode"] == 200
+    assert len(calls) == 1
+    assert calls[0]["to"] == "activated@example.com"
+    assert "Active" in calls[0]["subject"]
+
+
+def test_subscription_upsert_non_active_skips_email(wired, monkeypatch):
+    """When subscription upsert has non-active status, no email is sent."""
+    import config as cfg
+
+    monkeypatch.setattr(cfg, "ses_enabled", True)
+    wired._user_repo.get_or_create_user("u_email_noact", email="noact@example.com")
+    wired._user_repo.set_tier("u_email_noact", "paid", stripeCustomerId="cus_noact")
+    obj = {
+        "id": "sub_noact",
+        "status": "past_due",
+        "customer": "cus_noact",
+        "metadata": {"userId": "u_email_noact"},
+    }
+    calls = []
+    from notifications import sender
+
+    def mock_send(to, subject, html, text):
+        calls.append({"to": to, "subject": subject})
+        return True
+
+    monkeypatch.setattr(sender, "send_email", mock_send)
+    payload = build_event("customer.subscription.updated", obj)
+    r = _send(wired, payload)
+    assert r["statusCode"] == 200
+    assert len(calls) == 0
+
+
 def test_no_email_when_ses_disabled(wired, monkeypatch):
     """When SES is disabled, no emails are sent."""
     import config as cfg

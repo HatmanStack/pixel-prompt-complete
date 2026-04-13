@@ -107,6 +107,8 @@ def _on_subscription_upsert(obj: dict[str, Any], repo: UserRepository) -> None:
     if obj.get("customer"):
         fields["stripeCustomerId"] = obj["customer"]
     repo.set_tier(user_id, tier, **fields)
+    if status == "active":
+        _send_lifecycle_email(repo, user_id, email_templates.subscription_activated_email)
 
 
 def _on_subscription_deleted(obj: dict[str, Any], repo: UserRepository) -> None:
