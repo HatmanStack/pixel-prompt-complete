@@ -263,12 +263,12 @@ feat(admin): add suspend, unsuspend, and notify user endpoints
 
 **Verification Checklist:**
 
-- [ ] Model list returns all 4 models with counts and caps
-- [ ] Model disable creates config item in DynamoDB
-- [ ] Model enable clears disabled flag
-- [ ] Disabled model is skipped in generation flow
-- [ ] Invalid model name returns 400
-- [ ] All endpoints require admin auth
+- [x] Model list returns all 4 models with counts and caps
+- [x] Model disable creates config item in DynamoDB
+- [x] Model enable clears disabled flag
+- [x] Disabled model is skipped in generation flow
+- [x] Invalid model name returns 400
+- [x] All endpoints require admin auth
 
 **Testing Instructions:**
 

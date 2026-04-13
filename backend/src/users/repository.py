@@ -252,6 +252,21 @@ class UserRepository:
 
         return collected[:limit], out_last_key
 
+    # ---------- model runtime config ----------
+
+    def get_model_runtime_config(self, model_name: str) -> dict | None:
+        """Get the runtime config item for a model (``config#model#<name>``)."""
+        return self.get_user(f"config#model#{model_name}")
+
+    def set_model_runtime_config(self, model_name: str, disabled: bool) -> None:
+        """Set or update the runtime config for a model."""
+        now = int(time.time())
+        self._table.update_item(
+            Key={"userId": f"config#model#{model_name}"},
+            UpdateExpression="SET disabled = :d, updatedAt = :now",
+            ExpressionAttributeValues={":d": disabled, ":now": now},
+        )
+
     # ---------- suspension ----------
 
     def suspend_user(self, user_id: str) -> None:

@@ -375,12 +375,21 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
         if not enabled_models:
             return response(500, {"error": "No models enabled"})
 
-        # Filter models by per-model cost ceiling (only when auth is enabled)
+        # Filter models by runtime disable and per-model cost ceiling
         models_to_dispatch = []
         skipped_models = {}
         if config.auth_enabled:
             now_ts = int(time.time())
             for model in enabled_models:
+                # Runtime disable check (admin-toggled via DynamoDB)
+                runtime_cfg = _user_repo.get_model_runtime_config(model.name)
+                if runtime_cfg and runtime_cfg.get("disabled"):
+                    skipped_models[model.name] = {
+                        "status": "skipped",
+                        "reason": "admin_disabled",
+                    }
+                    continue
+                # Per-model cost ceiling check
                 if _model_counter_service.check_model_allowed(model.name, now_ts):
                     models_to_dispatch.append(model)
                 else:
