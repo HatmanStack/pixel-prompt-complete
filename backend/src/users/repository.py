@@ -196,6 +196,62 @@ class UserRepository:
             user_id, "dailyCount", "dailyResetAt", window_seconds, limit, now
         )
 
+    # ---------- admin scan ----------
+
+    _NON_USER_PREFIXES = ("guest#", "model#", "metrics#", "revenue#", "config#")
+
+    def scan_users(
+        self,
+        limit: int = 50,
+        last_key: dict | None = None,
+        tier_filter: str | None = None,
+        suspended_filter: bool | None = None,
+    ) -> tuple[list[dict], dict | None]:
+        """Scan for real user records, excluding synthetic items.
+
+        Returns (items, LastEvaluatedKey_or_None).
+        """
+        filter_parts: list[str] = []
+        values: dict[str, Any] = {}
+
+        if tier_filter:
+            filter_parts.append("tier = :tier")
+            values[":tier"] = tier_filter
+
+        if suspended_filter is True:
+            filter_parts.append("isSuspended = :susp")
+            values[":susp"] = True
+        elif suspended_filter is False:
+            filter_parts.append("(attribute_not_exists(isSuspended) OR isSuspended = :susp)")
+            values[":susp"] = False
+
+        scan_kwargs: dict[str, Any] = {"Limit": limit}
+        if filter_parts:
+            scan_kwargs["FilterExpression"] = " AND ".join(filter_parts)
+            scan_kwargs["ExpressionAttributeValues"] = values
+        if last_key:
+            scan_kwargs["ExclusiveStartKey"] = last_key
+
+        # We may need multiple pages to fill `limit` items after filtering
+        # synthetic records, so loop until we have enough or exhaust the table.
+        collected: list[dict] = []
+        out_last_key: dict | None = None
+
+        while True:
+            resp = self._table.scan(**scan_kwargs)
+            for item in resp.get("Items", []):
+                uid = item.get("userId", "")
+                if any(uid.startswith(prefix) for prefix in self._NON_USER_PREFIXES):
+                    continue
+                collected.append(item)
+
+            out_last_key = resp.get("LastEvaluatedKey")
+            if len(collected) >= limit or not out_last_key:
+                break
+            scan_kwargs["ExclusiveStartKey"] = out_last_key
+
+        return collected[:limit], out_last_key
+
     # ---------- suspension ----------
 
     def suspend_user(self, user_id: str) -> None:

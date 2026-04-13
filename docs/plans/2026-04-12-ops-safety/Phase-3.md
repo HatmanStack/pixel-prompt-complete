@@ -122,14 +122,14 @@ feat(admin): add admin auth middleware with Cognito group check
 
 **Verification Checklist:**
 
-- [ ] User list returns paginated results
-- [ ] User list excludes `guest#`, `model#`, `metrics#`, `revenue#` items
-- [ ] Tier filter works correctly
-- [ ] Suspended filter works correctly
-- [ ] Pagination token round-trips correctly
-- [ ] User detail returns full user record
-- [ ] User detail returns 404 for unknown user
-- [ ] Non-admin users get 403
+- [x] User list returns paginated results
+- [x] User list excludes `guest#`, `model#`, `metrics#`, `revenue#` items
+- [x] Tier filter works correctly
+- [x] Suspended filter works correctly
+- [x] Pagination token round-trips correctly
+- [x] User detail returns full user record
+- [x] User detail returns 404 for unknown user
+- [x] Non-admin users get 403
 
 **Testing Instructions:**
 
