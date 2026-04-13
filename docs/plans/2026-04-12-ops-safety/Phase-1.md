@@ -104,11 +104,11 @@ feat(ops): add config vars for cost ceiling, CAPTCHA, SES, and admin flags
 
 **Verification Checklist:**
 
-- [ ] `check_model_allowed` returns True when under cap
-- [ ] `check_model_allowed` returns False when at cap
-- [ ] Counter resets after 24-hour window expires
-- [ ] `get_model_counts` returns data for all 4 models
-- [ ] Model counter items use `model#<name>` partition key
+- [x] `check_model_allowed` returns True when under cap
+- [x] `check_model_allowed` returns False when at cap
+- [x] Counter resets after 24-hour window expires
+- [x] `get_model_counts` returns data for all 4 models
+- [x] Model counter items use `model#<name>` partition key
 
 **Testing Instructions:**
 
