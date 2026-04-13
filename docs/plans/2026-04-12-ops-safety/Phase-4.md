@@ -460,11 +460,11 @@ feat(admin): add model management section with status and controls
 
 **Verification Checklist:**
 
-- [ ] Revenue cards show current metrics
-- [ ] Churn rate computed correctly
-- [ ] Historical chart renders with snapshot data
-- [ ] Date range selector works
-- [ ] Handles zero subscribers gracefully (no division by zero)
+- [x] Revenue cards show current metrics
+- [x] Churn rate computed correctly
+- [x] Historical chart renders with snapshot data
+- [x] Date range selector works
+- [x] Handles zero subscribers gracefully (no division by zero)
 
 **Testing Instructions:**
 
