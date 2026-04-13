@@ -323,11 +323,11 @@ feat(admin): add model status, disable, and enable endpoints
 
 **Verification Checklist:**
 
-- [ ] Metrics endpoint returns today's model counts and historical snapshots
-- [ ] Revenue endpoint returns current counters and historical data
-- [ ] Days parameter limits the history range
-- [ ] Missing snapshot days return empty entries (not errors)
-- [ ] All endpoints require admin auth
+- [x] Metrics endpoint returns today's model counts and historical snapshots
+- [x] Revenue endpoint returns current counters and historical data
+- [x] Days parameter limits the history range
+- [x] Missing snapshot days return empty entries (not errors)
+- [x] All endpoints require admin auth
 
 **Testing Instructions:**
 
