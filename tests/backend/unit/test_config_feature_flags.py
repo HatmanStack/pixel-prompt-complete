@@ -17,7 +17,10 @@ def _reload_config():
 def _reset_auth_billing_env(monkeypatch):
     """Ensure auth/billing flags are cleared before each test for hermetic runs."""
     for var in ("AUTH_ENABLED", "BILLING_ENABLED", "GUEST_TOKEN_SECRET",
-                "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"):
+                "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET",
+                "CAPTCHA_ENABLED", "TURNSTILE_SECRET_KEY",
+                "SES_ENABLED", "SES_FROM_EMAIL",
+                "ADMIN_ENABLED"):
         monkeypatch.delenv(var, raising=False)
     yield
     _reload_config()
@@ -103,3 +106,62 @@ def test_old_rate_limit_constants_removed(monkeypatch):
     assert not hasattr(config, "global_limit")
     assert not hasattr(config, "ip_limit")
     assert not hasattr(config, "ip_include")
+
+
+# --- Phase 1: Cost ceiling, CAPTCHA, SES, Admin feature flags ---
+
+
+def test_captcha_enabled_defaults_false(monkeypatch):
+    monkeypatch.delenv("CAPTCHA_ENABLED", raising=False)
+    config = _reload_config()
+    assert config.captcha_enabled is False
+
+
+def test_captcha_enabled_true_without_secret_raises(monkeypatch):
+    monkeypatch.setenv("CAPTCHA_ENABLED", "true")
+    monkeypatch.setenv("TURNSTILE_SECRET_KEY", "")
+    with pytest.raises(RuntimeError, match="TURNSTILE_SECRET_KEY"):
+        _reload_config()
+    monkeypatch.delenv("CAPTCHA_ENABLED", raising=False)
+    _reload_config()
+
+
+def test_admin_enabled_without_auth_raises(monkeypatch):
+    monkeypatch.setenv("ADMIN_ENABLED", "true")
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    with pytest.raises(RuntimeError, match="ADMIN_ENABLED=true requires AUTH_ENABLED=true"):
+        _reload_config()
+    monkeypatch.delenv("ADMIN_ENABLED", raising=False)
+    _reload_config()
+
+
+def test_ses_enabled_without_email_raises(monkeypatch):
+    monkeypatch.setenv("SES_ENABLED", "true")
+    monkeypatch.setenv("SES_FROM_EMAIL", "")
+    with pytest.raises(RuntimeError, match="SES_FROM_EMAIL"):
+        _reload_config()
+    monkeypatch.delenv("SES_ENABLED", raising=False)
+    _reload_config()
+
+
+def test_model_daily_caps_dict_has_all_models(monkeypatch):
+    for var in ("MODEL_GEMINI_DAILY_CAP", "MODEL_NOVA_DAILY_CAP",
+                "MODEL_OPENAI_DAILY_CAP", "MODEL_FIREFLY_DAILY_CAP"):
+        monkeypatch.delenv(var, raising=False)
+    config = _reload_config()
+    assert set(config.MODEL_DAILY_CAPS.keys()) == {"gemini", "nova", "openai", "firefly"}
+
+
+def test_per_model_cap_defaults_to_500(monkeypatch):
+    for var in ("MODEL_GEMINI_DAILY_CAP", "MODEL_NOVA_DAILY_CAP",
+                "MODEL_OPENAI_DAILY_CAP", "MODEL_FIREFLY_DAILY_CAP"):
+        monkeypatch.delenv(var, raising=False)
+    config = _reload_config()
+    for model_name, cap in config.MODEL_DAILY_CAPS.items():
+        assert cap == 500, f"{model_name} cap should be 500, got {cap}"
+
+
+def test_per_model_cap_override(monkeypatch):
+    monkeypatch.setenv("MODEL_GEMINI_DAILY_CAP", "100")
+    config = _reload_config()
+    assert config.MODEL_DAILY_CAPS["gemini"] == 100

@@ -65,6 +65,13 @@ billing_enabled = os.environ.get("BILLING_ENABLED", "false").lower() == "true"
 if billing_enabled and not auth_enabled:
     raise RuntimeError("BILLING_ENABLED=true requires AUTH_ENABLED=true")
 
+# Feature flags (operational safety)
+captcha_enabled = os.environ.get("CAPTCHA_ENABLED", "false").lower() == "true"
+ses_enabled = os.environ.get("SES_ENABLED", "false").lower() == "true"
+admin_enabled = os.environ.get("ADMIN_ENABLED", "false").lower() == "true"
+if admin_enabled and not auth_enabled:
+    raise RuntimeError("ADMIN_ENABLED=true requires AUTH_ENABLED=true")
+
 # Cognito
 cognito_user_pool_id = os.environ.get("COGNITO_USER_POOL_ID", "")
 cognito_user_pool_client_id = os.environ.get("COGNITO_USER_POOL_CLIENT_ID", "")
@@ -218,6 +225,30 @@ def get_model_config_dict(model: ModelConfig) -> dict:
         config["client_secret"] = firefly_client_secret
     return config
 
+
+# Per-model daily cost ceiling caps
+model_gemini_daily_cap = _safe_int("MODEL_GEMINI_DAILY_CAP", 500)
+model_nova_daily_cap = _safe_int("MODEL_NOVA_DAILY_CAP", 500)
+model_openai_daily_cap = _safe_int("MODEL_OPENAI_DAILY_CAP", 500)
+model_firefly_daily_cap = _safe_int("MODEL_FIREFLY_DAILY_CAP", 500)
+
+MODEL_DAILY_CAPS: dict[str, int] = {
+    "gemini": model_gemini_daily_cap,
+    "nova": model_nova_daily_cap,
+    "openai": model_openai_daily_cap,
+    "firefly": model_firefly_daily_cap,
+}
+
+# CAPTCHA (Cloudflare Turnstile)
+turnstile_secret_key = os.environ.get("TURNSTILE_SECRET_KEY", "")
+if captcha_enabled and not turnstile_secret_key:
+    raise RuntimeError("CAPTCHA_ENABLED=true requires TURNSTILE_SECRET_KEY to be set")
+
+# SES email notifications
+ses_from_email = os.environ.get("SES_FROM_EMAIL", "")
+ses_region = os.environ.get("SES_REGION", "us-west-2")
+if ses_enabled and not ses_from_email:
+    raise RuntimeError("SES_ENABLED=true requires SES_FROM_EMAIL to be set")
 
 # Operational Timeouts (seconds) - configurable via environment
 api_client_timeout = _safe_float("API_CLIENT_TIMEOUT", 120.0)
