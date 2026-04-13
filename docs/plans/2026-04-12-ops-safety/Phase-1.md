@@ -279,13 +279,13 @@ feat(ops): integrate per-model cost ceiling into generation flow
 
 **Verification Checklist:**
 
-- [ ] `verify_turnstile` returns True on successful verification
-- [ ] `verify_turnstile` returns False on failed verification
-- [ ] `verify_turnstile` returns False on network error (fail closed)
-- [ ] Guest `/generate` without `captchaToken` returns 403 `CAPTCHA_REQUIRED` when enabled
-- [ ] Guest `/generate` with invalid token returns 403 `CAPTCHA_FAILED` when enabled
-- [ ] Authenticated users skip CAPTCHA
-- [ ] `CAPTCHA_ENABLED=false` skips all CAPTCHA logic
+- [x] `verify_turnstile` returns True on successful verification
+- [x] `verify_turnstile` returns False on failed verification
+- [x] `verify_turnstile` returns False on network error (fail closed)
+- [x] Guest `/generate` without `captchaToken` returns 403 `CAPTCHA_REQUIRED` when enabled
+- [x] Guest `/generate` with invalid token returns 403 `CAPTCHA_FAILED` when enabled
+- [x] Authenticated users skip CAPTCHA
+- [x] `CAPTCHA_ENABLED=false` skips all CAPTCHA logic
 
 **Testing Instructions:**
 

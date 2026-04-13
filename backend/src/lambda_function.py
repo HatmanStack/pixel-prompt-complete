@@ -168,6 +168,16 @@ def _parse_and_validate_request(
     else:
         tier_ctx = _anon_tier()
 
+    # CAPTCHA verification for guest /generate requests
+    if config.captcha_enabled and tier_ctx.tier == "guest" and endpoint_kind == "generate":
+        captcha_token = body.get("captchaToken")
+        if not captcha_token:
+            return None, response(403, error_responses.captcha_required())
+        from ops.captcha import verify_turnstile
+
+        if not verify_turnstile(captcha_token, ip):
+            return None, response(403, error_responses.captcha_failed())
+
     # Extract prompt
     prompt = body.get("prompt", default_prompt)
 
