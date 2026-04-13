@@ -40,6 +40,7 @@ from models.providers import (
     get_outpaint_handler,
     sanitize_error_message,
 )
+from ops.model_counters import ModelCounterService
 from users.quota import enforce_quota
 from users.repository import UserRepository
 from users.tier import TierContext, resolve_tier
@@ -84,6 +85,9 @@ image_storage = ImageStorage(s3_client, s3_bucket, cloudfront_domain)
 # because resolve_tier() / enforce_quota() short-circuit.
 _user_repo = UserRepository(config.users_table_name)
 _guest_service = get_guest_token_service() if config.guest_token_secret else None
+
+# Per-model cost ceiling service
+_model_counter_service = ModelCounterService(_user_repo)
 
 # Content filter
 content_filter = ContentFilter()
@@ -354,7 +358,26 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
         if not enabled_models:
             return response(500, {"error": "No models enabled"})
 
-        enabled_model_names = [m.name for m in enabled_models]
+        # Filter models by per-model cost ceiling (only when auth is enabled)
+        models_to_dispatch = []
+        skipped_models = {}
+        if config.auth_enabled:
+            now_ts = int(time.time())
+            for model in enabled_models:
+                if _model_counter_service.check_model_allowed(model.name, now_ts):
+                    models_to_dispatch.append(model)
+                else:
+                    skipped_models[model.name] = {
+                        "status": "skipped",
+                        "reason": "daily_cap_reached",
+                    }
+        else:
+            models_to_dispatch = list(enabled_models)
+
+        if not models_to_dispatch:
+            return response(429, error_responses.model_cost_ceiling())
+
+        enabled_model_names = [m.name for m in models_to_dispatch]
 
         # Create session
         session_id = session_manager.create_session(prompt, enabled_model_names)
@@ -418,8 +441,13 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
                         pass  # Best-effort; don't mask the original error
                 return model_name, {"status": "error", "error": sanitized}
 
+        # Include skipped models in results
+        results.update(skipped_models)
+
         # Execute in parallel using module-level executor
-        futures = {_executor.submit(generate_for_model, model): model for model in enabled_models}
+        futures = {
+            _executor.submit(generate_for_model, model): model for model in models_to_dispatch
+        }
         for future in as_completed(futures):
             model_name, result = future.result()
             results[model_name] = result

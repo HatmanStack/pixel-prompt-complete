@@ -219,11 +219,11 @@ feat(ops): add account suspension with quota enforcement integration
 
 **Verification Checklist:**
 
-- [ ] Models at daily cap are skipped with `status: "skipped"` in response
-- [ ] Models under cap are dispatched normally
-- [ ] All models capped returns 429 with `MODEL_COST_CEILING` error
-- [ ] `auth_enabled=false` skips cost ceiling check entirely
-- [ ] Successful generation increments the model counter
+- [x] Models at daily cap are skipped with `status: "skipped"` in response
+- [x] Models under cap are dispatched normally
+- [x] All models capped returns 429 with `MODEL_COST_CEILING` error
+- [x] `auth_enabled=false` skips cost ceiling check entirely
+- [x] Successful generation increments the model counter
 
 **Testing Instructions:**
 
