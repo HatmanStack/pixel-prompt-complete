@@ -51,7 +51,7 @@ openai==2.30.0
     # via -r requirements.txt
 pillow==12.2.0
     # via -r requirements.txt
-pyasn1==0.6.2
+pyasn1==0.6.3
     # via pyasn1-modules
 pyasn1-modules==0.4.2
     # via google-auth
