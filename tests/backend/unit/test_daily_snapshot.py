@@ -22,22 +22,33 @@ TABLE_NAME = "pixel-prompt-users-snapshot"
 
 @pytest.fixture
 def wired(monkeypatch):
-    """Set up DynamoDB table with test data for snapshot tests."""
-    monkeypatch.setenv("AUTH_ENABLED", "true")
-    monkeypatch.setenv("GUEST_TOKEN_SECRET", "secret")
-    monkeypatch.setenv("USERS_TABLE_NAME", TABLE_NAME)
-    import config
+    """Set up DynamoDB table with test data for snapshot tests.
 
-    importlib.reload(config)
+    Does NOT set AUTH_ENABLED to avoid contaminating config state for
+    other test modules that share the same process.
+    """
+    monkeypatch.setenv("USERS_TABLE_NAME", TABLE_NAME)
     with mock_aws():
         ddb = boto3.resource("dynamodb", region_name="us-east-1")
-        ddb.create_table(
-            TableName=TABLE_NAME,
-            KeySchema=[{"AttributeName": "userId", "KeyType": "HASH"}],
-            AttributeDefinitions=[{"AttributeName": "userId", "AttributeType": "S"}],
-            BillingMode="PAY_PER_REQUEST",
-        )
-        boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="test-bucket")
+        try:
+            ddb.create_table(
+                TableName=TABLE_NAME,
+                KeySchema=[{"AttributeName": "userId", "KeyType": "HASH"}],
+                AttributeDefinitions=[{"AttributeName": "userId", "AttributeType": "S"}],
+                BillingMode="PAY_PER_REQUEST",
+            )
+        except Exception:
+            # Table may already exist in the shared moto context
+            pass
+        try:
+            boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="test-bucket")
+        except Exception:
+            pass
+        # Clean any leftover items from previous test runs
+        table = ddb.Table(TABLE_NAME)
+        scan = table.scan()
+        for item in scan.get("Items", []):
+            table.delete_item(Key={"userId": item["userId"]})
         table = ddb.Table(TABLE_NAME)
         now = int(time.time())
 
@@ -95,9 +106,6 @@ def wired(monkeypatch):
 
         repo = UserRepository(TABLE_NAME, dynamodb_resource=ddb)
         yield repo, table
-
-    monkeypatch.delenv("AUTH_ENABLED", raising=False)
-    importlib.reload(config)
 
 
 class TestHandleDailySnapshot:
@@ -209,8 +217,9 @@ class TestScheduledEventRouting:
         repo, table = wired
         import lambda_function
 
-        importlib.reload(lambda_function)
-        lambda_function._user_repo = repo
+        # Patch _user_repo without reloading the module to avoid
+        # contaminating config state for other test files.
+        monkeypatch.setattr(lambda_function, "_user_repo", repo)
 
         event = {"source": "scheduled", "action": "daily_snapshot"}
         result = lambda_function.lambda_handler(event, None)
