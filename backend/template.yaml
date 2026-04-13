@@ -494,6 +494,10 @@ Resources:
               Effect: Allow
               Action: bedrock:InvokeModel
               Resource: !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/*'
+            - Sid: CloudWatchPutMetrics
+              Effect: Allow
+              Action: cloudwatch:PutMetricData
+              Resource: "*"
       Events:
         GenerateApi:
           Type: HttpApi
@@ -587,6 +591,13 @@ Resources:
             Path: /gallery/{sessionId}
             Method: GET
             ApiId: !Ref HttpApi
+        DailySnapshotSchedule:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 0 * * ? *)
+            Description: Daily operational metrics snapshot
+            Enabled: true
+            Input: '{"source": "scheduled", "action": "daily_snapshot"}'
 
   HttpApi:
     Type: AWS::Serverless::HttpApi

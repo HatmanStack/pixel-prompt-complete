@@ -331,11 +331,11 @@ feat(ops): add CloudWatch custom metrics for request tracking
 
 **Verification Checklist:**
 
-- [ ] Snapshot writes `metrics#YYYY-MM-DD` item with model counts, user counts, revenue
-- [ ] Snapshot is idempotent (re-running same day does not overwrite)
-- [ ] Monthly churn counter resets on first of month
-- [ ] EventBridge rule triggers at 00:00 UTC daily
-- [ ] `lambda_handler` routes scheduled event to snapshot handler
+- [x] Snapshot writes `metrics#YYYY-MM-DD` item with model counts, user counts, revenue
+- [x] Snapshot is idempotent (re-running same day does not overwrite)
+- [x] Monthly churn counter resets on first of month
+- [x] EventBridge rule triggers at 00:00 UTC daily
+- [x] `lambda_handler` routes scheduled event to snapshot handler
 - [ ] `sam build` succeeds with the new event source
 
 **Testing Instructions:**

@@ -280,6 +280,12 @@ def _not_implemented(endpoint: str) -> ApiResponse:
 
 def lambda_handler(event: LambdaEvent, context: LambdaContext) -> ApiResponse:
     """Main Lambda handler function."""
+    # Handle scheduled events (EventBridge)
+    if event.get("source") == "scheduled" and event.get("action") == "daily_snapshot":
+        from ops.metrics import handle_daily_snapshot
+
+        return handle_daily_snapshot(event, context, repo=_user_repo)
+
     correlation_id = extract_correlation_id(event)
 
     path = event.get("rawPath", event.get("path", ""))
