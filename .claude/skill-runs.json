@@ -27,5 +27,16 @@
     "date": "2026-04-08",
     "plan": "2026-04-08-paid-tier",
     "verdict": "GO"
+  },
+  {
+    "skill": "brainstorm",
+    "date": "2026-04-12",
+    "plan": "2026-04-12-ops-safety"
+  },
+  {
+    "skill": "pipeline",
+    "date": "2026-04-13",
+    "plan": "2026-04-12-ops-safety",
+    "verdict": "GO"
   }
 ]
