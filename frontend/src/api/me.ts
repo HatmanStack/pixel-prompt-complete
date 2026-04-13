@@ -29,6 +29,7 @@ export interface MeResponse {
   tier: 'guest' | 'free' | 'paid';
   quota: MeQuota;
   billing: MeBilling;
+  groups?: string[];
 }
 
 export async function fetchMe(): Promise<MeResponse> {

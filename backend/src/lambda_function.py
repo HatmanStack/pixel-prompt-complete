@@ -19,6 +19,7 @@ import boto3
 import config
 from api.enhance import PromptEnhancer
 from api.log import handle_log
+from auth.claims import extract_admin_groups
 from auth.guest_token import get_guest_token_service
 from config import (
     ITERATION_WARNING_THRESHOLD,
@@ -1094,6 +1095,7 @@ def handle_me(event: LambdaEvent, correlation_id: str | None = None) -> ApiRespo
             "tier": ctx.tier,
             "quota": quota,
             "billing": billing,
+            "groups": extract_admin_groups(event),
         },
     )
 

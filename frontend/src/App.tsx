@@ -13,11 +13,13 @@ import { ErrorBoundary } from '@/components/features/errors/ErrorBoundary';
 import { ErrorFallback } from '@/components/features/errors/ErrorFallback';
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { Suspense, lazy } from 'react';
+import { ADMIN_ENABLED } from '@/api/config';
 
 const GenerationPanel = lazy(() => import('@/components/generation/GenerationPanel'));
 const AuthCallback = lazy(() => import('@/pages/AuthCallback'));
 const BillingSuccess = lazy(() => import('@/pages/BillingSuccess'));
 const BillingCancel = lazy(() => import('@/pages/BillingCancel'));
+const Admin = lazy(() => import('@/pages/Admin'));
 
 export const App: FC = () => {
   const pathname = typeof window !== 'undefined' ? window.location.pathname : '/';
@@ -39,6 +41,13 @@ export const App: FC = () => {
     return (
       <Suspense fallback={<LoadingSpinner size="lg" />}>
         <BillingCancel />
+      </Suspense>
+    );
+  }
+  if (ADMIN_ENABLED && pathname.startsWith('/admin')) {
+    return (
+      <Suspense fallback={<LoadingSpinner size="lg" />}>
+        <Admin />
       </Suspense>
     );
   }
