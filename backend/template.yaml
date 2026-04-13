@@ -40,6 +40,28 @@ Metadata:
           - PromptModelId
           - PromptModelApiKey
       - Label:
+          default: "Per-Model Daily Caps"
+        Parameters:
+          - ModelGeminiDailyCap
+          - ModelNovaDailyCap
+          - ModelOpenaiDailyCap
+          - ModelFireflyDailyCap
+      - Label:
+          default: "CAPTCHA (Cloudflare Turnstile)"
+        Parameters:
+          - CaptchaEnabled
+          - TurnstileSecretKey
+      - Label:
+          default: "Email Notifications (SES)"
+        Parameters:
+          - SesEnabled
+          - SesFromEmail
+          - SesRegion
+      - Label:
+          default: "Admin Dashboard"
+        Parameters:
+          - AdminEnabled
+      - Label:
           default: "CORS"
         Parameters:
           - CorsAllowedOrigin
@@ -294,6 +316,70 @@ Parameters:
     Default: "http://localhost:5173/"
     Description: Return URL from Stripe Customer Portal
 
+  # Per-Model Daily Caps
+  ModelGeminiDailyCap:
+    Type: Number
+    Default: 500
+    Description: Daily generation cap for Gemini model
+
+  ModelNovaDailyCap:
+    Type: Number
+    Default: 500
+    Description: Daily generation cap for Nova Canvas model
+
+  ModelOpenaiDailyCap:
+    Type: Number
+    Default: 500
+    Description: Daily generation cap for OpenAI model
+
+  ModelFireflyDailyCap:
+    Type: Number
+    Default: 500
+    Description: Daily generation cap for Firefly model
+
+  # CAPTCHA
+  CaptchaEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Enable Cloudflare Turnstile CAPTCHA for guest /generate
+
+  TurnstileSecretKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: Cloudflare Turnstile secret key (required when CaptchaEnabled=true)
+
+  # SES Email Notifications
+  SesEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Enable Amazon SES email notifications
+
+  SesFromEmail:
+    Type: String
+    Default: ""
+    Description: Verified SES sender email address (required when SesEnabled=true)
+
+  SesRegion:
+    Type: String
+    Default: "us-west-2"
+    Description: AWS region for SES
+
+  # Admin
+  AdminEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Enable admin dashboard and API (requires AuthEnabled=true)
+
 
 Conditions:
   AuthEnabledCondition: !Equals [!Ref AuthEnabled, "true"]
@@ -369,6 +455,20 @@ Resources:
           STRIPE_SUCCESS_URL: !Ref StripeSuccessUrl
           STRIPE_CANCEL_URL: !Ref StripeCancelUrl
           STRIPE_PORTAL_RETURN_URL: !Ref StripePortalReturnUrl
+          # Per-model daily caps
+          MODEL_GEMINI_DAILY_CAP: !Ref ModelGeminiDailyCap
+          MODEL_NOVA_DAILY_CAP: !Ref ModelNovaDailyCap
+          MODEL_OPENAI_DAILY_CAP: !Ref ModelOpenaiDailyCap
+          MODEL_FIREFLY_DAILY_CAP: !Ref ModelFireflyDailyCap
+          # CAPTCHA
+          CAPTCHA_ENABLED: !Ref CaptchaEnabled
+          TURNSTILE_SECRET_KEY: !Ref TurnstileSecretKey
+          # SES
+          SES_ENABLED: !Ref SesEnabled
+          SES_FROM_EMAIL: !Ref SesFromEmail
+          SES_REGION: !Ref SesRegion
+          # Admin
+          ADMIN_ENABLED: !Ref AdminEnabled
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref UsersTable
@@ -555,6 +655,14 @@ Resources:
     Properties:
       Domain: !Ref CognitoDomainPrefix
       UserPoolId: !Ref UserPool
+
+  AdminsGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Condition: AuthEnabledCondition
+    Properties:
+      GroupName: admins
+      UserPoolId: !Ref UserPool
+      Description: Administrators with access to /admin endpoints
 
   UsersTable:
     Type: AWS::DynamoDB::Table

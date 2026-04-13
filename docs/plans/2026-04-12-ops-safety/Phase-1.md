@@ -357,10 +357,10 @@ feat(captcha): add Cloudflare Turnstile verification for guest /generate
 
 **Verification Checklist:**
 
-- [ ] `sam build` succeeds with no errors
-- [ ] All new parameters have sensible defaults
-- [ ] `AdminsGroup` is conditional on `AuthEnabledCondition`
-- [ ] New env vars appear in the Lambda environment
+- [x] `sam build` succeeds with no errors
+- [x] All new parameters have sensible defaults
+- [x] `AdminsGroup` is conditional on `AuthEnabledCondition`
+- [x] New env vars appear in the Lambda environment
 
 **Testing Instructions:**
 
