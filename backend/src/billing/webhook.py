@@ -90,6 +90,7 @@ def _on_checkout_completed(obj: dict[str, Any], repo: UserRepository) -> None:
         fields["stripeSubscriptionId"] = obj["subscription"]
     fields["subscriptionStatus"] = "active"
     repo.set_tier(user_id, "paid", **fields)
+    repo.increment_revenue_counter("activeSubscribers", 1)
     _send_lifecycle_email(repo, user_id, email_templates.welcome_email)
 
 
@@ -118,6 +119,8 @@ def _on_subscription_deleted(obj: dict[str, Any], repo: UserRepository) -> None:
         subscriptionStatus="canceled",
         stripeSubscriptionId="",
     )
+    repo.decrement_revenue_counter("activeSubscribers", 1)
+    repo.increment_revenue_counter("monthlyChurn", 1)
     _send_lifecycle_email(repo, user_id, email_templates.subscription_cancelled_email)
 
 

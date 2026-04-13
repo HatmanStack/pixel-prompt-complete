@@ -290,6 +290,33 @@ class UserRepository:
             create_if_missing=False,
         )
 
+    # ---------- revenue counters ----------
+
+    def increment_revenue_counter(self, field: str, delta: int) -> None:
+        """Atomically increment a counter on the ``revenue#current`` item.
+
+        Creates the item if it does not exist (DynamoDB ``ADD`` creates
+        the attribute starting from zero on a missing item, and the key
+        is set automatically by ``UpdateItem``).
+        """
+        now = int(time.time())
+        self._table.update_item(
+            Key={"userId": "revenue#current"},
+            UpdateExpression=f"SET updatedAt = :now ADD {field} :delta",
+            ExpressionAttributeValues={
+                ":now": now,
+                ":delta": delta,
+            },
+        )
+
+    def decrement_revenue_counter(self, field: str, delta: int) -> None:
+        """Atomically decrement a counter (increment by negative delta)."""
+        self.increment_revenue_counter(field, -delta)
+
+    def get_revenue(self) -> dict:
+        """Return the ``revenue#current`` item, or empty dict if none."""
+        return self.get_user("revenue#current") or {}
+
     def increment_global_guest(
         self, limit: int, window_seconds: int, now: int
     ) -> tuple[bool, dict]:

@@ -199,11 +199,11 @@ feat(notifications): send lifecycle emails from Stripe webhook handlers
 
 **Verification Checklist:**
 
-- [ ] `increment_revenue_counter` creates item if missing
-- [ ] `increment_revenue_counter` atomically increments counter
-- [ ] `_on_checkout_completed` increments `activeSubscribers`
-- [ ] `_on_subscription_deleted` decrements `activeSubscribers` and increments `monthlyChurn`
-- [ ] `get_revenue` returns current counters
+- [x] `increment_revenue_counter` creates item if missing
+- [x] `increment_revenue_counter` atomically increments counter
+- [x] `_on_checkout_completed` increments `activeSubscribers`
+- [x] `_on_subscription_deleted` decrements `activeSubscribers` and increments `monthlyChurn`
+- [x] `get_revenue` returns current counters
 
 **Testing Instructions:**
 

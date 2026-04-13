@@ -461,3 +461,41 @@ def test_webhook_returns_200_when_email_fails(wired, monkeypatch):
     r = _send(wired, payload)
     # The webhook must still succeed even if email sending raises
     assert r["statusCode"] == 200
+
+
+# ---- Revenue tracking tests ----
+
+
+def test_checkout_completed_increments_active_subscribers(wired):
+    """checkout.session.completed increments activeSubscribers revenue counter."""
+    wired._user_repo.get_or_create_user("u_rev1")
+    obj = {
+        "client_reference_id": "u_rev1",
+        "customer": "cus_r1",
+        "subscription": "sub_r1",
+    }
+    payload = build_event("checkout.session.completed", obj)
+    r = _send(wired, payload)
+    assert r["statusCode"] == 200
+    revenue = wired._user_repo.get_revenue()
+    assert revenue.get("activeSubscribers", 0) == 1
+
+
+def test_subscription_deleted_decrements_and_churns(wired):
+    """subscription deleted decrements activeSubscribers and increments monthlyChurn."""
+    # Set up a subscriber first
+    wired._user_repo.get_or_create_user("u_rev2")
+    wired._user_repo.set_tier("u_rev2", "paid", stripeCustomerId="cus_r2")
+    wired._user_repo.increment_revenue_counter("activeSubscribers", 1)
+
+    obj = {
+        "id": "sub_r2",
+        "customer": "cus_r2",
+        "metadata": {"userId": "u_rev2"},
+    }
+    payload = build_event("customer.subscription.deleted", obj)
+    r = _send(wired, payload)
+    assert r["statusCode"] == 200
+    revenue = wired._user_repo.get_revenue()
+    assert revenue.get("activeSubscribers", 0) == 0
+    assert revenue.get("monthlyChurn", 0) == 1
