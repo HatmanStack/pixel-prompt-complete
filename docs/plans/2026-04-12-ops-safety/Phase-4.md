@@ -527,12 +527,12 @@ feat(admin): add revenue reporting section with charts
 
 **Verification Checklist:**
 
-- [ ] Turnstile widget renders for guest users when CAPTCHA is enabled
-- [ ] Widget does not render for authenticated users
-- [ ] Widget does not render when CAPTCHA is disabled
-- [ ] Token is included in `/generate` request body
-- [ ] Widget resets after generation attempt
-- [ ] Generate button is disabled until CAPTCHA is completed
+- [x] Turnstile widget renders for guest users when CAPTCHA is enabled
+- [x] Widget does not render for authenticated users
+- [x] Widget does not render when CAPTCHA is disabled
+- [x] Token is included in `/generate` request body
+- [x] Widget resets after generation attempt
+- [x] Generate button is disabled until CAPTCHA is completed
 
 **Testing Instructions:**
 

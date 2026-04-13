@@ -3,12 +3,14 @@
  * Main panel with 4-column layout for session-based image generation
  */
 
-import { useCallback, useEffect, useState, type FC } from 'react';
+import { useCallback, useEffect, useState, useRef, type FC } from 'react';
 import { useAppStore } from '@/stores/useAppStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { useSessionPolling } from '@/hooks/useSessionPolling';
 import { generateSession } from '@/api/client';
+import { CAPTCHA_ENABLED } from '@/api/config';
+import { useAuthStore } from '@/stores/useAuthStore';
 import { useToast } from '@/stores/useToastStore';
 import { useSound } from '@/hooks/useSound';
 import PromptInput from './PromptInput';
@@ -20,6 +22,7 @@ import { MultiIterateInput } from './MultiIterateInput';
 import GalleryBrowser from '@/components/gallery/GalleryBrowser';
 import { ErrorBoundary } from '@/components/features/errors/ErrorBoundary';
 import { ImageModal } from '@/components/features/generation/ImageModal';
+import { CaptchaWidget } from '@/components/features/CaptchaWidget';
 import type { ModelName, ModelColumn as ModelColumnType, Iteration } from '@/types';
 import { MODELS } from '@/types';
 
@@ -149,6 +152,12 @@ export const GenerationPanel: FC = () => {
     iteration: Iteration;
   } | null>(null);
 
+  // CAPTCHA state
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated());
+  const needsCaptcha = CAPTCHA_ENABLED && !isAuthenticated;
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const captchaResetRef = useRef<(() => void) | null>(null);
+
   // Poll session status when we have a session ID
   const { error: pollingError } = useSessionPolling(currentSession?.sessionId ?? null, {
     enabled: isGenerating,
@@ -187,7 +196,7 @@ export const GenerationPanel: FC = () => {
       playSound('click');
 
       // Call API to start generation
-      const response = await generateSession(prompt);
+      const response = await generateSession(prompt, captchaToken ?? undefined);
 
       if (response.sessionId) {
         // Initialize session structure for polling
@@ -229,8 +238,23 @@ export const GenerationPanel: FC = () => {
         setErrorMessage(msg);
         showError(msg);
       }
+    } finally {
+      // Reset CAPTCHA widget for next attempt
+      if (needsCaptcha) {
+        setCaptchaToken(null);
+        captchaResetRef.current?.();
+      }
     }
-  }, [prompt, resetSession, setIsGenerating, playSound, setCurrentSession, showError]);
+  }, [
+    prompt,
+    captchaToken,
+    needsCaptcha,
+    resetSession,
+    setIsGenerating,
+    playSound,
+    setCurrentSession,
+    showError,
+  ]);
 
   // Handle image expansion
   const handleImageExpand = (model: ModelName, iteration: Iteration) => {
@@ -300,11 +324,20 @@ export const GenerationPanel: FC = () => {
           </div>
         </div>
 
+        {needsCaptcha && (
+          <CaptchaWidget
+            onVerify={setCaptchaToken}
+            onReset={(fn) => {
+              captchaResetRef.current = fn;
+            }}
+          />
+        )}
+
         <div className="flex gap-4 items-start">
           <GenerateButton
             onClick={handleGenerate}
             isGenerating={isGenerating}
-            disabled={!prompt.trim() || isGenerating}
+            disabled={!prompt.trim() || isGenerating || (needsCaptcha && !captchaToken)}
           />
 
           {/* Multi-select input */}

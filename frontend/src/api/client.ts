@@ -191,10 +191,17 @@ async function apiFetch<T>(
 /**
  * Generate images from prompt (session-based)
  */
-export async function generateSession(prompt: string): Promise<SessionGenerateResponse> {
+export async function generateSession(
+  prompt: string,
+  captchaToken?: string,
+): Promise<SessionGenerateResponse> {
+  const body: Record<string, string> = { prompt };
+  if (captchaToken) {
+    body.captchaToken = captchaToken;
+  }
   return apiFetch<SessionGenerateResponse>(API_ROUTES.GENERATE, {
     method: 'POST',
-    body: JSON.stringify({ prompt }),
+    body: JSON.stringify(body),
   });
 }
 
