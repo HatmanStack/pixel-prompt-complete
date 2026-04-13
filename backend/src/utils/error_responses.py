@@ -196,3 +196,23 @@ def captcha_failed(**kwargs) -> Dict[str, Any]:
         message="CAPTCHA verification failed. Please try again.",
         **kwargs,
     )
+
+
+def admin_required(**kwargs) -> Dict[str, Any]:
+    """403 Admin access required."""
+    return error_response(
+        status_code=403,
+        error_code="ADMIN_REQUIRED",
+        message="Admin access required",
+        **kwargs,
+    )
+
+
+def admin_disabled(**kwargs) -> Dict[str, Any]:
+    """501 Admin features are disabled."""
+    return error_response(
+        status_code=501,
+        error_code="ADMIN_DISABLED",
+        message="Admin features are disabled",
+        **kwargs,
+    )
