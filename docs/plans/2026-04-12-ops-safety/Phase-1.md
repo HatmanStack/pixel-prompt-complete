@@ -404,9 +404,9 @@ chore(sam): add parameters for cost ceiling, CAPTCHA, SES, and admin
 
 **Verification Checklist:**
 
-- [ ] `.env.example` has all new vars with descriptive comments
-- [ ] CLAUDE.md environment variables table includes all new vars
-- [ ] Default values match what `config.py` uses
+- [x] `.env.example` has all new vars with descriptive comments
+- [x] CLAUDE.md environment variables table includes all new vars
+- [x] Default values match what `config.py` uses
 
 **Testing Instructions:**
 

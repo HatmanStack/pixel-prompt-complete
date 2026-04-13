@@ -82,8 +82,12 @@ backend/src/
 │   ├── checkout.py          # /billing/checkout handler
 │   ├── portal.py            # /billing/portal handler
 │   └── webhook.py           # /stripe/webhook handler + event dispatch
+├── ops/
+│   ├── model_counters.py    # Per-model cost ceiling logic (ModelCounterService)
+│   └── captcha.py           # Cloudflare Turnstile CAPTCHA verification
 ├── users/
-│   ├── repository.py        # UserRepository: DynamoDB CRUD, atomic quota updates
+│   ├── repository.py        # UserRepository: DynamoDB CRUD, atomic quota updates, suspension
+│   ├── quota.py             # Tier-based quota enforcement with suspension check
 │   └── tier.py              # resolve_tier(event) -> TierContext
 └── utils/
     ├── clients.py           # Cached API client factories (OpenAI, Gemini, Bedrock)
@@ -202,7 +206,43 @@ Prompt enhancement uses separate config: `PROMPT_MODEL_PROVIDER`, `PROMPT_MODEL_
 
 *Required when `AUTH_ENABLED=true`. **Required when `BILLING_ENABLED=true`.
 
-**Open-Source Mode**: the default `AUTH_ENABLED=false, BILLING_ENABLED=false` disables auth, quotas, and billing entirely. The app behaves exactly like the pre-tier version: no Cognito, no DynamoDB reads, no Stripe. Contributors can run the full stack without any paid-tier setup.
+**Per-Model Daily Caps (cost ceiling)**:
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `MODEL_GEMINI_DAILY_CAP` | No | `500` | Daily generation cap for Gemini |
+| `MODEL_NOVA_DAILY_CAP` | No | `500` | Daily generation cap for Nova Canvas |
+| `MODEL_OPENAI_DAILY_CAP` | No | `500` | Daily generation cap for OpenAI |
+| `MODEL_FIREFLY_DAILY_CAP` | No | `500` | Daily generation cap for Firefly |
+
+Cost ceiling checks run only when `AUTH_ENABLED=true`. Models at their daily cap are skipped during `/generate` (other models still run). If all models are capped, `/generate` returns 429 `MODEL_COST_CEILING`.
+
+**CAPTCHA (Cloudflare Turnstile)**:
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `CAPTCHA_ENABLED` | No | `false` | Enable Turnstile CAPTCHA for guest `/generate` |
+| `TURNSTILE_SECRET_KEY` | Yes*** | `""` | Cloudflare Turnstile secret key |
+
+***Required when `CAPTCHA_ENABLED=true`.
+
+**Email Notifications (Amazon SES)**:
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `SES_ENABLED` | No | `false` | Enable SES email notifications |
+| `SES_FROM_EMAIL` | Yes**** | `""` | Verified SES sender email address |
+| `SES_REGION` | No | `us-west-2` | AWS region for SES |
+
+****Required when `SES_ENABLED=true`.
+
+**Admin Dashboard**:
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `ADMIN_ENABLED` | No | `false` | Enable admin API endpoints (requires `AUTH_ENABLED=true`) |
+
+**Open-Source Mode**: the default `AUTH_ENABLED=false, BILLING_ENABLED=false` disables auth, quotas, billing, cost ceiling, CAPTCHA, email notifications, and admin features entirely. The app behaves exactly like the pre-tier version: no Cognito, no DynamoDB reads, no Stripe. Contributors can run the full stack without any paid-tier setup.
 
 **CORS**:
 
