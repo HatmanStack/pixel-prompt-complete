@@ -192,14 +192,14 @@ feat(admin): add user list and detail API endpoints
 
 **Verification Checklist:**
 
-- [ ] Suspend sets `isSuspended=true` and returns 200
-- [ ] Suspend sends suspension email when SES is enabled
-- [ ] Suspend returns 404 for unknown user
-- [ ] Unsuspend sets `isSuspended=false` and returns 200
-- [ ] Notify sends warning email with custom message
-- [ ] Notify sends custom email with custom subject and message
-- [ ] Notify returns error when user has no email
-- [ ] All endpoints require admin auth
+- [x] Suspend sets `isSuspended=true` and returns 200
+- [x] Suspend sends suspension email when SES is enabled
+- [x] Suspend returns 404 for unknown user
+- [x] Unsuspend sets `isSuspended=false` and returns 200
+- [x] Notify sends warning email with custom message
+- [x] Notify sends custom email with custom subject and message
+- [x] Notify returns error when user has no email
+- [x] All endpoints require admin auth
 
 **Testing Instructions:**
 

@@ -207,3 +207,166 @@ class TestHandleAdminUserDetail:
         event = _make_admin_event(path="/admin/users/user-0", groups=["editors"])
         result = handle_admin_user_detail(event, populated_repo, "corr-1")
         assert result["statusCode"] == 403
+
+
+class TestHandleAdminSuspend:
+    @patch("config.admin_enabled", True)
+    @patch("config.auth_enabled", True)
+    @patch("config.ses_enabled", False)
+    def test_suspend_sets_flag(self, populated_repo):
+        from admin.users import handle_admin_suspend
+
+        event = _make_admin_event(
+            path="/admin/users/user-0", method="POST", body={"reason": "abuse"}
+        )
+        result = handle_admin_suspend(event, populated_repo, "corr-1")
+        assert result["statusCode"] == 200
+        body = json.loads(result["body"])
+        assert body["status"] == "suspended"
+
+        user = populated_repo.get_user("user-0")
+        assert user["isSuspended"] is True
+
+    @patch("config.admin_enabled", True)
+    @patch("config.auth_enabled", True)
+    @patch("config.ses_enabled", True)
+    @patch("notifications.sender.send_email", return_value=True)
+    def test_suspend_sends_email(self, mock_send, populated_repo):
+        from admin.users import handle_admin_suspend
+
+        event = _make_admin_event(
+            path="/admin/users/user-0", method="POST", body={"reason": "spamming"}
+        )
+        result = handle_admin_suspend(event, populated_repo, "corr-1")
+        assert result["statusCode"] == 200
+        mock_send.assert_called_once()
+        call_args = mock_send.call_args
+        assert call_args[0][0] == "user0@example.com"
+
+    @patch("config.admin_enabled", True)
+    @patch("config.auth_enabled", True)
+    @patch("config.ses_enabled", False)
+    def test_suspend_returns_404_for_unknown_user(self, populated_repo):
+        from admin.users import handle_admin_suspend
+
+        event = _make_admin_event(path="/admin/users/nonexistent", method="POST")
+        result = handle_admin_suspend(event, populated_repo, "corr-1")
+        assert result["statusCode"] == 404
+
+
+class TestHandleAdminUnsuspend:
+    @patch("config.admin_enabled", True)
+    @patch("config.auth_enabled", True)
+    def test_unsuspend_clears_flag(self, populated_repo):
+        from admin.users import handle_admin_unsuspend
+
+        # user-2 is already suspended in the fixture
+        event = _make_admin_event(path="/admin/users/user-2", method="POST")
+        result = handle_admin_unsuspend(event, populated_repo, "corr-1")
+        assert result["statusCode"] == 200
+        body = json.loads(result["body"])
+        assert body["status"] == "active"
+
+        user = populated_repo.get_user("user-2")
+        assert user["isSuspended"] is False
+
+    @patch("config.admin_enabled", True)
+    @patch("config.auth_enabled", True)
+    def test_unsuspend_returns_404(self, populated_repo):
+        from admin.users import handle_admin_unsuspend
+
+        event = _make_admin_event(path="/admin/users/nonexistent", method="POST")
+        result = handle_admin_unsuspend(event, populated_repo, "corr-1")
+        assert result["statusCode"] == 404
+
+
+class TestHandleAdminNotify:
+    @patch("config.admin_enabled", True)
+    @patch("config.auth_enabled", True)
+    @patch("config.ses_enabled", True)
+    @patch("notifications.sender.send_email", return_value=True)
+    def test_sends_warning_email(self, mock_send, populated_repo):
+        from admin.users import handle_admin_notify
+
+        event = _make_admin_event(
+            path="/admin/users/user-0",
+            method="POST",
+            body={"type": "warning", "message": "Stop that!"},
+        )
+        result = handle_admin_notify(event, populated_repo, "corr-1")
+        assert result["statusCode"] == 200
+        body = json.loads(result["body"])
+        assert body["status"] == "sent"
+        mock_send.assert_called_once()
+
+    @patch("config.admin_enabled", True)
+    @patch("config.auth_enabled", True)
+    @patch("config.ses_enabled", True)
+    @patch("notifications.sender.send_email", return_value=True)
+    def test_sends_custom_email(self, mock_send, populated_repo):
+        from admin.users import handle_admin_notify
+
+        event = _make_admin_event(
+            path="/admin/users/user-0",
+            method="POST",
+            body={
+                "type": "custom",
+                "subject": "Hello",
+                "message": "Custom message body",
+            },
+        )
+        result = handle_admin_notify(event, populated_repo, "corr-1")
+        assert result["statusCode"] == 200
+        body = json.loads(result["body"])
+        assert body["status"] == "sent"
+
+    @patch("config.admin_enabled", True)
+    @patch("config.auth_enabled", True)
+    @patch("config.ses_enabled", True)
+    def test_notify_returns_error_for_user_without_email(self, populated_repo):
+        from admin.users import handle_admin_notify
+
+        # Add a user without email
+        populated_repo._table.put_item(
+            Item={"userId": "no-email-user", "tier": "free"}
+        )
+
+        event = _make_admin_event(
+            path="/admin/users/no-email-user",
+            method="POST",
+            body={"type": "warning", "message": "test"},
+        )
+        result = handle_admin_notify(event, populated_repo, "corr-1")
+        assert result["statusCode"] == 400
+        body = json.loads(result["body"])
+        assert "email" in body["error"].lower()
+
+    @patch("config.admin_enabled", True)
+    @patch("config.auth_enabled", True)
+    @patch("config.ses_enabled", False)
+    def test_notify_returns_failed_when_ses_disabled(self, populated_repo):
+        from admin.users import handle_admin_notify
+
+        event = _make_admin_event(
+            path="/admin/users/user-0",
+            method="POST",
+            body={"type": "warning", "message": "test"},
+        )
+        result = handle_admin_notify(event, populated_repo, "corr-1")
+        assert result["statusCode"] == 200
+        body = json.loads(result["body"])
+        assert body["status"] == "failed"
+
+    @patch("config.admin_enabled", True)
+    @patch("config.auth_enabled", True)
+    @patch("config.ses_enabled", True)
+    def test_notify_requires_message(self, populated_repo):
+        from admin.users import handle_admin_notify
+
+        event = _make_admin_event(
+            path="/admin/users/user-0",
+            method="POST",
+            body={"type": "warning"},
+        )
+        result = handle_admin_notify(event, populated_repo, "corr-1")
+        assert result["statusCode"] == 400
