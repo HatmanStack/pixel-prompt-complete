@@ -15,6 +15,8 @@ import stripe
 
 import config
 from billing.stripe_client import get_stripe
+from notifications import sender as email_sender
+from notifications import templates as email_templates
 from users.repository import UserRepository
 from utils.logger import StructuredLogger
 
@@ -45,6 +47,24 @@ def _raw_body(event: dict[str, Any]) -> str:
     return body
 
 
+def _send_lifecycle_email(repo: UserRepository, user_id: str, template_fn, *template_args) -> None:
+    """Send a lifecycle email if the user has an email address.
+
+    Fire-and-forget: errors are logged but never raised.
+    """
+    try:
+        user = repo.get_user(user_id)
+        if not user:
+            return
+        email = user.get("email")
+        if not email:
+            return
+        subject, html, text = template_fn(email, *template_args)
+        email_sender.send_email(email, subject, html, text)
+    except Exception as e:
+        StructuredLogger.warning(f"Lifecycle email failed for {user_id}: {e}")
+
+
 def _user_id_from_object(obj: dict[str, Any]) -> str | None:
     """Extract the userId (Cognito sub) from a Stripe object.
 
@@ -70,6 +90,7 @@ def _on_checkout_completed(obj: dict[str, Any], repo: UserRepository) -> None:
         fields["stripeSubscriptionId"] = obj["subscription"]
     fields["subscriptionStatus"] = "active"
     repo.set_tier(user_id, "paid", **fields)
+    _send_lifecycle_email(repo, user_id, email_templates.welcome_email)
 
 
 def _on_subscription_upsert(obj: dict[str, Any], repo: UserRepository) -> None:
@@ -97,6 +118,7 @@ def _on_subscription_deleted(obj: dict[str, Any], repo: UserRepository) -> None:
         subscriptionStatus="canceled",
         stripeSubscriptionId="",
     )
+    _send_lifecycle_email(repo, user_id, email_templates.subscription_cancelled_email)
 
 
 def _on_payment_failed(obj: dict[str, Any], repo: UserRepository) -> None:
@@ -109,6 +131,7 @@ def _on_payment_failed(obj: dict[str, Any], repo: UserRepository) -> None:
     current_tier = user.get("tier", "free")
     # Keep tier as-is; only mark status as past_due.
     repo.set_tier(user_id, current_tier, subscriptionStatus="past_due")
+    _send_lifecycle_email(repo, user_id, email_templates.payment_failed_email)
 
 
 _DISPATCH = {

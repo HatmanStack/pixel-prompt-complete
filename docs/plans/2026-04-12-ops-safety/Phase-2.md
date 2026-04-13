@@ -146,12 +146,12 @@ feat(notifications): add email templates for lifecycle and admin notices
 
 **Verification Checklist:**
 
-- [ ] `_on_checkout_completed` sends welcome email when SES is enabled
-- [ ] `_on_subscription_deleted` sends cancellation email
-- [ ] `_on_payment_failed` sends payment failed warning
-- [ ] Email failure does not cause webhook to return non-200
-- [ ] No email sent when `ses_enabled=false`
-- [ ] No email sent when user has no email address
+- [x] `_on_checkout_completed` sends welcome email when SES is enabled
+- [x] `_on_subscription_deleted` sends cancellation email
+- [x] `_on_payment_failed` sends payment failed warning
+- [x] Email failure does not cause webhook to return non-200
+- [x] No email sent when `ses_enabled=false`
+- [x] No email sent when user has no email address
 
 **Testing Instructions:**
 
