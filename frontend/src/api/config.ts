@@ -37,6 +37,14 @@ export const COGNITO_REDIRECT_URI: string =
 export const COGNITO_LOGOUT_URI: string =
   (import.meta.env.VITE_COGNITO_LOGOUT_URI as string | undefined) ?? '';
 
+// Admin and CAPTCHA feature flags
+export const ADMIN_ENABLED: boolean =
+  (import.meta.env.VITE_ADMIN_ENABLED as string | undefined) === 'true';
+export const CAPTCHA_ENABLED: boolean =
+  (import.meta.env.VITE_CAPTCHA_ENABLED as string | undefined) === 'true';
+export const TURNSTILE_SITE_KEY: string =
+  (import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined) ?? '';
+
 // Validate required Cognito vars when auth is enabled
 if (AUTH_ENABLED) {
   const missing = [
@@ -126,6 +134,12 @@ export const API_ROUTES = {
   ME: '/me',
   BILLING_CHECKOUT: '/billing/checkout',
   BILLING_PORTAL: '/billing/portal',
+
+  // Admin endpoints
+  ADMIN_USERS: '/admin/users',
+  ADMIN_MODELS: '/admin/models',
+  ADMIN_METRICS: '/admin/metrics',
+  ADMIN_REVENUE: '/admin/revenue',
 } as const;
 
 // Request timeout in milliseconds — image generation can take 120+ seconds
