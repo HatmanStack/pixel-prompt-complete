@@ -256,12 +256,12 @@ feat(ops): add revenue tracking counters to webhook handlers
 
 **Verification Checklist:**
 
-- [ ] `emit_request_metric` calls CloudWatch `PutMetricData`
-- [ ] Metric namespace is `PixelPrompt/Operations`
-- [ ] Dimensions include `Endpoint` and optionally `Model`
-- [ ] Errors in metric emission do not propagate
-- [ ] CloudWatch client is lazily initialized
-- [ ] Metrics not emitted when `auth_enabled=false`
+- [x] `emit_request_metric` calls CloudWatch `PutMetricData`
+- [x] Metric namespace is `PixelPrompt/Operations`
+- [x] Dimensions include `Endpoint` and optionally `Model`
+- [x] Errors in metric emission do not propagate
+- [x] CloudWatch client is lazily initialized
+- [x] Metrics not emitted when `auth_enabled=false`
 
 **Testing Instructions:**
 

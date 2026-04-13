@@ -40,6 +40,7 @@ from models.providers import (
     get_outpaint_handler,
     sanitize_error_message,
 )
+from ops.metrics import emit_request_metric
 from ops.model_counters import ModelCounterService
 from users.quota import enforce_quota
 from users.repository import UserRepository
@@ -462,6 +463,15 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
             model_name, result = future.result()
             results[model_name] = result
 
+        # Emit CloudWatch metrics per model (only in auth-enabled mode)
+        if config.auth_enabled:
+            for mname, mresult in results.items():
+                if mname in skipped_models:
+                    continue
+                dur = mresult.get("duration", 0) * 1000  # seconds to ms
+                is_err = mresult.get("status") == "error"
+                emit_request_metric("/generate", mname, dur, is_err)
+
         set_cookie = None
         if (
             validated.tier
@@ -628,6 +638,16 @@ def _handle_refinement(
 
         duration = time.time() - start_time
         target = datetime.now(timezone.utc).strftime("%Y-%m-%d-%H-%M-%S")
+        is_error = result["status"] != "success"
+
+        # Emit CloudWatch metrics for refinement (only in auth-enabled mode)
+        if config.auth_enabled:
+            emit_request_metric(
+                f"/{handler_name.replace('handle_', '')}",
+                model_name,
+                duration * 1000,
+                is_error,
+            )
 
         if result["status"] == "success":
             store_prompt = result_prompt_fn(prompt) if result_prompt_fn else prompt
