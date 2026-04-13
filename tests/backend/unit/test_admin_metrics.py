@@ -50,19 +50,29 @@ def _make_admin_event(
     }
 
 
+_TABLE_NAME = "admin-metrics-test"
+
+
 @pytest.fixture
 def dynamo_repo():
     """Create a moto DynamoDB table and UserRepository."""
     with mock_aws():
         dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
-        table = dynamodb.create_table(
-            TableName="test-users",
-            KeySchema=[{"AttributeName": "userId", "KeyType": "HASH"}],
-            AttributeDefinitions=[{"AttributeName": "userId", "AttributeType": "S"}],
-            BillingMode="PAY_PER_REQUEST",
-        )
-        table.wait_until_exists()
-        repo = UserRepository("test-users", dynamodb_resource=dynamodb)
+        try:
+            dynamodb.create_table(
+                TableName=_TABLE_NAME,
+                KeySchema=[{"AttributeName": "userId", "KeyType": "HASH"}],
+                AttributeDefinitions=[{"AttributeName": "userId", "AttributeType": "S"}],
+                BillingMode="PAY_PER_REQUEST",
+            )
+        except Exception:
+            pass
+        # Clean any leftover items
+        table = dynamodb.Table(_TABLE_NAME)
+        scan = table.scan()
+        for item in scan.get("Items", []):
+            table.delete_item(Key={"userId": item["userId"]})
+        repo = UserRepository(_TABLE_NAME, dynamodb_resource=dynamodb)
         yield repo
 
 
