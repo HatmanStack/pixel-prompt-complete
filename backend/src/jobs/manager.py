@@ -115,6 +115,7 @@ class SessionManager:
         prompt: str,
         is_outpaint: bool = False,
         outpaint_preset: str | None = None,
+        adapted_prompt: str | None = None,
     ) -> int:
         """
         Add a new iteration to a model column.
@@ -160,6 +161,8 @@ class SessionManager:
                 "startedAt": now,
                 "isOutpaint": is_outpaint,
             }
+            if adapted_prompt and adapted_prompt != prompt:
+                iteration["adaptedPrompt"] = adapted_prompt
             if outpaint_preset:
                 iteration["outpaintPreset"] = outpaint_preset
 

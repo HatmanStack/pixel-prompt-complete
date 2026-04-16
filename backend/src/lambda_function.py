@@ -472,6 +472,9 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
 
         enabled_model_names = [m.name for m in models_to_dispatch]
 
+        # Adapt prompt per model (single LLM call)
+        adapted_prompts = prompt_enhancer.adapt_per_model(prompt, enabled_model_names)
+
         # Create session
         session_id = session_manager.create_session(prompt, enabled_model_names)
 
@@ -491,11 +494,14 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
             iteration_index = None
 
             try:
-                iteration_index = session_manager.add_iteration(session_id, model_name, prompt)
+                model_prompt = adapted_prompts.get(model_name, prompt)
+                iteration_index = session_manager.add_iteration(
+                    session_id, model_name, prompt, adapted_prompt=model_prompt
+                )
 
                 handler = get_handler(model_config.provider)
                 config_dict = get_model_config_dict(model_config)
-                result = handler(config_dict, prompt, {})
+                result = handler(config_dict, model_prompt, {})
 
                 duration = time.time() - start_time
 
@@ -508,6 +514,7 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
                         iteration_index,
                         target,
                         duration,
+                        context_prompt=prompt,
                     )
                     return model_name, {
                         "status": "completed",
