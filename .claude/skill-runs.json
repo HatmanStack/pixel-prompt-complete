@@ -38,5 +38,16 @@
     "date": "2026-04-13",
     "plan": "2026-04-12-ops-safety",
     "verdict": "GO"
+  },
+  {
+    "skill": "brainstorm",
+    "date": "2026-04-15",
+    "plan": "2026-04-15-ux-enhancements"
+  },
+  {
+    "skill": "pipeline",
+    "date": "2026-04-16",
+    "plan": "2026-04-15-ux-enhancements",
+    "verdict": "GO"
   }
 ]
