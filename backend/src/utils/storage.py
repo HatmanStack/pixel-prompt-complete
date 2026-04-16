@@ -254,6 +254,30 @@ class ImageStorage:
             StructuredLogger.error(f"Failed to list gallery images from S3: {e}")
             raise
 
+    def generate_presigned_download_url(
+        self, image_key: str, filename: str, expires_in: int = 300
+    ) -> str:
+        """Generate a presigned S3 URL for downloading an image.
+
+        Args:
+            image_key: S3 key of the image
+            filename: Suggested download filename
+            expires_in: URL expiry in seconds (default 300 = 5 minutes)
+
+        Returns:
+            Presigned URL string
+        """
+        return self.s3.generate_presigned_url(
+            "get_object",
+            Params={
+                "Bucket": self.bucket,
+                "Key": image_key,
+                "ResponseContentDisposition": f'attachment; filename="{filename}"',
+                "ResponseContentType": "image/png",
+            },
+            ExpiresIn=expires_in,
+        )
+
     def get_cloudfront_url(self, s3_key: str) -> str:
         """
         Get CloudFront URL for an S3 key.

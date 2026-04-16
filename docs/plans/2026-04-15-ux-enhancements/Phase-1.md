@@ -277,11 +277,11 @@ Add `GET /download/{sessionId}/{model}/{iterationIndex}` that returns a JSON res
 
 ### Verification Checklist
 
-- [ ] `GET /download/{sessionId}/{model}/{iterationIndex}` returns a JSON body with `url` and `filename`
-- [ ] Presigned URL includes `Content-Disposition: attachment` header
-- [ ] 404 returned for nonexistent session, model, or iteration
-- [ ] 400 returned for invalid session ID format
-- [ ] Route is registered in `lambda_handler()`
+- [x] `GET /download/{sessionId}/{model}/{iterationIndex}` returns a JSON body with `url` and `filename`
+- [x] Presigned URL includes `Content-Disposition: attachment` header
+- [x] 404 returned for nonexistent session, model, or iteration
+- [x] 400 returned for invalid session ID format
+- [x] Route is registered in `lambda_handler()`
 
 ### Testing Instructions
 

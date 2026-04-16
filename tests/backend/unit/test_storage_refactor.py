@@ -251,6 +251,154 @@ class TestGalleryDetailFormats:
         assert "gemini" in models
 
 
+class TestGeneratePresignedDownloadUrl:
+    """Task 1.5: ImageStorage.generate_presigned_download_url."""
+
+    def test_generate_presigned_download_url(self, mock_s3):
+        """generate_presigned_download_url should return a presigned URL string."""
+        s3, bucket = mock_s3
+        storage = ImageStorage(s3, bucket, "cdn.example.com")
+
+        # Put an object so the key exists
+        key = "sessions/test-session/gemini-20250101-iter0.png"
+        s3.put_object(Bucket=bucket, Key=key, Body=b"image data")
+
+        url = storage.generate_presigned_download_url(key, "gemini-iteration-0.png")
+        assert isinstance(url, str)
+        assert bucket in url or key in url  # URL references the object
+
+
+class TestDownloadEndpoint:
+    """Task 1.5: GET /download/{sessionId}/{model}/{iterationIndex}."""
+
+    def _make_session(self, model, image_key, iteration_index=0):
+        return {
+            "models": {
+                model: {
+                    "iterationCount": 1,
+                    "iterations": [
+                        {
+                            "index": iteration_index,
+                            "status": "completed",
+                            "imageKey": image_key,
+                        }
+                    ],
+                }
+            }
+        }
+
+    def _make_event(self, session_id, model, iteration_index):
+        return {
+            "rawPath": f"/download/{session_id}/{model}/{iteration_index}",
+            "requestContext": {"http": {"method": "GET"}},
+        }
+
+    def test_download_returns_presigned_url(self, mock_s3):
+        """Download endpoint should return a JSON body with url and filename."""
+        s3, bucket = mock_s3
+        storage = ImageStorage(s3, bucket, "cdn.example.com")
+
+        image_key = "sessions/test-session/gemini-20250101-iter0.png"
+        s3.put_object(Bucket=bucket, Key=image_key, Body=b"image data")
+        session = self._make_session("gemini", image_key)
+
+        with (
+            patch("lambda_function.session_manager") as mock_sm,
+            patch("lambda_function.image_storage", storage),
+        ):
+            mock_sm.get_session.return_value = session
+            from lambda_function import handle_download
+
+            resp = handle_download(self._make_event("test-session", "gemini", "0"), "corr-id")
+
+        body = json.loads(resp["body"])
+        assert resp["statusCode"] == 200
+        assert "url" in body
+        assert body["filename"] == "gemini-iteration-0.png"
+
+    def test_download_missing_session_returns_404(self, mock_s3):
+        """Download with nonexistent session should return 404."""
+        s3, bucket = mock_s3
+
+        with (
+            patch("lambda_function.session_manager") as mock_sm,
+        ):
+            mock_sm.get_session.return_value = None
+            from lambda_function import handle_download
+
+            resp = handle_download(
+                self._make_event("nonexistent", "gemini", "0"), "corr-id"
+            )
+
+        assert resp["statusCode"] == 404
+
+    def test_download_missing_iteration_returns_404(self, mock_s3):
+        """Download with nonexistent iteration index should return 404."""
+        s3, bucket = mock_s3
+
+        session = self._make_session("gemini", "some-key.png", iteration_index=0)
+
+        with (
+            patch("lambda_function.session_manager") as mock_sm,
+        ):
+            mock_sm.get_session.return_value = session
+            from lambda_function import handle_download
+
+            # Ask for iteration 5 which doesn't exist
+            resp = handle_download(
+                self._make_event("test-session", "gemini", "5"), "corr-id"
+            )
+
+        assert resp["statusCode"] == 404
+
+    def test_download_invalid_session_id_returns_400(self, mock_s3):
+        """Download with invalid session ID format should return 400."""
+        with (
+            patch("lambda_function.session_manager"),
+        ):
+            from lambda_function import handle_download
+
+            resp = handle_download(
+                self._make_event("../../etc/passwd", "gemini", "0"), "corr-id"
+            )
+
+        assert resp["statusCode"] == 400
+
+    def test_download_invalid_model_returns_400(self, mock_s3):
+        """Download with invalid model name should return 400."""
+        with (
+            patch("lambda_function.session_manager"),
+        ):
+            from lambda_function import handle_download
+
+            resp = handle_download(
+                self._make_event("valid-session", "invalid-model", "0"), "corr-id"
+            )
+
+        assert resp["statusCode"] == 400
+
+
+class TestDownloadRouteRegistration:
+    """Task 1.5: Route registration in lambda_handler."""
+
+    def test_download_route_registered(self, mock_s3):
+        """GET /download/... should be routed to handle_download."""
+        with (
+            patch("lambda_function.session_manager") as mock_sm,
+            patch("lambda_function.handle_download") as mock_handler,
+        ):
+            mock_handler.return_value = {"statusCode": 200, "body": "{}"}
+            from lambda_function import lambda_handler
+
+            event = {
+                "rawPath": "/download/test-session/gemini/0",
+                "requestContext": {"http": {"method": "GET"}},
+                "headers": {},
+            }
+            lambda_handler(event, None)
+            mock_handler.assert_called_once()
+
+
 class TestLoadSourceImageFormats:
     """Task 1.3: _load_source_image handles both old JSON and new PNG formats."""
 

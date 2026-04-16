@@ -380,6 +380,8 @@ def lambda_handler(event: LambdaEvent, context: LambdaContext) -> ApiResponse:
             return handle_outpaint(event, correlation_id)
         elif path.startswith("/status/") and method == "GET":
             return handle_status(event, correlation_id)
+        elif path.startswith("/download/") and method == "GET":
+            return handle_download(event, correlation_id)
         elif path == "/enhance" and method == "POST":
             return handle_enhance(event, correlation_id)
         elif path == "/log" and method == "POST":
@@ -987,6 +989,65 @@ def handle_log_endpoint(event: LambdaEvent) -> ApiResponse:
     except Exception as e:
         StructuredLogger.error(
             f"Error in handle_log_endpoint: {e}",
+            traceback=traceback.format_exc(),
+        )
+        return response(500, {"error": "Internal server error"})
+
+
+def handle_download(event: LambdaEvent, correlation_id: str | None = None) -> ApiResponse:
+    """GET /download/{sessionId}/{model}/{iterationIndex} - Presigned download URL."""
+    try:
+        path = event.get("rawPath", event.get("path", ""))
+        parts = path.strip("/").split("/")
+        # Expected: ["download", sessionId, model, iterationIndex]
+        if len(parts) != 4:
+            return response(400, {"error": "Invalid download path"})
+
+        _, session_id, model_name, iter_idx_str = parts
+
+        # Validate session ID format
+        if not re.match(r"^[a-zA-Z0-9\-]{1,64}$", session_id):
+            return response(400, {"error": "Invalid session ID format"})
+
+        # Validate model
+        if model_name not in MODELS:
+            return response(400, {"error": f"Invalid model: {model_name}"})
+
+        # Validate iteration index
+        try:
+            iteration_index = int(iter_idx_str)
+            if iteration_index < 0:
+                raise ValueError
+        except (ValueError, TypeError):
+            return response(400, {"error": "Invalid iteration index"})
+
+        # Load session
+        session = session_manager.get_session(session_id)
+        if not session:
+            return response(404, {"error": f"Session {session_id} not found"})
+
+        # Find the iteration
+        model_data = session.get("models", {}).get(model_name) or {}
+        iterations = model_data.get("iterations", [])
+        target_iter = None
+        for it in iterations:
+            if it.get("index") == iteration_index and it.get("status") == "completed":
+                target_iter = it
+                break
+
+        if not target_iter or not target_iter.get("imageKey"):
+            return response(404, {"error": "Iteration not found or not completed"})
+
+        image_key = target_iter["imageKey"]
+        filename = f"{model_name}-iteration-{iteration_index}.png"
+
+        url = image_storage.generate_presigned_download_url(image_key, filename)
+        return response(200, {"url": url, "filename": filename})
+
+    except Exception as e:
+        StructuredLogger.error(
+            f"Error in handle_download: {e}",
+            correlation_id=correlation_id,
             traceback=traceback.format_exc(),
         )
         return response(500, {"error": "Internal server error"})
