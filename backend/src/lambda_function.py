@@ -1007,16 +1007,31 @@ def handle_gallery_detail(event: LambdaEvent, correlation_id: str | None = None)
         image_keys = image_storage.list_gallery_images(gallery_id)
 
         def _load_image(key):
-            metadata = image_storage.get_image_metadata(key)
-            if metadata:
-                return {
-                    "key": key,
-                    "url": image_storage.get_cloudfront_url(key),
-                    "model": metadata.get("model", "Unknown"),
-                    "prompt": metadata.get("prompt", ""),
-                    "timestamp": metadata.get("timestamp"),
-                }
-            return None
+            if key.endswith(".json"):
+                # Old format: metadata embedded in the JSON file
+                metadata = image_storage.get_image_metadata(key)
+                if metadata:
+                    return {
+                        "key": key,
+                        "url": image_storage.get_cloudfront_url(key),
+                        "model": metadata.get("model", "Unknown"),
+                        "prompt": metadata.get("prompt", ""),
+                        "timestamp": metadata.get("timestamp"),
+                    }
+                return None
+
+            # New .png format: parse model name from filename
+            # Key format: sessions/{galleryId}/{model}-{timestamp}{-iter{N}}.png
+            filename = key.rsplit("/", 1)[-1]  # e.g. "gemini-20250116100000-iter0.png"
+            name_part = filename.rsplit(".", 1)[0]  # strip .png
+            model_name = name_part.split("-", 1)[0] if "-" in name_part else "Unknown"
+            return {
+                "key": key,
+                "url": image_storage.get_cloudfront_url(key),
+                "model": model_name,
+                "prompt": "",
+                "timestamp": None,
+            }
 
         # Fetch image metadata in parallel (using dedicated gallery executor)
         images = []

@@ -179,6 +179,78 @@ class TestGetImageMetadataPng:
         assert result is None
 
 
+class TestGalleryDetailFormats:
+    """Task 1.4: Gallery detail handles both old JSON and new PNG formats."""
+
+    def test_gallery_detail_new_format(self, mock_s3):
+        """Gallery detail should return CloudFront URLs for .png files with parsed model names."""
+        s3, bucket = mock_s3
+        storage = ImageStorage(s3, bucket, "cdn.example.com")
+
+        gallery_id = "2025-11-16-10-00-00"
+        s3.put_object(
+            Bucket=bucket,
+            Key=f"sessions/{gallery_id}/gemini-20250116100000-iter0.png",
+            Body=base64.b64decode(SAMPLE_IMAGE_BASE64),
+            ContentType="image/png",
+        )
+
+        with (
+            patch("lambda_function.image_storage", storage),
+        ):
+            from lambda_function import handle_gallery_detail
+
+            event = {"rawPath": f"/gallery/{gallery_id}"}
+            resp = handle_gallery_detail(event, "test-corr-id")
+
+        body = json.loads(resp["body"])
+        assert resp["statusCode"] == 200
+        assert body["total"] == 1
+        img = body["images"][0]
+        assert img["url"].endswith(".png")
+        assert img["model"] == "gemini"
+
+    def test_gallery_detail_mixed_formats(self, mock_s3):
+        """Gallery detail should return images for both .json and .png files."""
+        s3, bucket = mock_s3
+        storage = ImageStorage(s3, bucket, "cdn.example.com")
+
+        gallery_id = "2025-11-16-10-00-00"
+        # Old format
+        s3.put_object(
+            Bucket=bucket,
+            Key=f"sessions/{gallery_id}/openai-20250116100000.json",
+            Body=json.dumps({
+                "output": SAMPLE_IMAGE_BASE64,
+                "model": "openai",
+                "prompt": "test",
+                "timestamp": "2025-01-16T10:00:00Z",
+            }),
+        )
+        # New format
+        s3.put_object(
+            Bucket=bucket,
+            Key=f"sessions/{gallery_id}/gemini-20250116100000-iter0.png",
+            Body=base64.b64decode(SAMPLE_IMAGE_BASE64),
+            ContentType="image/png",
+        )
+
+        with (
+            patch("lambda_function.image_storage", storage),
+        ):
+            from lambda_function import handle_gallery_detail
+
+            event = {"rawPath": f"/gallery/{gallery_id}"}
+            resp = handle_gallery_detail(event, "test-corr-id")
+
+        body = json.loads(resp["body"])
+        assert resp["statusCode"] == 200
+        assert body["total"] == 2
+        models = {img["model"] for img in body["images"]}
+        assert "openai" in models
+        assert "gemini" in models
+
+
 class TestLoadSourceImageFormats:
     """Task 1.3: _load_source_image handles both old JSON and new PNG formats."""
 

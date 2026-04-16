@@ -218,9 +218,9 @@ Update `handle_gallery_detail()` to work with the new image format. Gallery imag
 
 ### Verification Checklist
 
-- [ ] Gallery detail returns CloudFront URLs for both `.json` and `.png` images
-- [ ] Model name is correctly parsed from `.png` filenames
-- [ ] Gallery list preview URLs work for `.png` images
+- [x] Gallery detail returns CloudFront URLs for both `.json` and `.png` images
+- [x] Model name is correctly parsed from `.png` filenames
+- [x] Gallery list preview URLs work for `.png` images
 
 ### Testing Instructions
 
