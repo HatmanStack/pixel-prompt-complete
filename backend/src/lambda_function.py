@@ -44,6 +44,7 @@ from models.providers import (
 )
 from ops.metrics import emit_request_metric
 from ops.model_counters import ModelCounterService
+from prompts.repository import PromptHistoryRepository
 from users.quota import enforce_quota
 from users.repository import UserRepository
 from users.tier import TierContext, resolve_tier
@@ -91,6 +92,9 @@ _guest_service = get_guest_token_service() if config.guest_token_secret else Non
 
 # Per-model cost ceiling service
 _model_counter_service = ModelCounterService(_user_repo)
+
+# Prompt history repository
+_prompt_history = PromptHistoryRepository(config.users_table_name)
 
 # Content filter
 content_filter = ContentFilter()
@@ -390,6 +394,10 @@ def lambda_handler(event: LambdaEvent, context: LambdaContext) -> ApiResponse:
             return handle_gallery_list(event, correlation_id)
         elif path.startswith("/gallery/") and method == "GET":
             return handle_gallery_detail(event, correlation_id)
+        elif path == "/prompts/recent" and method == "GET":
+            return handle_prompts_recent(event, correlation_id)
+        elif path == "/prompts/history" and method == "GET":
+            return handle_prompts_history(event, correlation_id)
         elif path == "/me" and method == "GET":
             return handle_me(event, correlation_id)
         elif path == "/billing/checkout" and method == "POST":
@@ -477,6 +485,16 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
 
         # Create session
         session_id = session_manager.create_session(prompt, enabled_model_names)
+
+        # Record prompt history (best-effort, do not fail generation)
+        try:
+            user_id = validated.tier.user_id if validated.tier.is_authenticated else None
+            _prompt_history.record_prompt(user_id=user_id, prompt=prompt, session_id=session_id)
+        except Exception as e:
+            StructuredLogger.warning(
+                f"Failed to record prompt history: {e}",
+                correlation_id=correlation_id,
+            )
 
         StructuredLogger.info(
             f"Session {session_id} created",
@@ -1131,6 +1149,57 @@ def handle_gallery_detail(event: LambdaEvent, correlation_id: str | None = None)
             traceback=traceback.format_exc(),
         )
         return response(500, {"error": "Internal server error"})
+
+
+def handle_prompts_recent(event: LambdaEvent, correlation_id: str | None = None) -> ApiResponse:
+    """GET /prompts/recent - Global recent prompt feed (no auth required)."""
+    try:
+        params = event.get("queryStringParameters") or {}
+        limit = min(int(params.get("limit", 50)), 50)
+
+        items = _prompt_history.get_recent_feed(limit=limit)
+        return response(200, {"prompts": items, "total": len(items)})
+
+    except Exception as e:
+        StructuredLogger.error(
+            f"Error in handle_prompts_recent: {e}",
+            correlation_id=correlation_id,
+            traceback=traceback.format_exc(),
+        )
+        return response(500, error_responses.internal_server_error())
+
+
+def handle_prompts_history(event: LambdaEvent, correlation_id: str | None = None) -> ApiResponse:
+    """GET /prompts/history - Per-user prompt history (auth required)."""
+    if not config.auth_enabled:
+        return response(501, {"error": "GET /prompts/history not implemented"})
+
+    if _guest_service is None:
+        return response(500, error_responses.internal_server_error())
+
+    ctx = resolve_tier(event, _user_repo, _guest_service)
+    if not ctx.is_authenticated:
+        return response(401, error_responses.auth_required())
+
+    try:
+        params = event.get("queryStringParameters") or {}
+        limit = min(int(params.get("limit", 50)), 100)
+        q = params.get("q")
+
+        if q:
+            items = _prompt_history.search_user_history(ctx.user_id, q, limit=limit)
+        else:
+            items = _prompt_history.get_user_history(ctx.user_id, limit=limit)
+
+        return response(200, {"prompts": items, "total": len(items)})
+
+    except Exception as e:
+        StructuredLogger.error(
+            f"Error in handle_prompts_history: {e}",
+            correlation_id=correlation_id,
+            traceback=traceback.format_exc(),
+        )
+        return response(500, error_responses.internal_server_error())
 
 
 def handle_me(event: LambdaEvent, correlation_id: str | None = None) -> ApiResponse:

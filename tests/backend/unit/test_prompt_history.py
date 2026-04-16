@@ -1,8 +1,11 @@
 """
-Unit tests for prompt history DynamoDB repository.
+Unit tests for prompt history DynamoDB repository and API endpoints.
 """
 
+import json
+import os
 import time
+from unittest.mock import MagicMock, patch
 
 import boto3
 import pytest
@@ -10,34 +13,59 @@ from moto import mock_aws
 
 from prompts.repository import PromptHistoryRepository
 
+# Ensure env vars are set before any lambda_function import
+os.environ.setdefault("S3_BUCKET", "test-bucket")
+os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
+os.environ.setdefault("AWS_ACCESS_KEY_ID", "testing")
+os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testing")
+
+# Module-level moto mock for lambda_function import (must be before import)
+_aws_mock = mock_aws()
+_aws_mock.start()
+_s3 = boto3.client("s3", region_name="us-east-1")
+_s3.create_bucket(Bucket="test-bucket")
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _stop_module_mock():
+    yield
+    _aws_mock.stop()
+
+
+_REPO_TABLE_NAME = "test-prompt-history"
+
 
 @pytest.fixture
 def dynamodb_table():
-    """Create a mock DynamoDB table with the PromptHistoryIndex GSI."""
-    with mock_aws():
-        dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
-        table = dynamodb.create_table(
-            TableName="test-users",
-            KeySchema=[{"AttributeName": "userId", "KeyType": "HASH"}],
-            AttributeDefinitions=[
-                {"AttributeName": "userId", "AttributeType": "S"},
-                {"AttributeName": "promptOwner", "AttributeType": "S"},
-                {"AttributeName": "createdAt", "AttributeType": "N"},
-            ],
-            GlobalSecondaryIndexes=[
-                {
-                    "IndexName": "PromptHistoryIndex",
-                    "KeySchema": [
-                        {"AttributeName": "promptOwner", "KeyType": "HASH"},
-                        {"AttributeName": "createdAt", "KeyType": "RANGE"},
-                    ],
-                    "Projection": {"ProjectionType": "ALL"},
-                }
-            ],
-            BillingMode="PAY_PER_REQUEST",
-        )
-        table.meta.client.get_waiter("table_exists").wait(TableName="test-users")
-        yield dynamodb, "test-users"
+    """Create a mock DynamoDB table with the PromptHistoryIndex GSI.
+
+    Uses the module-level moto mock (started for lambda_function import).
+    Creates a uniquely-named table to avoid collisions, then deletes it after the test.
+    """
+    dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+    table = dynamodb.create_table(
+        TableName=_REPO_TABLE_NAME,
+        KeySchema=[{"AttributeName": "userId", "KeyType": "HASH"}],
+        AttributeDefinitions=[
+            {"AttributeName": "userId", "AttributeType": "S"},
+            {"AttributeName": "promptOwner", "AttributeType": "S"},
+            {"AttributeName": "createdAt", "AttributeType": "N"},
+        ],
+        GlobalSecondaryIndexes=[
+            {
+                "IndexName": "PromptHistoryIndex",
+                "KeySchema": [
+                    {"AttributeName": "promptOwner", "KeyType": "HASH"},
+                    {"AttributeName": "createdAt", "KeyType": "RANGE"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            }
+        ],
+        BillingMode="PAY_PER_REQUEST",
+    )
+    table.meta.client.get_waiter("table_exists").wait(TableName=_REPO_TABLE_NAME)
+    yield dynamodb, _REPO_TABLE_NAME
+    table.delete()
 
 
 @pytest.fixture
@@ -152,3 +180,187 @@ class TestPromptHistoryRepository:
         items = response["Items"]
         assert len(items) == 1
         assert "ttl" not in items[0]
+
+
+# --- Endpoint integration tests ---
+
+_MOD = "lambda_function"
+_TARGETS = [
+    f"{_MOD}.s3_client",
+    f"{_MOD}.session_manager",
+    f"{_MOD}.context_manager",
+    f"{_MOD}.image_storage",
+    f"{_MOD}.content_filter",
+    f"{_MOD}.prompt_enhancer",
+    f"{_MOD}._executor",
+    f"{_MOD}._gallery_executor",
+    f"{_MOD}.get_enabled_models",
+    f"{_MOD}.get_handler",
+    f"{_MOD}.get_iterate_handler",
+    f"{_MOD}.get_outpaint_handler",
+    f"{_MOD}.get_model",
+    f"{_MOD}.get_model_config_dict",
+    f"{_MOD}.handle_log",
+]
+
+
+def _make_event(method="POST", path="/generate", body=None, source_ip="1.2.3.4",
+                query_params=None):
+    event = {
+        "rawPath": path,
+        "requestContext": {"http": {"method": method, "sourceIp": source_ip}},
+        "headers": {},
+    }
+    if body is not None:
+        event["body"] = json.dumps(body)
+    if query_params:
+        event["queryStringParameters"] = query_params
+    return event
+
+
+def _body(resp):
+    return json.loads(resp["body"])
+
+
+@pytest.fixture
+def ep_mocks():
+    """Patch module-level singletons for endpoint tests."""
+    patchers = []
+    m = {}
+    for target in _TARGETS:
+        p = patch(target)
+        obj = p.start()
+        patchers.append(p)
+        m[target.split(".")[-1]] = obj
+
+    m["content_filter"].check_prompt.return_value = False
+    m["get_enabled_models"].return_value = []
+
+    yield m
+
+    for p in patchers:
+        p.stop()
+
+
+from lambda_function import lambda_handler  # noqa: E402
+
+
+class TestPromptEndpoints:
+    """Tests for /prompts/recent and /prompts/history endpoints."""
+
+    def test_prompts_recent_endpoint(self, ep_mocks):
+        """Call the recent endpoint, verify response structure."""
+        mock_repo = MagicMock()
+        mock_repo.get_recent_feed.return_value = [
+            {"prompt": "sunset", "sessionId": "s1", "createdAt": 1000},
+        ]
+
+        with patch("lambda_function._prompt_history", mock_repo):
+            resp = lambda_handler(
+                _make_event(method="GET", path="/prompts/recent"), None
+            )
+
+        assert resp["statusCode"] == 200
+        body = _body(resp)
+        assert "prompts" in body
+        assert len(body["prompts"]) == 1
+        assert body["prompts"][0]["prompt"] == "sunset"
+
+    def test_prompts_history_requires_auth(self, ep_mocks):
+        """Call /prompts/history without auth, verify 501 (auth disabled)."""
+        with patch("lambda_function.config") as mock_config:
+            mock_config.auth_enabled = False
+            mock_config.cors_allowed_origin = "*"
+            resp = lambda_handler(
+                _make_event(method="GET", path="/prompts/history"), None
+            )
+
+        assert resp["statusCode"] == 501
+
+    def test_prompts_recent_with_limit(self, ep_mocks):
+        """Call /prompts/recent with limit param."""
+        mock_repo = MagicMock()
+        mock_repo.get_recent_feed.return_value = []
+
+        with patch("lambda_function._prompt_history", mock_repo):
+            resp = lambda_handler(
+                _make_event(
+                    method="GET", path="/prompts/recent",
+                    query_params={"limit": "10"}
+                ),
+                None,
+            )
+
+        assert resp["statusCode"] == 200
+        mock_repo.get_recent_feed.assert_called_once_with(limit=10)
+
+    @patch("lambda_function.as_completed")
+    def test_generate_records_prompt(self, mock_as_completed, ep_mocks):
+        """Call handle_generate, verify prompt was recorded."""
+        fake_model = MagicMock(name="gemini", provider="google_gemini")
+        fake_model.name = "gemini"
+        ep_mocks["get_enabled_models"].return_value = [fake_model]
+        ep_mocks["session_manager"].create_session.return_value = "sess-rec"
+        ep_mocks["get_model_config_dict"].return_value = {"id": "gemini-model"}
+        ep_mocks["prompt_enhancer"].adapt_per_model.return_value = {
+            "gemini": "sunset"
+        }
+        ep_mocks["session_manager"].add_iteration.return_value = 0
+        ep_mocks["get_handler"].return_value = lambda c, p, params: {
+            "status": "success", "image": "b64",
+        }
+        ep_mocks["image_storage"].upload_image.return_value = "k"
+        ep_mocks["image_storage"].get_cloudfront_url.return_value = "https://cdn/k"
+
+        def submit_sync(fn, model):
+            result = fn(model)
+            future = MagicMock()
+            future.result.return_value = result
+            return future
+
+        ep_mocks["_executor"].submit.side_effect = submit_sync
+        mock_as_completed.side_effect = lambda futures: futures.keys()
+
+        mock_repo = MagicMock()
+        with patch("lambda_function._prompt_history", mock_repo):
+            resp = lambda_handler(_make_event(body={"prompt": "sunset"}), None)
+
+        assert resp["statusCode"] == 200
+        mock_repo.record_prompt.assert_called_once()
+        call_args = mock_repo.record_prompt.call_args
+        assert call_args.kwargs.get("prompt") == "sunset" or call_args[1].get("prompt") == "sunset"
+
+    @patch("lambda_function.as_completed")
+    def test_generate_survives_history_write_failure(self, mock_as_completed, ep_mocks):
+        """Mock record_prompt to raise, verify generation still succeeds."""
+        fake_model = MagicMock(name="gemini", provider="google_gemini")
+        fake_model.name = "gemini"
+        ep_mocks["get_enabled_models"].return_value = [fake_model]
+        ep_mocks["session_manager"].create_session.return_value = "sess-fail"
+        ep_mocks["get_model_config_dict"].return_value = {"id": "gemini-model"}
+        ep_mocks["prompt_enhancer"].adapt_per_model.return_value = {
+            "gemini": "sunset"
+        }
+        ep_mocks["session_manager"].add_iteration.return_value = 0
+        ep_mocks["get_handler"].return_value = lambda c, p, params: {
+            "status": "success", "image": "b64",
+        }
+        ep_mocks["image_storage"].upload_image.return_value = "k"
+        ep_mocks["image_storage"].get_cloudfront_url.return_value = "https://cdn/k"
+
+        def submit_sync(fn, model):
+            result = fn(model)
+            future = MagicMock()
+            future.result.return_value = result
+            return future
+
+        ep_mocks["_executor"].submit.side_effect = submit_sync
+        mock_as_completed.side_effect = lambda futures: futures.keys()
+
+        mock_repo = MagicMock()
+        mock_repo.record_prompt.side_effect = Exception("DynamoDB error")
+        with patch("lambda_function._prompt_history", mock_repo):
+            resp = lambda_handler(_make_event(body={"prompt": "sunset"}), None)
+
+        # Generation should still succeed despite history write failure
+        assert resp["statusCode"] == 200
