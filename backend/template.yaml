@@ -595,6 +595,22 @@ Resources:
             Path: /gallery/{sessionId}
             Method: GET
             ApiId: !Ref HttpApi
+        PromptRecentApi:
+          Type: HttpApi
+          Properties:
+            Path: /prompts/recent
+            Method: GET
+            ApiId: !Ref HttpApi
+        PromptHistoryApi:
+          Type: HttpApi
+          Properties:
+            Path: /prompts/history
+            Method: GET
+            ApiId: !Ref HttpApi
+            Auth: !If
+              - AuthEnabledCondition
+              - Authorizer: CognitoJwt
+              - {}
         # Admin API routes (JWT auth gated)
         AdminUsersListApi:
           Type: HttpApi
@@ -788,9 +804,22 @@ Resources:
       AttributeDefinitions:
         - AttributeName: userId
           AttributeType: S
+        - AttributeName: promptOwner
+          AttributeType: S
+        - AttributeName: createdAt
+          AttributeType: N
       KeySchema:
         - AttributeName: userId
           KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: PromptHistoryIndex
+          KeySchema:
+            - AttributeName: promptOwner
+              KeyType: HASH
+            - AttributeName: createdAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
       TimeToLiveSpecification:
         AttributeName: ttl
         Enabled: true
