@@ -335,9 +335,9 @@ Run: `PYTHONPATH=backend/src pytest tests/backend/unit/ -v --cov=backend/src --c
 
 ### Verification Checklist
 
-- [ ] All existing tests pass with the new storage format
-- [ ] No test hardcodes `.json` image keys (except backward compat tests)
-- [ ] Coverage stays above 80%
+- [x] All existing tests pass with the new storage format
+- [x] No test hardcodes `.json` image keys (except backward compat tests)
+- [x] Coverage stays above 80%
 
 ### Testing Instructions
 

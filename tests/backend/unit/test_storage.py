@@ -122,7 +122,7 @@ class TestImageStorage:
         assert retrieved['prompt'] == 'test'
 
     def test_upload_image_to_sessions(self, mock_s3):
-        """Test uploading image to S3 under sessions prefix"""
+        """Test uploading image to S3 under sessions prefix as raw PNG"""
         s3_client, bucket_name = mock_s3
 
         storage = ImageStorage(s3_client, bucket_name, 'https://cdn.example.com')
@@ -138,13 +138,15 @@ class TestImageStorage:
         )
 
         assert key is not None
+        assert key.endswith('.png')
         assert 'sessions/' in key
         assert 'flux' in key
         assert 'iter0' in key
 
-        # Verify image was uploaded
+        # Verify image was uploaded as raw bytes
         response = s3_client.get_object(Bucket=bucket_name, Key=key)
         assert response is not None
+        assert response['ContentType'] == 'image/png'
 
     def test_upload_image_without_iteration(self, mock_s3):
         """Test uploading image without iteration index"""
@@ -241,8 +243,8 @@ class TestImageStorage:
             mock_logger.error.assert_called_once()
             assert 'Failed to list gallery images' in mock_logger.error.call_args[0][0]
 
-    def test_list_gallery_images_filters_json_only(self, mock_s3):
-        """Test that list_gallery_images only returns .json files."""
+    def test_list_gallery_images_includes_json_and_png(self, mock_s3):
+        """Test that list_gallery_images returns both .json and .png files."""
         s3_client, bucket_name = mock_s3
         gallery_id = '2025-11-16-10-00-00'
 
@@ -256,12 +258,19 @@ class TestImageStorage:
             Key=f'sessions/{gallery_id}/image.png',
             Body=b'binary data'
         )
+        # Non-image files should be excluded
+        s3_client.put_object(
+            Bucket=bucket_name,
+            Key=f'sessions/{gallery_id}/notes.txt',
+            Body=b'some text'
+        )
 
         storage = ImageStorage(s3_client, bucket_name, 'https://cdn.example.com')
         images = storage.list_gallery_images(gallery_id)
 
-        assert len(images) == 1
-        assert images[0].endswith('.json')
+        assert len(images) == 2
+        extensions = {img.rsplit('.', 1)[-1] for img in images}
+        assert extensions == {'json', 'png'}
 
 
 class TestGalleryHelpers:

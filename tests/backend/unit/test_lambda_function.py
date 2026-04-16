@@ -142,19 +142,19 @@ class TestRouting:
                 "gemini": {
                     "iterationCount": 1,
                     "iterations": [
-                        {"index": 0, "status": "completed", "imageKey": "k"},
+                        {"index": 0, "status": "completed", "imageKey": "k.png"},
                     ],
                 }
             }
         }
         mocks["session_manager"].add_iteration.return_value = 1
-        mocks["image_storage"].get_image.return_value = {"output": "b64"}
+        mocks["image_storage"].get_image_bytes.return_value = b"\x89PNG"
         mocks["context_manager"].get_context_for_iteration.return_value = []
         mocks["get_model"].return_value = MagicMock(provider="google_gemini")
         mocks["get_model_config_dict"].return_value = {"id": "gemini-2.5-flash-image"}
         mocks["get_iterate_handler"].return_value = lambda c, s, p, ctx: {"status": "success", "image": "new"}
-        mocks["image_storage"].upload_image.return_value = "k2"
-        mocks["image_storage"].get_cloudfront_url.return_value = "https://cdn/k2"
+        mocks["image_storage"].upload_image.return_value = "k2.png"
+        mocks["image_storage"].get_cloudfront_url.return_value = "https://cdn/k2.png"
 
         resp = lambda_handler(_make_event(path="/iterate", body={"sessionId": "s1", "model": "gemini", "prompt": "more"}), None)
         assert resp["statusCode"] == 200
@@ -166,18 +166,18 @@ class TestRouting:
                 "gemini": {
                     "iterationCount": 0,
                     "iterations": [
-                        {"index": 0, "status": "completed", "imageKey": "k"},
+                        {"index": 0, "status": "completed", "imageKey": "k.png"},
                     ],
                 }
             }
         }
         mocks["session_manager"].add_iteration.return_value = 1
-        mocks["image_storage"].get_image.return_value = {"output": "b64"}
+        mocks["image_storage"].get_image_bytes.return_value = b"\x89PNG"
         mocks["get_model"].return_value = MagicMock(provider="google_gemini")
         mocks["get_model_config_dict"].return_value = {"id": "gemini-2.5-flash-image"}
         mocks["get_outpaint_handler"].return_value = lambda c, s, pr, p: {"status": "success", "image": "out"}
-        mocks["image_storage"].upload_image.return_value = "k3"
-        mocks["image_storage"].get_cloudfront_url.return_value = "https://cdn/k3"
+        mocks["image_storage"].upload_image.return_value = "k3.png"
+        mocks["image_storage"].get_cloudfront_url.return_value = "https://cdn/k3.png"
 
         resp = lambda_handler(_make_event(path="/outpaint", body={"sessionId": "s1", "model": "gemini", "preset": "16:9", "prompt": "expand"}), None)
         assert resp["statusCode"] == 200
