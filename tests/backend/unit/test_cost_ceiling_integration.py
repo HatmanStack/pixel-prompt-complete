@@ -28,6 +28,7 @@ def test_capped_model_skipped_in_response():
     with (
         patch("config.auth_enabled", True),
         patch("lambda_function._guest_service", MagicMock()),
+        patch("lambda_function._user_repo") as mock_user_repo,
         patch("lambda_function.resolve_tier") as mock_tier,
         patch("lambda_function.enforce_quota") as mock_quota,
         patch("lambda_function.content_filter") as mock_cf,
@@ -38,6 +39,8 @@ def test_capped_model_skipped_in_response():
     ):
         from users.tier import TierContext
         from users.quota import QuotaResult
+
+        mock_user_repo.get_model_runtime_config.return_value = None
 
         mock_tier.return_value = TierContext(
             tier="paid", user_id="u1", email=None,
@@ -88,6 +91,7 @@ def test_all_models_capped_returns_429():
     with (
         patch("config.auth_enabled", True),
         patch("lambda_function._guest_service", MagicMock()),
+        patch("lambda_function._user_repo") as mock_user_repo,
         patch("lambda_function.resolve_tier") as mock_tier,
         patch("lambda_function.enforce_quota") as mock_quota,
         patch("lambda_function.content_filter") as mock_cf,
@@ -96,6 +100,8 @@ def test_all_models_capped_returns_429():
     ):
         from users.tier import TierContext
         from users.quota import QuotaResult
+
+        mock_user_repo.get_model_runtime_config.return_value = None
 
         mock_tier.return_value = TierContext(
             tier="paid", user_id="u1", email=None,

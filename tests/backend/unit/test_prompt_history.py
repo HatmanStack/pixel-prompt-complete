@@ -19,19 +19,6 @@ os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 os.environ.setdefault("AWS_ACCESS_KEY_ID", "testing")
 os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testing")
 
-# Module-level moto mock for lambda_function import (must be before import)
-_aws_mock = mock_aws()
-_aws_mock.start()
-_s3 = boto3.client("s3", region_name="us-east-1")
-_s3.create_bucket(Bucket="test-bucket")
-
-
-@pytest.fixture(autouse=True, scope="module")
-def _stop_module_mock():
-    yield
-    _aws_mock.stop()
-
-
 _REPO_TABLE_NAME = "test-prompt-history"
 
 
@@ -39,33 +26,32 @@ _REPO_TABLE_NAME = "test-prompt-history"
 def dynamodb_table():
     """Create a mock DynamoDB table with the PromptHistoryIndex GSI.
 
-    Uses the module-level moto mock (started for lambda_function import).
-    Creates a uniquely-named table to avoid collisions, then deletes it after the test.
+    Each test gets its own mock_aws context so no state leaks between tests or modules.
     """
-    dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
-    table = dynamodb.create_table(
-        TableName=_REPO_TABLE_NAME,
-        KeySchema=[{"AttributeName": "userId", "KeyType": "HASH"}],
-        AttributeDefinitions=[
-            {"AttributeName": "userId", "AttributeType": "S"},
-            {"AttributeName": "promptOwner", "AttributeType": "S"},
-            {"AttributeName": "createdAt", "AttributeType": "N"},
-        ],
-        GlobalSecondaryIndexes=[
-            {
-                "IndexName": "PromptHistoryIndex",
-                "KeySchema": [
-                    {"AttributeName": "promptOwner", "KeyType": "HASH"},
-                    {"AttributeName": "createdAt", "KeyType": "RANGE"},
-                ],
-                "Projection": {"ProjectionType": "ALL"},
-            }
-        ],
-        BillingMode="PAY_PER_REQUEST",
-    )
-    table.meta.client.get_waiter("table_exists").wait(TableName=_REPO_TABLE_NAME)
-    yield dynamodb, _REPO_TABLE_NAME
-    table.delete()
+    with mock_aws():
+        dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+        table = dynamodb.create_table(
+            TableName=_REPO_TABLE_NAME,
+            KeySchema=[{"AttributeName": "userId", "KeyType": "HASH"}],
+            AttributeDefinitions=[
+                {"AttributeName": "userId", "AttributeType": "S"},
+                {"AttributeName": "promptOwner", "AttributeType": "S"},
+                {"AttributeName": "createdAt", "AttributeType": "N"},
+            ],
+            GlobalSecondaryIndexes=[
+                {
+                    "IndexName": "PromptHistoryIndex",
+                    "KeySchema": [
+                        {"AttributeName": "promptOwner", "KeyType": "HASH"},
+                        {"AttributeName": "createdAt", "KeyType": "RANGE"},
+                    ],
+                    "Projection": {"ProjectionType": "ALL"},
+                }
+            ],
+            BillingMode="PAY_PER_REQUEST",
+        )
+        table.meta.client.get_waiter("table_exists").wait(TableName=_REPO_TABLE_NAME)
+        yield dynamodb, _REPO_TABLE_NAME
 
 
 @pytest.fixture
@@ -224,25 +210,36 @@ def _body(resp):
 
 @pytest.fixture
 def ep_mocks():
-    """Patch module-level singletons for endpoint tests."""
-    patchers = []
-    m = {}
-    for target in _TARGETS:
-        p = patch(target)
-        obj = p.start()
-        patchers.append(p)
-        m[target.split(".")[-1]] = obj
+    """Patch module-level singletons for endpoint tests.
 
-    m["content_filter"].check_prompt.return_value = False
-    m["get_enabled_models"].return_value = []
+    Wraps in mock_aws so lambda_function import (if not yet cached) can create
+    boto3 clients without hitting real AWS.
+    """
+    with mock_aws():
+        # Ensure the S3 bucket exists for lambda_function module-level init
+        boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="test-bucket")
 
-    yield m
+        patchers = []
+        m = {}
+        for target in _TARGETS:
+            p = patch(target)
+            obj = p.start()
+            patchers.append(p)
+            m[target.split(".")[-1]] = obj
 
-    for p in patchers:
-        p.stop()
+        m["content_filter"].check_prompt.return_value = False
+        m["get_enabled_models"].return_value = []
+
+        yield m
+
+        for p in patchers:
+            p.stop()
 
 
-from lambda_function import lambda_handler  # noqa: E402
+def _get_lambda_handler():
+    """Import lambda_handler inside mock_aws to avoid module-level AWS calls leaking."""
+    from lambda_function import lambda_handler
+    return lambda_handler
 
 
 class TestPromptEndpoints:
@@ -250,6 +247,7 @@ class TestPromptEndpoints:
 
     def test_prompts_recent_endpoint(self, ep_mocks):
         """Call the recent endpoint, verify response structure."""
+        lambda_handler = _get_lambda_handler()
         mock_repo = MagicMock()
         mock_repo.get_recent_feed.return_value = [
             {"prompt": "sunset", "sessionId": "s1", "createdAt": 1000},
@@ -268,6 +266,7 @@ class TestPromptEndpoints:
 
     def test_prompts_history_requires_auth(self, ep_mocks):
         """Call /prompts/history without auth, verify 501 (auth disabled)."""
+        lambda_handler = _get_lambda_handler()
         with patch("lambda_function.config") as mock_config:
             mock_config.auth_enabled = False
             mock_config.cors_allowed_origin = "*"
@@ -279,6 +278,7 @@ class TestPromptEndpoints:
 
     def test_prompts_recent_with_limit(self, ep_mocks):
         """Call /prompts/recent with limit param."""
+        lambda_handler = _get_lambda_handler()
         mock_repo = MagicMock()
         mock_repo.get_recent_feed.return_value = []
 
@@ -297,6 +297,7 @@ class TestPromptEndpoints:
     @patch("lambda_function.as_completed")
     def test_generate_records_prompt(self, mock_as_completed, ep_mocks):
         """Call handle_generate, verify prompt was recorded."""
+        lambda_handler = _get_lambda_handler()
         fake_model = MagicMock(name="gemini", provider="google_gemini")
         fake_model.name = "gemini"
         ep_mocks["get_enabled_models"].return_value = [fake_model]
@@ -333,6 +334,7 @@ class TestPromptEndpoints:
     @patch("lambda_function.as_completed")
     def test_generate_survives_history_write_failure(self, mock_as_completed, ep_mocks):
         """Mock record_prompt to raise, verify generation still succeeds."""
+        lambda_handler = _get_lambda_handler()
         fake_model = MagicMock(name="gemini", provider="google_gemini")
         fake_model.name = "gemini"
         ep_mocks["get_enabled_models"].return_value = [fake_model]

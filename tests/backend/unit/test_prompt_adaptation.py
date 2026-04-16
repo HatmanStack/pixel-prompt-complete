@@ -185,19 +185,6 @@ class TestAdaptPerModel:
 
 # --- Integration tests for Task 2.2: adaptation wired into generate flow ---
 
-# Module-level moto mock for lambda_function import
-_aws_mock = mock_aws()
-_aws_mock.start()
-_s3 = boto3.client("s3", region_name="us-east-1")
-_s3.create_bucket(Bucket="test-bucket")
-
-
-@pytest.fixture(autouse=True, scope="module")
-def _stop_module_mock():
-    yield
-    _aws_mock.stop()
-
-
 _MOD = "lambda_function"
 _TARGETS = [
     f"{_MOD}.s3_client",
@@ -235,24 +222,36 @@ def _body(resp):
 
 @pytest.fixture
 def gen_mocks():
-    patchers = []
-    m = {}
-    for target in _TARGETS:
-        p = patch(target)
-        obj = p.start()
-        patchers.append(p)
-        m[target.split(".")[-1]] = obj
+    """Patch module-level singletons for generate integration tests.
 
-    m["content_filter"].check_prompt.return_value = False
-    m["get_enabled_models"].return_value = []
+    Wraps in mock_aws so lambda_function import (if not yet cached) can create
+    boto3 clients without hitting real AWS, and so no moto state leaks between
+    test modules.
+    """
+    with mock_aws():
+        boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="test-bucket")
 
-    yield m
+        patchers = []
+        m = {}
+        for target in _TARGETS:
+            p = patch(target)
+            obj = p.start()
+            patchers.append(p)
+            m[target.split(".")[-1]] = obj
 
-    for p in patchers:
-        p.stop()
+        m["content_filter"].check_prompt.return_value = False
+        m["get_enabled_models"].return_value = []
+
+        yield m
+
+        for p in patchers:
+            p.stop()
 
 
-from lambda_function import lambda_handler  # noqa: E402
+def _get_lambda_handler():
+    """Import lambda_handler (cached after first import)."""
+    from lambda_function import lambda_handler
+    return lambda_handler
 
 
 class TestGenerateAdaptation:
@@ -294,6 +293,7 @@ class TestGenerateAdaptation:
         gen_mocks["_executor"].submit.side_effect = submit_sync
         mock_as_completed.side_effect = lambda futures: futures.keys()
 
+        lambda_handler = _get_lambda_handler()
         resp = lambda_handler(_make_event(body={"prompt": "sunset"}), None)
         assert resp["statusCode"] == 200
 
@@ -304,6 +304,7 @@ class TestGenerateAdaptation:
     @patch("lambda_function.as_completed")
     def test_generate_stores_adapted_prompt_in_session(self, mock_as_completed, gen_mocks):
         """add_iteration is called with adapted_prompt kwarg."""
+        lambda_handler = _get_lambda_handler()
         fake_model = MagicMock(name="gemini", provider="google_gemini")
         fake_model.name = "gemini"
         gen_mocks["get_enabled_models"].return_value = [fake_model]
@@ -340,6 +341,7 @@ class TestGenerateAdaptation:
     @patch("lambda_function.as_completed")
     def test_generate_context_uses_original_prompt(self, mock_as_completed, gen_mocks):
         """Context window entries use the original prompt, not the adapted one."""
+        lambda_handler = _get_lambda_handler()
         fake_model = MagicMock(name="gemini", provider="google_gemini")
         fake_model.name = "gemini"
         gen_mocks["get_enabled_models"].return_value = [fake_model]
@@ -379,6 +381,7 @@ class TestGenerateAdaptation:
     @patch("lambda_function.as_completed")
     def test_generate_adaptation_failure_uses_original(self, mock_as_completed, gen_mocks):
         """When adapt_per_model raises, all handlers receive the original prompt."""
+        lambda_handler = _get_lambda_handler()
         fake_model = MagicMock(name="gemini", provider="google_gemini")
         fake_model.name = "gemini"
         gen_mocks["get_enabled_models"].return_value = [fake_model]

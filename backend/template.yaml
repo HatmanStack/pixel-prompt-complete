@@ -611,6 +611,12 @@ Resources:
               - AuthEnabledCondition
               - Authorizer: CognitoJwt
               - {}
+        DownloadApi:
+          Type: HttpApi
+          Properties:
+            Path: /download/{sessionId}/{model}/{iterationIndex}
+            Method: GET
+            ApiId: !Ref HttpApi
         # Admin API routes (JWT auth gated)
         AdminUsersListApi:
           Type: HttpApi
