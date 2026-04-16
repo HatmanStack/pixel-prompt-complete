@@ -131,3 +131,73 @@ describe('IterationCard - Download Button', () => {
     });
   });
 });
+
+describe('IterationCard - Adapted Prompt', () => {
+  it('shows adapted prompt toggle when adaptedPrompt differs from prompt', () => {
+    render(
+      <IterationCard
+        model={defaultModel}
+        iteration={completedIteration({
+          prompt: 'A beautiful landscape',
+          adaptedPrompt: 'A photorealistic beautiful landscape with vivid colors',
+        })}
+        sessionId="test-session-123"
+      />,
+    );
+
+    expect(screen.getByText('Show adapted')).toBeDefined();
+  });
+
+  it('hides adapted prompt toggle when adaptedPrompt is absent', () => {
+    render(
+      <IterationCard
+        model={defaultModel}
+        iteration={completedIteration({ adaptedPrompt: undefined })}
+        sessionId="test-session-123"
+      />,
+    );
+
+    expect(screen.queryByText('Show adapted')).toBeNull();
+  });
+
+  it('hides adapted prompt toggle when adaptedPrompt equals prompt', () => {
+    render(
+      <IterationCard
+        model={defaultModel}
+        iteration={completedIteration({
+          prompt: 'A beautiful landscape',
+          adaptedPrompt: 'A beautiful landscape',
+        })}
+        sessionId="test-session-123"
+      />,
+    );
+
+    expect(screen.queryByText('Show adapted')).toBeNull();
+  });
+
+  it('toggles adapted prompt text on click', () => {
+    const adaptedText = 'A photorealistic beautiful landscape with vivid colors';
+    render(
+      <IterationCard
+        model={defaultModel}
+        iteration={completedIteration({
+          prompt: 'A beautiful landscape',
+          adaptedPrompt: adaptedText,
+        })}
+        sessionId="test-session-123"
+      />,
+    );
+
+    // Initially collapsed
+    expect(screen.queryByText(adaptedText)).toBeNull();
+
+    // Click to expand
+    fireEvent.click(screen.getByText('Show adapted'));
+    expect(screen.getByText(adaptedText)).toBeDefined();
+    expect(screen.getByText('Hide adapted')).toBeDefined();
+
+    // Click to collapse
+    fireEvent.click(screen.getByText('Hide adapted'));
+    expect(screen.queryByText(adaptedText)).toBeNull();
+  });
+});

@@ -100,6 +100,10 @@ export const IterationCard: FC<IterationCardProps> = memo(
     const isClickable = iteration.status === 'completed' && iteration.imageUrl;
     const isCompleted = iteration.status === 'completed';
     const [isDownloading, setIsDownloading] = useState(false);
+    const [isAdaptedExpanded, setIsAdaptedExpanded] = useState(false);
+
+    const hasAdaptedPrompt =
+      !!iteration.adaptedPrompt && iteration.adaptedPrompt !== iteration.prompt;
 
     const handleDownload = async (e: React.MouseEvent) => {
       e.stopPropagation();
@@ -214,6 +218,24 @@ export const IterationCard: FC<IterationCardProps> = memo(
               </button>
             )}
           </div>
+          {hasAdaptedPrompt && (
+            <div className="mt-1">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsAdaptedExpanded(!isAdaptedExpanded);
+                }}
+                className="text-xs text-blue-500 dark:text-blue-400 hover:underline bg-transparent border-none cursor-pointer p-0"
+              >
+                {isAdaptedExpanded ? 'Hide adapted' : 'Show adapted'}
+              </button>
+              {isAdaptedExpanded && (
+                <p className="text-xs text-gray-400 dark:text-gray-500 italic mt-1 break-words">
+                  {iteration.adaptedPrompt}
+                </p>
+              )}
+            </div>
+          )}
         </div>
       </div>
     );
