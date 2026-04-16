@@ -359,10 +359,10 @@ test(storage): update existing tests for raw PNG storage format
 
 ## Phase Verification
 
-- [ ] All tasks committed (1.1 through 1.6)
-- [ ] `ruff check backend/src/` returns clean
-- [ ] `PYTHONPATH=backend/src pytest tests/backend/unit/ -v --cov=backend/src --cov-fail-under=80` passes
-- [ ] New sessions store `.png` files in S3 (not `.json` for images)
-- [ ] Old sessions with `.json` image files still work for iterate, outpaint, and gallery
-- [ ] `GET /download/{sessionId}/{model}/{iterationIndex}` returns presigned URLs
-- [ ] `sam build` succeeds
+- [x] All tasks committed (1.1 through 1.6)
+- [x] `ruff check backend/src/` returns clean
+- [x] `PYTHONPATH=backend/src pytest tests/backend/unit/ -v --cov=backend/src --cov-fail-under=80` passes
+- [x] New sessions store `.png` files in S3 (not `.json` for images)
+- [x] Old sessions with `.json` image files still work for iterate, outpaint, and gallery
+- [x] `GET /download/{sessionId}/{model}/{iterationIndex}` returns presigned URLs
+- [x] `sam build` succeeds
