@@ -10,6 +10,7 @@ export const useUIStore = create<UIStore>((set) => ({
   // Initial state
   isModalOpen: false,
   modalContent: null,
+  isCompareOpen: false,
   isMuted: false,
   volume: 0.5,
   soundsLoaded: false,
@@ -21,6 +22,10 @@ export const useUIStore = create<UIStore>((set) => ({
   openModal: (content: string) => set({ isModalOpen: true, modalContent: content }),
 
   closeModal: () => set({ isModalOpen: false, modalContent: null }),
+
+  // Compare modal actions
+  openCompare: () => set({ isCompareOpen: true }),
+  closeCompare: () => set({ isCompareOpen: false }),
 
   // Sound actions
   toggleMute: () => set((state) => ({ isMuted: !state.isMuted })),
