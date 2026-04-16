@@ -19,6 +19,7 @@ import PromptEnhancer from './PromptEnhancer';
 import GenerateButton from './GenerateButton';
 import { ModelColumn } from './ModelColumn';
 import { MultiIterateInput } from './MultiIterateInput';
+import { PromptHistory } from './PromptHistory';
 import GalleryBrowser from '@/components/gallery/GalleryBrowser';
 import { ErrorBoundary } from '@/components/features/errors/ErrorBoundary';
 import { ImageModal } from '@/components/features/generation/ImageModal';
@@ -356,6 +357,11 @@ export const GenerationPanel: FC = () => {
         {/* Progress */}
         {isGenerating && <ProgressBar session={currentSession} />}
       </section>
+
+      {/* Prompt History */}
+      <ErrorBoundary componentName="PromptHistory">
+        <PromptHistory />
+      </ErrorBoundary>
 
       {/* 4-Column Layout */}
       <section
