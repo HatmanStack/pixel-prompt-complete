@@ -20,6 +20,9 @@ export type {
   SessionGalleryListResponse,
   SessionGalleryDetailResponse,
   SelectionState,
+  PromptHistoryItem,
+  PromptHistoryResponse,
+  DownloadResponse,
   ApiError,
 } from './api';
 
