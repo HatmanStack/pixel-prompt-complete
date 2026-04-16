@@ -167,9 +167,9 @@ Update `_load_source_image()` to read raw image bytes from S3 for new-format ima
 
 ### Verification Checklist
 
-- [ ] `_load_source_image()` returns base64 string for both old and new format images
-- [ ] Iterate and outpaint work with new-format source images
-- [ ] Old sessions with JSON-format images still work for iterate/outpaint
+- [x] `_load_source_image()` returns base64 string for both old and new format images
+- [x] Iterate and outpaint work with new-format source images
+- [x] Old sessions with JSON-format images still work for iterate/outpaint
 
 ### Testing Instructions
 

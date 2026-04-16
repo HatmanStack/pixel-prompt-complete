@@ -4,6 +4,7 @@ Routes API requests to appropriate handlers for image generation,
 iteration, outpainting, and session status.
 """
 
+import base64
 import json
 import re
 import time
@@ -641,6 +642,14 @@ def _load_source_image(
         source_image_key = max(completed, key=lambda x: x["index"]).get("imageKey")
     if not source_image_key:
         return None, response(400, {"error": f"No source image for {model_name}"})
+
+    # For new .png keys: read raw bytes directly (skip JSON parse overhead)
+    # For old .json keys: read JSON and extract the base64 output field
+    if not source_image_key.endswith(".json"):
+        raw_bytes = image_storage.get_image_bytes(source_image_key)
+        if not raw_bytes:
+            return None, response(500, {"error": "Failed to load source image"})
+        return (base64.b64encode(raw_bytes).decode("utf-8"), iteration_count), None
 
     source_data = image_storage.get_image(source_image_key)
     if not source_data or not source_data.get("output"):

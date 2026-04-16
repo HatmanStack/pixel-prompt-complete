@@ -4,6 +4,7 @@ Tests for the storage refactor: raw PNG images in S3 instead of base64 JSON.
 
 import base64
 import json
+from unittest.mock import patch
 
 import pytest
 
@@ -176,3 +177,79 @@ class TestGetImageMetadataPng:
 
         result = storage.get_image_metadata(key)
         assert result is None
+
+
+class TestLoadSourceImageFormats:
+    """Task 1.3: _load_source_image handles both old JSON and new PNG formats."""
+
+    def _make_session(self, image_key, iteration_count=1):
+        return {
+            "models": {
+                "gemini": {
+                    "iterationCount": iteration_count,
+                    "iterations": [
+                        {
+                            "index": 0,
+                            "status": "completed",
+                            "imageKey": image_key,
+                        }
+                    ],
+                }
+            }
+        }
+
+    def test_load_source_image_new_format(self, mock_s3):
+        """_load_source_image should return base64 for .png image keys."""
+        s3, bucket = mock_s3
+        storage = ImageStorage(s3, bucket, "cdn.example.com")
+
+        raw_bytes = base64.b64decode(SAMPLE_IMAGE_BASE64)
+        png_key = "sessions/test-session/gemini-20250101-iter0.png"
+        s3.put_object(Bucket=bucket, Key=png_key, Body=raw_bytes, ContentType="image/png")
+
+        session = self._make_session(png_key)
+
+        with (
+            patch("lambda_function.session_manager") as mock_sm,
+            patch("lambda_function.image_storage", storage),
+        ):
+            mock_sm.get_session.return_value = session
+            from lambda_function import _load_source_image
+
+            result, err = _load_source_image("test-session", "gemini")
+
+        assert err is None
+        assert result is not None
+        source_b64, count = result
+        assert source_b64 == SAMPLE_IMAGE_BASE64
+        assert count == 1
+
+    def test_load_source_image_old_format(self, mock_s3):
+        """_load_source_image should return base64 for .json image keys."""
+        s3, bucket = mock_s3
+        storage = ImageStorage(s3, bucket, "cdn.example.com")
+
+        json_key = "sessions/test-session/gemini-20250101-iter0.json"
+        metadata = {
+            "output": SAMPLE_IMAGE_BASE64,
+            "model": "gemini",
+            "prompt": "test",
+        }
+        s3.put_object(Bucket=bucket, Key=json_key, Body=json.dumps(metadata))
+
+        session = self._make_session(json_key)
+
+        with (
+            patch("lambda_function.session_manager") as mock_sm,
+            patch("lambda_function.image_storage", storage),
+        ):
+            mock_sm.get_session.return_value = session
+            from lambda_function import _load_source_image
+
+            result, err = _load_source_image("test-session", "gemini")
+
+        assert err is None
+        assert result is not None
+        source_b64, count = result
+        assert source_b64 == SAMPLE_IMAGE_BASE64
+        assert count == 1
