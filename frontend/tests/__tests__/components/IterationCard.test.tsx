@@ -3,7 +3,7 @@
  * Covers download button, adapted prompt display
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { IterationCard } from '../../../src/components/generation/IterationCard';
 import type { Iteration, ModelName } from '../../../src/types/api';
@@ -89,7 +89,6 @@ describe('IterationCard - Download Button', () => {
       filename: 'gemini-1.png',
     });
 
-    const clickSpy = vi.fn();
     const createElementSpy = vi.spyOn(document, 'createElement');
     const appendChildSpy = vi.spyOn(document.body, 'appendChild');
     const removeChildSpy = vi.spyOn(document.body, 'removeChild');
