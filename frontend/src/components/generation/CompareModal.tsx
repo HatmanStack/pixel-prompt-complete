@@ -126,6 +126,7 @@ export const CompareModal: FC<CompareModalProps> = ({ models, session, onClose }
       >
         {/* Close button */}
         <button
+          type="button"
           ref={closeButtonRef}
           onClick={onClose}
           className="absolute top-3 right-3 z-10 w-8 h-8 flex items-center justify-center rounded-full bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors border-none cursor-pointer"

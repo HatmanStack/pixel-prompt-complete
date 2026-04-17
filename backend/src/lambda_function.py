@@ -1121,7 +1121,7 @@ def handle_gallery_detail(event: LambdaEvent, correlation_id: str | None = None)
             filename = key.rsplit("/", 1)[-1]  # e.g. "gemini-20250116100000-iter0.png"
             name_part = filename.rsplit(".", 1)[0]  # strip .png
             model_name = "Unknown"
-            for m in MODELS:
+            for m in sorted(MODELS, key=len, reverse=True):
                 if name_part.startswith(m + "-") or name_part == m:
                     model_name = m
                     break
@@ -1169,7 +1169,7 @@ def handle_prompts_recent(event: LambdaEvent, correlation_id: str | None = None)
     """GET /prompts/recent - Global recent prompt feed (no auth required)."""
     params = event.get("queryStringParameters") or {}
     try:
-        limit = min(int(params.get("limit", 50)), 50)
+        limit = max(1, min(int(params.get("limit", 50)), 50))
     except (ValueError, TypeError):
         return response(400, {"error": "Invalid limit parameter"})
 
@@ -1200,10 +1200,10 @@ def handle_prompts_history(event: LambdaEvent, correlation_id: str | None = None
 
     params = event.get("queryStringParameters") or {}
     try:
-        limit = min(int(params.get("limit", 50)), 100)
+        limit = max(1, min(int(params.get("limit", 50)), 100))
     except (ValueError, TypeError):
         return response(400, {"error": "Invalid limit parameter"})
-    q = params.get("q")
+    q = (params.get("q") or "")[:200] or None
 
     try:
         if q:

@@ -182,6 +182,7 @@ export const IterationCard: FC<IterationCardProps> = memo(
             </span>
             {isCompleted && sessionId && (
               <button
+                type="button"
                 onClick={handleDownload}
                 disabled={isDownloading}
                 className="flex-shrink-0 p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
@@ -229,6 +230,7 @@ export const IterationCard: FC<IterationCardProps> = memo(
           {hasAdaptedPrompt && (
             <div className="mt-1">
               <button
+                type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   setIsAdaptedExpanded(!isAdaptedExpanded);

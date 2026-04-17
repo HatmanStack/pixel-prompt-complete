@@ -147,6 +147,7 @@ export const PromptHistory: FC = () => {
   return (
     <div className="border border-gray-200 dark:border-gray-700 rounded-lg">
       <button
+        type="button"
         onClick={() => setIsOpen(!isOpen)}
         className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors border-none cursor-pointer"
       >
@@ -167,6 +168,7 @@ export const PromptHistory: FC = () => {
           {/* Tabs */}
           <div className="flex gap-2 mb-3">
             <button
+              type="button"
               onClick={() => setActiveTab('recent')}
               className={`text-xs px-2 py-1 rounded border-none cursor-pointer transition-colors ${
                 activeTab === 'recent'
@@ -178,6 +180,7 @@ export const PromptHistory: FC = () => {
             </button>
             {isAuthenticated && (
               <button
+                type="button"
                 onClick={() => setActiveTab('history')}
                 className={`text-xs px-2 py-1 rounded border-none cursor-pointer transition-colors ${
                   activeTab === 'history'
