@@ -3,7 +3,7 @@
  * Full-screen comparison of 2-4 model images with iteration picker
  */
 
-import { useState, useEffect, useRef, useCallback, type FC } from 'react';
+import { useState, useEffect, useRef, useCallback, type FC, type MouseEvent } from 'react';
 import type { ModelName, Session } from '@/types';
 import { MODEL_DISPLAY_NAMES } from '@/types';
 
@@ -101,7 +101,7 @@ export const CompareModal: FC<CompareModalProps> = ({ models, session, onClose }
     closeButtonRef.current?.focus();
   }, []);
 
-  const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
+  const handleBackdropClick = (e: MouseEvent<HTMLDivElement>) => {
     if (e.target === e.currentTarget) {
       onClose();
     }

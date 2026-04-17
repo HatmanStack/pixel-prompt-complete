@@ -57,8 +57,10 @@ describe('IterationCard', () => {
       const onExpand = vi.fn();
       render(<IterationCard {...defaultProps} onExpand={onExpand} />);
 
+      // The image area is now a native <button>, which is inherently keyboard
+      // accessible: browsers fire click on Enter/Space. Verify the handler wires up.
       const card = screen.getByRole('button');
-      fireEvent.keyDown(card, { key: 'Enter' });
+      fireEvent.click(card);
       expect(onExpand).toHaveBeenCalledTimes(1);
     });
   });
