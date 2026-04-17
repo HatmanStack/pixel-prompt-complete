@@ -1026,6 +1026,9 @@ def handle_download(event: LambdaEvent, correlation_id: str | None = None) -> Ap
     try:
         path = event.get("rawPath", event.get("path", ""))
         parts = path.strip("/").split("/")
+        # Strip stage prefix if present (e.g. Prod/download/... -> download/...)
+        if len(parts) == 5 and parts[0] not in ("download",):
+            parts = parts[1:]
         # Expected: ["download", sessionId, model, iterationIndex]
         if len(parts) != 4:
             return response(400, {"error": "Invalid download path"})

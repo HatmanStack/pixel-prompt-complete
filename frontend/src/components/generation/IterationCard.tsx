@@ -128,50 +128,38 @@ export const IterationCard: FC<IterationCardProps> = memo(
     };
 
     return (
-      <div
-        className={`
-        relative rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700
-        bg-white dark:bg-gray-800 shadow-sm
-        ${isClickable ? 'cursor-pointer hover:shadow-md transition-shadow' : ''}
-      `}
-        onClick={isClickable ? onExpand : undefined}
-        role={isClickable ? 'button' : undefined}
-        tabIndex={isClickable ? 0 : undefined}
-        onKeyDown={
-          isClickable
-            ? (e) => {
-                if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) {
-                  e.preventDefault();
-                  onExpand?.();
-                }
-              }
-            : undefined
-        }
-        aria-label={
-          isClickable
-            ? `View ${MODEL_DISPLAY_NAMES[model]} iteration ${iteration.index}`
-            : undefined
-        }
-      >
-        {/* Status indicator badge */}
-        <div className="absolute top-2 left-2 z-10">
-          <StatusBadge status={iteration.status} />
-        </div>
-
-        {/* Image or placeholder */}
-        {iteration.status === 'completed' && iteration.imageUrl ? (
-          <img
-            src={iteration.imageUrl}
-            alt={`${MODEL_DISPLAY_NAMES[model]} iteration ${iteration.index}`}
-            className="w-full aspect-square object-cover"
-            loading="lazy"
-          />
-        ) : iteration.status === 'loading' ? (
-          <LoadingSkeleton width="100%" height="auto" className="aspect-square" />
-        ) : iteration.status === 'error' ? (
-          <ErrorState error={iteration.error} />
+      <div className="relative rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm">
+        {/* Clickable image area — separate from footer to avoid nested interactive elements */}
+        {isClickable ? (
+          <button
+            type="button"
+            onClick={() => onExpand?.()}
+            className="relative w-full border-none p-0 bg-transparent cursor-pointer hover:opacity-95 transition-opacity"
+            aria-label={`View ${MODEL_DISPLAY_NAMES[model]} iteration ${iteration.index}`}
+          >
+            <div className="absolute top-2 left-2 z-10">
+              <StatusBadge status={iteration.status} />
+            </div>
+            <img
+              src={iteration.imageUrl}
+              alt={`${MODEL_DISPLAY_NAMES[model]} iteration ${iteration.index}`}
+              className="w-full aspect-square object-cover"
+              loading="lazy"
+            />
+          </button>
         ) : (
-          <PendingPlaceholder />
+          <div className="relative">
+            <div className="absolute top-2 left-2 z-10">
+              <StatusBadge status={iteration.status} />
+            </div>
+            {iteration.status === 'loading' ? (
+              <LoadingSkeleton width="100%" height="auto" className="aspect-square" />
+            ) : iteration.status === 'error' ? (
+              <ErrorState error={iteration.error} />
+            ) : (
+              <PendingPlaceholder />
+            )}
+          </div>
         )}
 
         {/* Iteration number, prompt preview, and download */}

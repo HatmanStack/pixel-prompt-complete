@@ -129,6 +129,13 @@ export const PromptHistory: FC = () => {
     };
   }, [isOpen, activeTab, isAuthenticated, searchQuery]);
 
+  // Reset to recent tab if user signs out while on history tab
+  useEffect(() => {
+    if (!isAuthenticated && activeTab === 'history') {
+      setActiveTab('recent');
+    }
+  }, [isAuthenticated, activeTab]);
+
   // Clean up debounce timer on unmount
   useEffect(() => {
     return () => {

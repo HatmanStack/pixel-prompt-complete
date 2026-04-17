@@ -155,7 +155,7 @@ export interface SelectionState {
 export interface PromptHistoryItem {
   prompt: string;
   sessionId: string;
-  createdAt: number;
+  createdAt: number; // Unix epoch in seconds (not milliseconds)
 }
 
 export interface PromptHistoryResponse {
