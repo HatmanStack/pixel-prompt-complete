@@ -152,20 +152,22 @@ class TestPromptHistoryRepository:
         expected_ttl = int(time.time()) + 7 * 86400
         assert abs(items[0]["ttl"] - expected_ttl) < 10  # within 10 seconds
 
-    def test_user_items_have_no_ttl(self, repo, dynamodb_table):
-        """Record a prompt with user_id, verify user item has no ttl."""
-        repo.record_prompt(user_id="user-no-ttl", prompt="persist forever", session_id="s1")
+    def test_user_items_have_ttl(self, repo, dynamodb_table):
+        """Record a prompt with user_id, verify user item has 90-day ttl."""
+        repo.record_prompt(user_id="user-ttl", prompt="expires in 90d", session_id="s1")
 
         dynamodb, table_name = dynamodb_table
         table = dynamodb.Table(table_name)
 
         response = table.scan(
             FilterExpression="promptOwner = :po",
-            ExpressionAttributeValues={":po": "USER#user-no-ttl"},
+            ExpressionAttributeValues={":po": "USER#user-ttl"},
         )
         items = response["Items"]
         assert len(items) == 1
-        assert "ttl" not in items[0]
+        assert "ttl" in items[0]
+        # TTL should be ~90 days from now
+        assert int(items[0]["ttl"]) > int(items[0]["createdAt"]) + 80 * 86400
 
 
 # --- Endpoint integration tests ---

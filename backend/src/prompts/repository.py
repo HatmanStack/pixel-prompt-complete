@@ -18,6 +18,8 @@ import boto3
 
 # TTL for global feed items: 7 days
 _FEED_TTL_SECONDS = 7 * 86400
+# TTL for per-user prompt history items: 90 days
+_USER_HISTORY_TTL_SECONDS = 90 * 86400
 
 # For search: read a larger window then filter client-side,
 # since DynamoDB Limit applies before FilterExpression.
@@ -76,6 +78,7 @@ class PromptHistoryRepository:
                 "createdAt": now,
                 "prompt": prompt,
                 "sessionId": session_id,
+                "ttl": now + _USER_HISTORY_TTL_SECONDS,
             }
             items_to_write.append(user_item)
 

@@ -150,8 +150,12 @@ export const CompareModal: FC<CompareModalProps> = ({ models, session, onClose }
             if (!column) return null;
 
             const completedIterations = column.iterations.filter((i) => i.status === 'completed');
-            const selectedIndex = selectedIterations[model];
-            const selectedIteration = column.iterations.find((i) => i.index === selectedIndex);
+            const fallbackIndex =
+              completedIterations.length > 0
+                ? completedIterations[completedIterations.length - 1].index
+                : undefined;
+            const resolvedIndex = selectedIterations[model] ?? fallbackIndex;
+            const selectedIteration = column.iterations.find((i) => i.index === resolvedIndex);
             const imageUrl = selectedIteration?.imageUrl;
 
             return (
@@ -170,7 +174,7 @@ export const CompareModal: FC<CompareModalProps> = ({ models, session, onClose }
                   {imageUrl ? (
                     <img
                       src={imageUrl}
-                      alt={`${MODEL_DISPLAY_NAMES[model]} iteration ${selectedIndex}`}
+                      alt={`${MODEL_DISPLAY_NAMES[model]} iteration ${resolvedIndex}`}
                       className="w-full h-full object-cover"
                     />
                   ) : (
@@ -181,7 +185,7 @@ export const CompareModal: FC<CompareModalProps> = ({ models, session, onClose }
                 {/* Iteration picker */}
                 {completedIterations.length > 1 && (
                   <select
-                    value={selectedIndex}
+                    value={resolvedIndex}
                     onChange={(e) => handleIterationChange(model, Number(e.target.value))}
                     className="text-xs px-2 py-1 rounded border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300"
                     aria-label={`Select iteration for ${MODEL_DISPLAY_NAMES[model]}`}

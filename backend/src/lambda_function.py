@@ -941,8 +941,11 @@ def handle_gallery_list(event: LambdaEvent, correlation_id: str | None = None) -
             images = image_storage.list_gallery_images(folder)
 
             preview_url = None
-            if images:
-                preview_url = image_storage.get_cloudfront_url(images[0])
+            # Prefer .png images for previews (browsers can't render .json)
+            png_images = [img for img in images if img.endswith(".png")]
+            preview_candidate = png_images[0] if png_images else (images[0] if images else None)
+            if preview_candidate:
+                preview_url = image_storage.get_cloudfront_url(preview_candidate)
 
             try:
                 timestamp_str = f"{folder[:10]}T{folder[11:13]}:{folder[14:16]}:{folder[17:19]}Z"
@@ -1063,6 +1066,14 @@ def handle_download(event: LambdaEvent, correlation_id: str | None = None) -> Ap
             return response(404, {"error": "Iteration not found or not completed"})
 
         image_key = target_iter["imageKey"]
+
+        # Legacy JSON-format images cannot be served as PNG downloads
+        if image_key.endswith(".json"):
+            return response(
+                410,
+                {"error": "This iteration uses a legacy format that cannot be downloaded directly"},
+            )
+
         filename = f"{model_name}-iteration-{iteration_index}.png"
 
         url = image_storage.generate_presigned_download_url(image_key, filename)

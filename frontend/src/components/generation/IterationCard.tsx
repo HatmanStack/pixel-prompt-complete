@@ -6,6 +6,7 @@
 import { memo, useState, type FC } from 'react';
 import { LoadingSkeleton } from '@/components/common/LoadingSkeleton';
 import { getDownloadUrl } from '@/api/client';
+import { useToastStore } from '@/stores/useToastStore';
 import type { ModelName, Iteration } from '@/types';
 import { MODEL_DISPLAY_NAMES } from '@/types';
 
@@ -119,7 +120,8 @@ export const IterationCard: FC<IterationCardProps> = memo(
         a.click();
         document.body.removeChild(a);
       } catch (err) {
-        console.error('Download failed:', err);
+        const msg = err instanceof Error ? err.message : 'Download failed';
+        useToastStore.getState().error(msg);
       } finally {
         setIsDownloading(false);
       }

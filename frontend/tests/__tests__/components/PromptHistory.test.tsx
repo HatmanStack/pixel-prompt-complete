@@ -51,14 +51,14 @@ describe('PromptHistory', () => {
     mockIsAuthenticated = false;
     mockGetRecentPrompts.mockResolvedValue({
       prompts: [
-        { prompt: 'A sunset over mountains', sessionId: 's1', createdAt: Date.now() - 3600000 },
-        { prompt: 'A cat in space', sessionId: 's2', createdAt: Date.now() - 7200000 },
+        { prompt: 'A sunset over mountains', sessionId: 's1', createdAt: Math.floor((Date.now() - 3600000) / 1000) },
+        { prompt: 'A cat in space', sessionId: 's2', createdAt: Math.floor((Date.now() - 7200000) / 1000) },
       ],
       total: 2,
     });
     mockGetPromptHistory.mockResolvedValue({
       prompts: [
-        { prompt: 'My saved prompt', sessionId: 's3', createdAt: Date.now() - 1800000 },
+        { prompt: 'My saved prompt', sessionId: 's3', createdAt: Math.floor((Date.now() - 1800000) / 1000) },
       ],
       total: 1,
     });

@@ -195,6 +195,7 @@ export const PromptHistory: FC = () => {
             <input
               type="text"
               placeholder="Search prompts..."
+              aria-label="Search prompts"
               onChange={(e) => handleSearchChange(e.target.value)}
               className="w-full px-2 py-1 mb-2 text-xs border border-gray-200 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300"
             />

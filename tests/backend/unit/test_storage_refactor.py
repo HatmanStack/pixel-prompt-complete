@@ -375,6 +375,27 @@ class TestDownloadEndpoint:
         assert resp["statusCode"] == 400
 
 
+    def test_download_legacy_json_returns_410(self, mock_s3):
+        """Download with legacy .json imageKey should return 410."""
+        s3, bucket = mock_s3
+
+        session = self._make_session("gemini", "sessions/test/gemini-20250101.json")
+
+        with (
+            patch("lambda_function.session_manager") as mock_sm,
+        ):
+            mock_sm.get_session.return_value = session
+            from lambda_function import handle_download
+
+            resp = handle_download(
+                self._make_event("test-session", "gemini", "0"), "corr-id"
+            )
+
+        assert resp["statusCode"] == 410
+        body = json.loads(resp["body"])
+        assert "legacy" in body["error"].lower()
+
+
 class TestDownloadRouteRegistration:
     """Task 1.5: Route registration in lambda_handler."""
 
