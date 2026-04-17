@@ -135,6 +135,13 @@ export const API_ROUTES = {
   BILLING_CHECKOUT: '/billing/checkout',
   BILLING_PORTAL: '/billing/portal',
 
+  // Prompt history endpoints
+  PROMPTS_RECENT: '/prompts/recent',
+  PROMPTS_HISTORY: '/prompts/history',
+
+  // Download endpoint
+  DOWNLOAD: '/download',
+
   // Admin endpoints
   ADMIN_USERS: '/admin/users',
   ADMIN_MODELS: '/admin/models',

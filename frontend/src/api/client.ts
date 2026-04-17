@@ -25,6 +25,8 @@ import type {
   ModelName,
   SessionGalleryListResponse,
   SessionGalleryDetailResponse,
+  PromptHistoryResponse,
+  DownloadResponse,
 } from '@/types';
 
 interface FetchOptions extends RequestInit {
@@ -301,6 +303,40 @@ export async function enhancePrompt(prompt: string): Promise<EnhanceResponse> {
     method: 'POST',
     body: JSON.stringify({ prompt }),
   });
+}
+
+/**
+ * Get recent prompts (global feed)
+ */
+export async function getRecentPrompts(limit = 20): Promise<PromptHistoryResponse> {
+  return apiFetch<PromptHistoryResponse>(`${API_ROUTES.PROMPTS_RECENT}?limit=${limit}`, {
+    method: 'GET',
+  });
+}
+
+/**
+ * Get prompt history for authenticated user
+ */
+export async function getPromptHistory(limit = 20, query?: string): Promise<PromptHistoryResponse> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (query) params.set('q', query);
+  return apiFetch<PromptHistoryResponse>(`${API_ROUTES.PROMPTS_HISTORY}?${params.toString()}`, {
+    method: 'GET',
+  });
+}
+
+/**
+ * Get presigned download URL for an iteration's image
+ */
+export async function getDownloadUrl(
+  sessionId: string,
+  model: ModelName,
+  iterationIndex: number,
+): Promise<DownloadResponse> {
+  return apiFetch<DownloadResponse>(
+    `${API_ROUTES.DOWNLOAD}/${encodeURIComponent(sessionId)}/${encodeURIComponent(model)}/${iterationIndex}`,
+    { method: 'GET' },
+  );
 }
 
 // Export configuration for testing

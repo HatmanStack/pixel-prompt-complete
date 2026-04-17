@@ -21,6 +21,9 @@ vi.mock('../../../src/api/config', () => ({
     ENHANCE: '/enhance',
     GALLERY_LIST: '/gallery/list',
     GALLERY_DETAIL: '/gallery',
+    PROMPTS_RECENT: '/prompts/recent',
+    PROMPTS_HISTORY: '/prompts/history',
+    DOWNLOAD: '/download',
   },
   REQUEST_TIMEOUT: 30000,
   RETRY_CONFIG: {
@@ -37,6 +40,9 @@ import {
   getSessionStatus,
   iterateMultiple,
   enhancePrompt,
+  getRecentPrompts,
+  getPromptHistory,
+  getDownloadUrl,
 } from '../../../src/api/client';
 
 // Helper to create a mock Response
@@ -393,6 +399,78 @@ describe('API Client', () => {
       await vi.advanceTimersByTimeAsync(10_000);
       await p;
       expect(warnSpy).toHaveBeenCalled();
+    });
+  });
+
+  // =============================================
+  // getRecentPrompts
+  // =============================================
+  describe('getRecentPrompts', () => {
+    it('sends GET to /prompts/recent with limit param', async () => {
+      const responseBody = { prompts: [{ prompt: 'test', sessionId: 's1', createdAt: 1000 }], total: 1 };
+      fetchMock.mockResolvedValueOnce(mockResponse(responseBody, 200));
+
+      const result = await getRecentPrompts(20);
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [url, options] = fetchMock.mock.calls[0];
+      expect(url).toBe('https://api.test.com/prompts/recent?limit=20');
+      expect(options.method).toBe('GET');
+      expect(result).toEqual(responseBody);
+    });
+
+    it('uses default limit when not specified', async () => {
+      const responseBody = { prompts: [], total: 0 };
+      fetchMock.mockResolvedValueOnce(mockResponse(responseBody, 200));
+
+      await getRecentPrompts();
+
+      const [url] = fetchMock.mock.calls[0];
+      expect(url).toBe('https://api.test.com/prompts/recent?limit=20');
+    });
+  });
+
+  // =============================================
+  // getPromptHistory
+  // =============================================
+  describe('getPromptHistory', () => {
+    it('sends GET to /prompts/history with limit', async () => {
+      const responseBody = { prompts: [], total: 0 };
+      fetchMock.mockResolvedValueOnce(mockResponse(responseBody, 200));
+
+      await getPromptHistory(10);
+
+      const [url, options] = fetchMock.mock.calls[0];
+      expect(url).toBe('https://api.test.com/prompts/history?limit=10');
+      expect(options.method).toBe('GET');
+    });
+
+    it('includes query param when provided', async () => {
+      const responseBody = { prompts: [], total: 0 };
+      fetchMock.mockResolvedValueOnce(mockResponse(responseBody, 200));
+
+      await getPromptHistory(10, 'landscape');
+
+      const [url] = fetchMock.mock.calls[0];
+      expect(url).toBe('https://api.test.com/prompts/history?limit=10&q=landscape');
+    });
+  });
+
+  // =============================================
+  // getDownloadUrl
+  // =============================================
+  describe('getDownloadUrl', () => {
+    it('sends GET to /download/{sessionId}/{model}/{iterationIndex}', async () => {
+      const responseBody = { url: 'https://s3.example.com/presigned', filename: 'gemini-1.png' };
+      fetchMock.mockResolvedValueOnce(mockResponse(responseBody, 200));
+
+      const result = await getDownloadUrl('session-123', 'gemini', 2);
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [url, options] = fetchMock.mock.calls[0];
+      expect(url).toBe('https://api.test.com/download/session-123/gemini/2');
+      expect(options.method).toBe('GET');
+      expect(result).toEqual(responseBody);
     });
   });
 });

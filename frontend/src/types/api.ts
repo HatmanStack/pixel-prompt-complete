@@ -36,6 +36,7 @@ export interface Iteration {
   index: number;
   status: IterationStatus;
   prompt: string;
+  adaptedPrompt?: string;
   imageUrl?: string;
   error?: string;
   completedAt?: string;
@@ -145,6 +146,26 @@ export interface SessionGalleryDetailResponse {
 export interface SelectionState {
   selectedModels: Set<ModelName>;
   isMultiSelectMode: boolean;
+}
+
+// ====================
+// Prompt History / Download Types
+// ====================
+
+export interface PromptHistoryItem {
+  prompt: string;
+  sessionId: string;
+  createdAt: number; // Unix epoch in seconds (not milliseconds)
+}
+
+export interface PromptHistoryResponse {
+  prompts: PromptHistoryItem[];
+  total: number;
+}
+
+export interface DownloadResponse {
+  url: string;
+  filename: string;
 }
 
 // ====================

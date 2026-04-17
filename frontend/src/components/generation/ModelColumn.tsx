@@ -10,6 +10,7 @@ import { OutpaintControls } from './OutpaintControls';
 import type { ModelName, ModelColumn as ModelColumnType, Iteration } from '@/types';
 import { MODEL_DISPLAY_NAMES } from '@/types';
 import { useIteration } from '@/hooks/useIteration';
+import { useAppStore } from '@/stores/useAppStore';
 import { MAX_ITERATIONS } from '@/config/constants';
 
 interface ModelColumnProps {
@@ -100,6 +101,7 @@ export const ModelColumn: FC<ModelColumnProps> = memo(
     onFocusToggle,
   }) => {
     const { isAtLimit } = useIteration(model);
+    const sessionId = useAppStore((s) => s.currentSession?.sessionId);
 
     // When no focus is active, use the default min-w/max-w. When focus is active
     // the parent wrapper sets widths, so we let the column fill its container.
@@ -178,6 +180,7 @@ export const ModelColumn: FC<ModelColumnProps> = memo(
                   <IterationCard
                     model={model}
                     iteration={latest}
+                    sessionId={sessionId}
                     onExpand={() => onImageExpand?.(model, latest)}
                   />
                 </div>
@@ -189,6 +192,7 @@ export const ModelColumn: FC<ModelColumnProps> = memo(
                 <IterationCard
                   model={model}
                   iteration={iteration}
+                  sessionId={sessionId}
                   onExpand={() => onImageExpand?.(model, iteration)}
                 />
               </div>

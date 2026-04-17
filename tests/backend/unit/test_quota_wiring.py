@@ -143,13 +143,13 @@ def test_free_user_exceeds_refine_quota_429(wired):
             "models": {
                 "gemini": {
                     "iterationCount": 0,
-                    "iterations": [{"index": 0, "status": "completed", "imageKey": "k"}],
+                    "iterations": [{"index": 0, "status": "completed", "imageKey": "k.png"}],
                 }
             }
         }
         sm.add_iteration.return_value = 1
-        img.get_image.return_value = {"output": "b64"}
-        img.upload_image.return_value = "k2"
+        img.get_image_bytes.return_value = b"\x89PNG"
+        img.upload_image.return_value = "k2.png"
         img.get_cloudfront_url.return_value = "u"
         cm.get_context_for_iteration.return_value = []
         gm.return_value = MagicMock(provider="google_gemini")

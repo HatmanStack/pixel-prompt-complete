@@ -52,6 +52,9 @@ export interface UIState {
   isModalOpen: boolean;
   modalContent: string | null;
 
+  // Compare modal state
+  isCompareOpen: boolean;
+
   // Sound state
   isMuted: boolean;
   volume: number;
@@ -69,6 +72,10 @@ export interface UIActions {
   // Modal actions
   openModal: (content: string) => void;
   closeModal: () => void;
+
+  // Compare modal actions
+  openCompare: () => void;
+  closeCompare: () => void;
 
   // Sound actions
   toggleMute: () => void;

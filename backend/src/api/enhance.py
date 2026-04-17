@@ -2,13 +2,16 @@
 Prompt Enhancement module for Pixel Prompt Complete.
 
 Uses configured LLM to expand short prompts into detailed image generation prompts.
+Includes per-model prompt adaptation for tailored image generation.
 """
 
+import json
 import warnings
 from typing import Any, Optional
 
 from config import prompt_model_api_key, prompt_model_id, prompt_model_provider
 from utils.clients import get_genai_client, get_openai_client
+from utils.logger import StructuredLogger
 
 # Per-model parameter configuration. First match wins.
 _MODEL_PARAMS: dict[str, dict[str, Any]] = {
@@ -62,6 +65,102 @@ Example transformations:
 - "sunset" → "A breathtaking sunset over a calm ocean, with vibrant orange and purple hues reflecting on the water, dramatic cloud formations, cinematic composition with silhouetted palm trees in the foreground"
 
 Enhance the following prompt:"""
+
+        # System prompt for per-model prompt adaptation
+        self.adaptation_system_prompt = (
+            "You are an expert at optimizing image generation prompts for specific AI models.\n"
+            "Given a user's prompt, produce a JSON object with model-specific variants.\n"
+            "Keys must match exactly: {model_keys}.\n"
+            "Each variant should be 2-4 sentences tailored to the model's strengths:\n"
+            "- gemini: strong at photorealism, natural scenes, complex multi-element compositions\n"
+            "- nova: artistic styles, illustrations, stylized imagery\n"
+            "- openai: precise composition, typography, literal interpretation of instructions\n"
+            "- firefly: clean commercial imagery, product photography, design assets\n"
+            "Keep the core intent identical across all variants.\n"
+            "Return ONLY valid JSON. No markdown, no explanation."
+        )
+
+    def adapt_per_model(self, prompt: str, enabled_models: list[str]) -> dict[str, str]:
+        """Adapt a prompt for each enabled model's strengths via a single LLM call.
+
+        Args:
+            prompt: The user's original prompt.
+            enabled_models: List of enabled model names (e.g. ["gemini", "nova"]).
+
+        Returns:
+            Dict mapping model name to adapted prompt string.
+            Falls back to original prompt for all models on any failure.
+        """
+        fallback = {m: prompt for m in enabled_models}
+
+        if not self.prompt_model:
+            return fallback
+
+        try:
+            provider = self.prompt_model["provider"]
+            api_key = self.prompt_model.get("api_key", "")
+            if not api_key:
+                return fallback
+
+            model_keys = ", ".join(enabled_models)
+            system_prompt = self.adaptation_system_prompt.format(model_keys=model_keys)
+
+            if provider == "google_gemini":
+                client = get_genai_client(api_key)
+                generation_config: dict[str, Any] = {
+                    "response_mime_type": "application/json",
+                }
+                response = client.models.generate_content(
+                    model=self.prompt_model["id"],
+                    contents=f"{system_prompt}\n\n{prompt}",
+                    config=generation_config,
+                )
+                if not response.candidates or len(response.candidates) == 0:
+                    raise ValueError("Gemini returned empty candidates")
+                response_text = response.candidates[0].content.parts[0].text.strip()
+            else:
+                client_kwargs: dict[str, Any] = {"timeout": 10.0}
+                if "base_url" in self.prompt_model:
+                    client_kwargs["base_url"] = self.prompt_model["base_url"]
+                client = get_openai_client(api_key, **client_kwargs)
+
+                model_id = self.prompt_model["id"]
+                completion_params: dict[str, Any] = {
+                    "model": model_id,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": prompt},
+                    ],
+                    **_get_model_params(model_id),
+                }
+                if "gpt-4" in model_id or "gpt-5" in model_id:
+                    completion_params["response_format"] = {"type": "json_object"}
+
+                response = client.chat.completions.create(**completion_params)
+                response_text = response.choices[0].message.content
+                if response_text:
+                    response_text = response_text.strip()
+                else:
+                    raise ValueError("Empty response from LLM")
+
+            parsed = json.loads(response_text)
+            if not isinstance(parsed, dict):
+                raise ValueError("LLM response is not a JSON object")
+
+            # Build result: use adapted prompt if available, otherwise original
+            result = {}
+            for model in enabled_models:
+                value = parsed.get(model)
+                if isinstance(value, str) and value.strip():
+                    result[model] = value
+                else:
+                    result[model] = prompt
+
+            return result
+
+        except Exception as e:
+            StructuredLogger.warning(f"Prompt adaptation failed: {e}")
+            return fallback
 
     def enhance(self, prompt: str) -> Optional[str]:
         """

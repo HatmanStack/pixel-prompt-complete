@@ -19,9 +19,11 @@ import PromptEnhancer from './PromptEnhancer';
 import GenerateButton from './GenerateButton';
 import { ModelColumn } from './ModelColumn';
 import { MultiIterateInput } from './MultiIterateInput';
+import { PromptHistory } from './PromptHistory';
 import GalleryBrowser from '@/components/gallery/GalleryBrowser';
 import { ErrorBoundary } from '@/components/features/errors/ErrorBoundary';
 import { ImageModal } from '@/components/features/generation/ImageModal';
+import { CompareModal } from './CompareModal';
 import { CaptchaWidget } from '@/components/features/CaptchaWidget';
 import type { ModelName, ModelColumn as ModelColumnType, Iteration } from '@/types';
 import { MODELS } from '@/types';
@@ -144,7 +146,17 @@ export const GenerationPanel: FC = () => {
   const { playSound } = useSound();
   const focusedModel = useUIStore((s) => s.focusedModel);
   const toggleFocus = useUIStore((s) => s.toggleFocus);
+  const isCompareOpen = useUIStore((s) => s.isCompareOpen);
+  const openCompare = useUIStore((s) => s.openCompare);
+  const closeCompare = useUIStore((s) => s.closeCompare);
   const { isDesktop } = useBreakpoint();
+
+  // Auto-close compare modal when preconditions no longer met
+  useEffect(() => {
+    if (isCompareOpen && (selectedModels.size < 2 || !currentSession)) {
+      closeCompare();
+    }
+  }, [isCompareOpen, selectedModels.size, currentSession, closeCompare]);
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [expandedImage, setExpandedImage] = useState<{
@@ -340,10 +352,20 @@ export const GenerationPanel: FC = () => {
             disabled={!prompt.trim() || isGenerating || (needsCaptcha && !captchaToken)}
           />
 
-          {/* Multi-select input */}
+          {/* Multi-select input and compare */}
           {selectedModels.size > 0 && (
-            <div className="flex-1">
-              <MultiIterateInput selectedCount={selectedModels.size} />
+            <div className="flex-1 flex gap-2 items-start">
+              <div className="flex-1">
+                <MultiIterateInput selectedCount={selectedModels.size} />
+              </div>
+              {selectedModels.size >= 2 && currentSession && (
+                <button
+                  onClick={openCompare}
+                  className="px-3 py-2 text-sm rounded bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors border-none cursor-pointer whitespace-nowrap"
+                >
+                  Compare ({selectedModels.size})
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -356,6 +378,11 @@ export const GenerationPanel: FC = () => {
         {/* Progress */}
         {isGenerating && <ProgressBar session={currentSession} />}
       </section>
+
+      {/* Prompt History */}
+      <ErrorBoundary componentName="PromptHistory">
+        <PromptHistory />
+      </ErrorBoundary>
 
       {/* 4-Column Layout */}
       <section
@@ -414,6 +441,15 @@ export const GenerationPanel: FC = () => {
           imageUrl={expandedImage.iteration.imageUrl || ''}
           model={expandedImage.model}
           iteration={expandedImage.iteration}
+        />
+      )}
+
+      {/* Compare Modal */}
+      {isCompareOpen && currentSession && selectedModels.size >= 2 && (
+        <CompareModal
+          models={Array.from(selectedModels)}
+          session={currentSession}
+          onClose={closeCompare}
         />
       )}
     </article>

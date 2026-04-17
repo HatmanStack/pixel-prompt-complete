@@ -4,6 +4,7 @@ Routes API requests to appropriate handlers for image generation,
 iteration, outpainting, and session status.
 """
 
+import base64
 import json
 import re
 import time
@@ -43,6 +44,7 @@ from models.providers import (
 )
 from ops.metrics import emit_request_metric
 from ops.model_counters import ModelCounterService
+from prompts.repository import PromptHistoryRepository
 from users.quota import enforce_quota
 from users.repository import UserRepository
 from users.tier import TierContext, resolve_tier
@@ -90,6 +92,9 @@ _guest_service = get_guest_token_service() if config.guest_token_secret else Non
 
 # Per-model cost ceiling service
 _model_counter_service = ModelCounterService(_user_repo)
+
+# Prompt history repository
+_prompt_history = PromptHistoryRepository(config.users_table_name)
 
 # Content filter
 content_filter = ContentFilter()
@@ -236,7 +241,6 @@ def _handle_successful_result(
         result["image"],
         target,
         model_name,
-        prompt,
         iteration=iteration_index,
     )
 
@@ -379,6 +383,8 @@ def lambda_handler(event: LambdaEvent, context: LambdaContext) -> ApiResponse:
             return handle_outpaint(event, correlation_id)
         elif path.startswith("/status/") and method == "GET":
             return handle_status(event, correlation_id)
+        elif path.startswith("/download/") and method == "GET":
+            return handle_download(event, correlation_id)
         elif path == "/enhance" and method == "POST":
             return handle_enhance(event, correlation_id)
         elif path == "/log" and method == "POST":
@@ -387,6 +393,10 @@ def lambda_handler(event: LambdaEvent, context: LambdaContext) -> ApiResponse:
             return handle_gallery_list(event, correlation_id)
         elif path.startswith("/gallery/") and method == "GET":
             return handle_gallery_detail(event, correlation_id)
+        elif path == "/prompts/recent" and method == "GET":
+            return handle_prompts_recent(event, correlation_id)
+        elif path == "/prompts/history" and method == "GET":
+            return handle_prompts_history(event, correlation_id)
         elif path == "/me" and method == "GET":
             return handle_me(event, correlation_id)
         elif path == "/billing/checkout" and method == "POST":
@@ -469,8 +479,21 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
 
         enabled_model_names = [m.name for m in models_to_dispatch]
 
+        # Adapt prompt per model (single LLM call)
+        adapted_prompts = prompt_enhancer.adapt_per_model(prompt, enabled_model_names)
+
         # Create session
         session_id = session_manager.create_session(prompt, enabled_model_names)
+
+        # Record prompt history (best-effort, do not fail generation)
+        try:
+            user_id = validated.tier.user_id if validated.tier.is_authenticated else None
+            _prompt_history.record_prompt(user_id=user_id, prompt=prompt, session_id=session_id)
+        except Exception as e:
+            StructuredLogger.warning(
+                f"Failed to record prompt history: {e}",
+                correlation_id=correlation_id,
+            )
 
         StructuredLogger.info(
             f"Session {session_id} created",
@@ -488,11 +511,14 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
             iteration_index = None
 
             try:
-                iteration_index = session_manager.add_iteration(session_id, model_name, prompt)
+                model_prompt = adapted_prompts.get(model_name, prompt)
+                iteration_index = session_manager.add_iteration(
+                    session_id, model_name, prompt, adapted_prompt=model_prompt
+                )
 
                 handler = get_handler(model_config.provider)
                 config_dict = get_model_config_dict(model_config)
-                result = handler(config_dict, prompt, {})
+                result = handler(config_dict, model_prompt, {})
 
                 duration = time.time() - start_time
 
@@ -505,6 +531,7 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
                         iteration_index,
                         target,
                         duration,
+                        context_prompt=prompt,
                     )
                     return model_name, {
                         "status": "completed",
@@ -641,6 +668,14 @@ def _load_source_image(
         source_image_key = max(completed, key=lambda x: x["index"]).get("imageKey")
     if not source_image_key:
         return None, response(400, {"error": f"No source image for {model_name}"})
+
+    # For new .png keys: read raw bytes directly (skip JSON parse overhead)
+    # For old .json keys: read JSON and extract the base64 output field
+    if not source_image_key.endswith(".json"):
+        raw_bytes = image_storage.get_image_bytes(source_image_key)
+        if not raw_bytes:
+            return None, response(500, {"error": "Failed to load source image"})
+        return (base64.b64encode(raw_bytes).decode("utf-8"), iteration_count), None
 
     source_data = image_storage.get_image(source_image_key)
     if not source_data or not source_data.get("output"):
@@ -906,8 +941,11 @@ def handle_gallery_list(event: LambdaEvent, correlation_id: str | None = None) -
             images = image_storage.list_gallery_images(folder)
 
             preview_url = None
-            if images:
-                preview_url = image_storage.get_cloudfront_url(images[0])
+            # Prefer .png images for previews (browsers can't render .json)
+            png_images = [img for img in images if img.endswith(".png")]
+            preview_candidate = png_images[0] if png_images else (images[0] if images else None)
+            if preview_candidate:
+                preview_url = image_storage.get_cloudfront_url(preview_candidate)
 
             try:
                 timestamp_str = f"{folder[:10]}T{folder[11:13]}:{folder[14:16]}:{folder[17:19]}Z"
@@ -983,6 +1021,76 @@ def handle_log_endpoint(event: LambdaEvent) -> ApiResponse:
         return response(500, {"error": "Internal server error"})
 
 
+def handle_download(event: LambdaEvent, correlation_id: str | None = None) -> ApiResponse:
+    """GET /download/{sessionId}/{model}/{iterationIndex} - Presigned download URL."""
+    try:
+        path = event.get("rawPath", event.get("path", ""))
+        parts = path.strip("/").split("/")
+        # Strip stage prefix if present (e.g. Prod/download/... -> download/...)
+        if len(parts) == 5 and parts[0] not in ("download",):
+            parts = parts[1:]
+        # Expected: ["download", sessionId, model, iterationIndex]
+        if len(parts) != 4:
+            return response(400, {"error": "Invalid download path"})
+
+        _, session_id, model_name, iter_idx_str = parts
+
+        # Validate session ID format
+        if not re.match(r"^[a-zA-Z0-9\-]{1,64}$", session_id):
+            return response(400, {"error": "Invalid session ID format"})
+
+        # Validate model
+        if model_name not in MODELS:
+            return response(400, {"error": f"Invalid model: {model_name}"})
+
+        # Validate iteration index
+        try:
+            iteration_index = int(iter_idx_str)
+            if iteration_index < 0:
+                raise ValueError
+        except (ValueError, TypeError):
+            return response(400, {"error": "Invalid iteration index"})
+
+        # Load session
+        session = session_manager.get_session(session_id)
+        if not session:
+            return response(404, {"error": f"Session {session_id} not found"})
+
+        # Find the iteration
+        model_data = session.get("models", {}).get(model_name) or {}
+        iterations = model_data.get("iterations", [])
+        target_iter = None
+        for it in iterations:
+            if it.get("index") == iteration_index and it.get("status") == "completed":
+                target_iter = it
+                break
+
+        if not target_iter or not target_iter.get("imageKey"):
+            return response(404, {"error": "Iteration not found or not completed"})
+
+        image_key = target_iter["imageKey"]
+
+        # Legacy JSON-format images cannot be served as PNG downloads
+        if image_key.endswith(".json"):
+            return response(
+                410,
+                {"error": "This iteration uses a legacy format that cannot be downloaded directly"},
+            )
+
+        filename = f"{model_name}-iteration-{iteration_index}.png"
+
+        url = image_storage.generate_presigned_download_url(image_key, filename)
+        return response(200, {"url": url, "filename": filename})
+
+    except Exception as e:
+        StructuredLogger.error(
+            f"Error in handle_download: {e}",
+            correlation_id=correlation_id,
+            traceback=traceback.format_exc(),
+        )
+        return response(500, {"error": "Internal server error"})
+
+
 def handle_gallery_detail(event: LambdaEvent, correlation_id: str | None = None) -> ApiResponse:
     """GET /gallery/{galleryId} - Get all images from a specific gallery."""
     try:
@@ -998,16 +1106,35 @@ def handle_gallery_detail(event: LambdaEvent, correlation_id: str | None = None)
         image_keys = image_storage.list_gallery_images(gallery_id)
 
         def _load_image(key):
-            metadata = image_storage.get_image_metadata(key)
-            if metadata:
-                return {
-                    "key": key,
-                    "url": image_storage.get_cloudfront_url(key),
-                    "model": metadata.get("model", "Unknown"),
-                    "prompt": metadata.get("prompt", ""),
-                    "timestamp": metadata.get("timestamp"),
-                }
-            return None
+            if key.endswith(".json"):
+                # Old format: metadata embedded in the JSON file
+                metadata = image_storage.get_image_metadata(key)
+                if metadata:
+                    return {
+                        "key": key,
+                        "url": image_storage.get_cloudfront_url(key),
+                        "model": metadata.get("model", "Unknown"),
+                        "prompt": metadata.get("prompt", ""),
+                        "timestamp": metadata.get("timestamp"),
+                    }
+                return None
+
+            # New .png format: match model name against known MODELS
+            # Key format: sessions/{galleryId}/{model}-{timestamp}{-iter{N}}.png
+            filename = key.rsplit("/", 1)[-1]  # e.g. "gemini-20250116100000-iter0.png"
+            name_part = filename.rsplit(".", 1)[0]  # strip .png
+            model_name = "Unknown"
+            for m in sorted(MODELS, key=len, reverse=True):
+                if name_part.startswith(m + "-") or name_part == m:
+                    model_name = m
+                    break
+            return {
+                "key": key,
+                "url": image_storage.get_cloudfront_url(key),
+                "model": model_name,
+                "prompt": "",
+                "timestamp": None,
+            }
 
         # Fetch image metadata in parallel (using dedicated gallery executor)
         images = []
@@ -1039,6 +1166,63 @@ def handle_gallery_detail(event: LambdaEvent, correlation_id: str | None = None)
             traceback=traceback.format_exc(),
         )
         return response(500, {"error": "Internal server error"})
+
+
+def handle_prompts_recent(event: LambdaEvent, correlation_id: str | None = None) -> ApiResponse:
+    """GET /prompts/recent - Global recent prompt feed (no auth required)."""
+    params = event.get("queryStringParameters") or {}
+    try:
+        limit = max(1, min(int(params.get("limit", 50)), 50))
+    except (ValueError, TypeError):
+        return response(400, {"error": "Invalid limit parameter"})
+
+    try:
+        items = _prompt_history.get_recent_feed(limit=limit)
+        return response(200, {"prompts": items, "total": len(items)})
+
+    except Exception as e:
+        StructuredLogger.error(
+            f"Error in handle_prompts_recent: {e}",
+            correlation_id=correlation_id,
+            traceback=traceback.format_exc(),
+        )
+        return response(500, error_responses.internal_server_error())
+
+
+def handle_prompts_history(event: LambdaEvent, correlation_id: str | None = None) -> ApiResponse:
+    """GET /prompts/history - Per-user prompt history (auth required)."""
+    if not config.auth_enabled:
+        return response(501, {"error": "GET /prompts/history not implemented"})
+
+    if _guest_service is None:
+        return response(500, error_responses.internal_server_error())
+
+    ctx = resolve_tier(event, _user_repo, _guest_service)
+    if not ctx.is_authenticated:
+        return response(401, error_responses.auth_required())
+
+    params = event.get("queryStringParameters") or {}
+    try:
+        limit = max(1, min(int(params.get("limit", 50)), 100))
+    except (ValueError, TypeError):
+        return response(400, {"error": "Invalid limit parameter"})
+    q = (params.get("q") or "")[:200] or None
+
+    try:
+        if q:
+            items = _prompt_history.search_user_history(ctx.user_id, q, limit=limit)
+        else:
+            items = _prompt_history.get_user_history(ctx.user_id, limit=limit)
+
+        return response(200, {"prompts": items, "total": len(items)})
+
+    except Exception as e:
+        StructuredLogger.error(
+            f"Error in handle_prompts_history: {e}",
+            correlation_id=correlation_id,
+            traceback=traceback.format_exc(),
+        )
+        return response(500, error_responses.internal_server_error())
 
 
 def handle_me(event: LambdaEvent, correlation_id: str | None = None) -> ApiResponse:
