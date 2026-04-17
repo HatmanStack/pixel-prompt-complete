@@ -25,6 +25,7 @@ _USER_HISTORY_TTL_SECONDS = 90 * 86400
 # since DynamoDB Limit applies before FilterExpression.
 _SEARCH_OVERREAD_FACTOR = 10
 _SEARCH_MAX_WINDOW = 200
+_SEARCH_MAX_PAGES = 3
 
 
 def _coerce_decimals(item: dict) -> dict:
@@ -150,7 +151,9 @@ class PromptHistoryRepository:
             "Limit": read_limit,
         }
 
-        while len(matched) < limit:
+        pages = 0
+        while len(matched) < limit and pages < _SEARCH_MAX_PAGES:
+            pages += 1
             response = self._table.query(**kwargs)
             for item in response.get("Items", []):
                 if query_lower in item.get("prompt", "").lower():

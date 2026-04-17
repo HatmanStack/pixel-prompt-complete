@@ -1116,11 +1116,15 @@ def handle_gallery_detail(event: LambdaEvent, correlation_id: str | None = None)
                     }
                 return None
 
-            # New .png format: parse model name from filename
+            # New .png format: match model name against known MODELS
             # Key format: sessions/{galleryId}/{model}-{timestamp}{-iter{N}}.png
             filename = key.rsplit("/", 1)[-1]  # e.g. "gemini-20250116100000-iter0.png"
             name_part = filename.rsplit(".", 1)[0]  # strip .png
-            model_name = name_part.split("-", 1)[0] if "-" in name_part else "Unknown"
+            model_name = "Unknown"
+            for m in MODELS:
+                if name_part.startswith(m + "-") or name_part == m:
+                    model_name = m
+                    break
             return {
                 "key": key,
                 "url": image_storage.get_cloudfront_url(key),

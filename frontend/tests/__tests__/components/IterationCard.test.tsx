@@ -53,6 +53,10 @@ describe('IterationCard - Download Button', () => {
     vi.clearAllMocks();
   });
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('shows download button on completed iteration', () => {
     render(
       <IterationCard

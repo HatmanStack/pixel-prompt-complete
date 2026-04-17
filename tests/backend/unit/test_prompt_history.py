@@ -83,22 +83,22 @@ class TestPromptHistoryRepository:
         assert history[0]["prompt"] == "mountain landscape"
         assert history[0]["sessionId"] == "sess-2"
 
-    def test_get_user_history_newest_first(self, repo, dynamodb_table):
-        """Record 5 prompts with different timestamps, verify ordering."""
+    def test_get_user_history_newest_first(self, repo, dynamodb_table, monkeypatch):
+        """Record 5 prompts with patched timestamps, verify ordering."""
+        base_time = 1700000000
         for i in range(5):
+            monkeypatch.setattr(time, "time", lambda _i=i: base_time + _i)
             repo.record_prompt(
                 user_id="user-order",
                 prompt=f"prompt {i}",
                 session_id=f"sess-{i}",
             )
-            # Ensure distinct createdAt values
-            time.sleep(0.01)
 
         history = repo.get_user_history("user-order")
         assert len(history) == 5
-        # Newest first: createdAt should be descending
+        # Newest first: createdAt should be strictly descending
         for i in range(len(history) - 1):
-            assert history[i]["createdAt"] >= history[i + 1]["createdAt"]
+            assert history[i]["createdAt"] > history[i + 1]["createdAt"]
 
     def test_get_user_history_limit(self, repo, dynamodb_table):
         """Record 10 prompts, request limit=3, verify only 3 returned."""
