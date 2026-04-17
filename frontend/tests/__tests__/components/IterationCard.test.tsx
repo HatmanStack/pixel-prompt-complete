@@ -77,7 +77,7 @@ describe('IterationCard - Download Button', () => {
     expect(screen.queryByLabelText('Download image')).toBeNull();
   });
 
-  it('calls getDownloadUrl and opens URL on click', async () => {
+  it('calls getDownloadUrl and triggers download via anchor on click', async () => {
     const { getDownloadUrl } = await import('../../../src/api/client');
     const mockGetDownloadUrl = vi.mocked(getDownloadUrl);
     mockGetDownloadUrl.mockResolvedValueOnce({
@@ -85,8 +85,10 @@ describe('IterationCard - Download Button', () => {
       filename: 'gemini-1.png',
     });
 
-    const openSpy = vi.fn();
-    vi.stubGlobal('open', openSpy);
+    const clickSpy = vi.fn();
+    const createElementSpy = vi.spyOn(document, 'createElement');
+    const appendChildSpy = vi.spyOn(document.body, 'appendChild');
+    const removeChildSpy = vi.spyOn(document.body, 'removeChild');
 
     render(
       <IterationCard
@@ -101,8 +103,18 @@ describe('IterationCard - Download Button', () => {
 
     await waitFor(() => {
       expect(mockGetDownloadUrl).toHaveBeenCalledWith('test-session-123', 'gemini', 1);
-      expect(openSpy).toHaveBeenCalledWith('https://s3.example.com/presigned-url', '_blank');
+      // Verify an anchor element was created and clicked
+      const anchorCalls = createElementSpy.mock.results.filter(
+        (r) => r.type === 'return' && r.value instanceof HTMLAnchorElement,
+      );
+      expect(anchorCalls.length).toBeGreaterThan(0);
+      expect(appendChildSpy).toHaveBeenCalled();
+      expect(removeChildSpy).toHaveBeenCalled();
     });
+
+    createElementSpy.mockRestore();
+    appendChildSpy.mockRestore();
+    removeChildSpy.mockRestore();
   });
 
   it('download click does not trigger onExpand', async () => {
@@ -111,8 +123,6 @@ describe('IterationCard - Download Button', () => {
       url: 'https://s3.example.com/presigned-url',
       filename: 'gemini-1.png',
     });
-    vi.stubGlobal('open', vi.fn());
-
     const onExpand = vi.fn();
     render(
       <IterationCard

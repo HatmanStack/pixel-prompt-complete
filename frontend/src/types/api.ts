@@ -149,7 +149,7 @@ export interface SelectionState {
 }
 
 // ====================
-// Error Types
+// Prompt History / Download Types
 // ====================
 
 export interface PromptHistoryItem {
@@ -167,6 +167,10 @@ export interface DownloadResponse {
   url: string;
   filename: string;
 }
+
+// ====================
+// Error Types
+// ====================
 
 export interface ApiError {
   error: string;

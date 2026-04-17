@@ -2,11 +2,15 @@
 
 Stores per-user prompt history and a global recent feed using a GSI
 (``PromptHistoryIndex``) on the existing ``pixel-prompt-users`` table.
+
+Prompt history items use the reserved ``userId`` prefix ``prompt#<uuid>``
+to avoid collisions with real user records managed by ``UserRepository``.
 """
 
 from __future__ import annotations
 
 import time
+from decimal import Decimal
 from typing import Any
 from uuid import uuid4
 
@@ -14,6 +18,22 @@ import boto3
 
 # TTL for global feed items: 7 days
 _FEED_TTL_SECONDS = 7 * 86400
+
+# For search: read a larger window then filter client-side,
+# since DynamoDB Limit applies before FilterExpression.
+_SEARCH_OVERREAD_FACTOR = 10
+_SEARCH_MAX_WINDOW = 200
+
+
+def _coerce_decimals(item: dict) -> dict:
+    """Convert DynamoDB Decimal values to native Python int/float for JSON serialization."""
+    out = {}
+    for k, v in item.items():
+        if isinstance(v, Decimal):
+            out[k] = int(v) if v == int(v) else float(v)
+        else:
+            out[k] = v
+    return out
 
 
 class PromptHistoryRepository:
@@ -72,7 +92,7 @@ class PromptHistoryRepository:
             limit: Maximum items to return.
 
         Returns:
-            List of prompt history items.
+            List of prompt history items (JSON-safe).
         """
         response = self._table.query(
             IndexName="PromptHistoryIndex",
@@ -81,7 +101,7 @@ class PromptHistoryRepository:
             ScanIndexForward=False,
             Limit=limit,
         )
-        return response.get("Items", [])
+        return [_coerce_decimals(item) for item in response.get("Items", [])]
 
     def get_recent_feed(self, limit: int = 50) -> list[dict]:
         """Query the global recent prompt feed, newest first.
@@ -90,7 +110,7 @@ class PromptHistoryRepository:
             limit: Maximum items to return.
 
         Returns:
-            List of prompt history items.
+            List of prompt history items (JSON-safe).
         """
         response = self._table.query(
             IndexName="PromptHistoryIndex",
@@ -99,10 +119,13 @@ class PromptHistoryRepository:
             ScanIndexForward=False,
             Limit=limit,
         )
-        return response.get("Items", [])
+        return [_coerce_decimals(item) for item in response.get("Items", [])]
 
     def search_user_history(self, user_id: str, query: str, limit: int = 20) -> list[dict]:
         """Search per-user prompt history by substring match.
+
+        Reads a larger window from DynamoDB and filters client-side,
+        because DynamoDB applies Limit before FilterExpression.
 
         Args:
             user_id: The Cognito sub (without ``USER#`` prefix).
@@ -110,17 +133,31 @@ class PromptHistoryRepository:
             limit: Maximum items to return.
 
         Returns:
-            List of matching prompt history items.
+            List of matching prompt history items (JSON-safe).
         """
-        response = self._table.query(
-            IndexName="PromptHistoryIndex",
-            KeyConditionExpression="promptOwner = :po",
-            FilterExpression="contains(prompt, :q)",
-            ExpressionAttributeValues={
-                ":po": f"USER#{user_id}",
-                ":q": query,
-            },
-            ScanIndexForward=False,
-            Limit=limit,
-        )
-        return response.get("Items", [])
+        read_limit = min(limit * _SEARCH_OVERREAD_FACTOR, _SEARCH_MAX_WINDOW)
+        query_lower = query.lower()
+        matched: list[dict] = []
+
+        kwargs: dict[str, Any] = {
+            "IndexName": "PromptHistoryIndex",
+            "KeyConditionExpression": "promptOwner = :po",
+            "ExpressionAttributeValues": {":po": f"USER#{user_id}"},
+            "ScanIndexForward": False,
+            "Limit": read_limit,
+        }
+
+        while len(matched) < limit:
+            response = self._table.query(**kwargs)
+            for item in response.get("Items", []):
+                if query_lower in item.get("prompt", "").lower():
+                    matched.append(_coerce_decimals(item))
+                    if len(matched) >= limit:
+                        break
+
+            last_key = response.get("LastEvaluatedKey")
+            if not last_key or not response.get("Items"):
+                break
+            kwargs["ExclusiveStartKey"] = last_key
+
+        return matched[:limit]

@@ -126,6 +126,8 @@ class SessionManager:
             prompt: Iteration prompt
             is_outpaint: Whether this is an outpaint operation
             outpaint_preset: Outpaint preset if applicable
+            adapted_prompt: Model-specific prompt after adaptation (stored as
+                ``adaptedPrompt`` when it differs from ``prompt``; None to skip)
 
         Returns:
             New iteration index

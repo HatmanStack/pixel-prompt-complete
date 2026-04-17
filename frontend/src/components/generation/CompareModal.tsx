@@ -3,7 +3,7 @@
  * Full-screen comparison of 2-4 model images with iteration picker
  */
 
-import { useState, useEffect, useRef, type FC } from 'react';
+import { useState, useEffect, useRef, useCallback, type FC } from 'react';
 import type { ModelName, Session } from '@/types';
 import { MODEL_DISPLAY_NAMES } from '@/types';
 
@@ -22,23 +22,38 @@ function getGridClass(count: number): string {
   return 'grid-cols-2 lg:grid-cols-4';
 }
 
+/**
+ * Get the latest completed iteration index for a model
+ */
+function getLatestCompletedIndex(session: Session, model: ModelName): number | undefined {
+  const column = session.models[model];
+  if (!column) return undefined;
+  const completed = column.iterations.filter((i) => i.status === 'completed');
+  return completed.length > 0 ? completed[completed.length - 1].index : undefined;
+}
+
 export const CompareModal: FC<CompareModalProps> = ({ models, session, onClose }) => {
+  const modalRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   // Track selected iteration index per model (default to latest completed)
-  const [selectedIterations, setSelectedIterations] = useState<Record<ModelName, number>>(() => {
-    const initial: Partial<Record<ModelName, number>> = {};
-    for (const model of models) {
-      const column = session.models[model];
-      if (column) {
-        const completedIterations = column.iterations.filter((i) => i.status === 'completed');
-        if (completedIterations.length > 0) {
-          initial[model] = completedIterations[completedIterations.length - 1].index;
+  const [selectedIterations, setSelectedIterations] = useState<Record<string, number>>({});
+
+  // Sync selected iterations when models or session change
+  useEffect(() => {
+    setSelectedIterations((prev) => {
+      const next = { ...prev };
+      for (const model of models) {
+        if (next[model] === undefined) {
+          const latest = getLatestCompletedIndex(session, model);
+          if (latest !== undefined) {
+            next[model] = latest;
+          }
         }
       }
-    }
-    return initial as Record<ModelName, number>;
-  });
+      return next;
+    });
+  }, [models, session]);
 
   // ESC key to close
   useEffect(() => {
@@ -50,6 +65,36 @@ export const CompareModal: FC<CompareModalProps> = ({ models, session, onClose }
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
+
+  // Focus trap: cycle Tab/Shift+Tab within modal
+  const handleFocusTrap = useCallback((e: KeyboardEvent) => {
+    if (e.key !== 'Tab' || !modalRef.current) return;
+
+    const focusable = modalRef.current.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+    );
+    if (focusable.length === 0) return;
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+
+    if (e.shiftKey) {
+      if (document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      }
+    } else {
+      if (document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    document.addEventListener('keydown', handleFocusTrap);
+    return () => document.removeEventListener('keydown', handleFocusTrap);
+  }, [handleFocusTrap]);
 
   // Auto-focus close button on mount
   useEffect(() => {
@@ -71,11 +116,14 @@ export const CompareModal: FC<CompareModalProps> = ({ models, session, onClose }
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
       data-testid="compare-backdrop"
       onClick={handleBackdropClick}
-      role="dialog"
-      aria-modal="true"
-      aria-label="Compare models side by side"
     >
-      <div className="relative w-[95vw] max-h-[95vh] bg-white dark:bg-gray-900 rounded-lg overflow-auto p-4">
+      <div
+        ref={modalRef}
+        className="relative w-[95vw] max-h-[95vh] bg-white dark:bg-gray-900 rounded-lg overflow-auto p-4"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Compare models side by side"
+      >
         {/* Close button */}
         <button
           ref={closeButtonRef}

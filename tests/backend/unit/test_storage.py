@@ -133,7 +133,7 @@ class TestImageStorage:
             base64_image=image_data,
             target='2025-11-16-10-30-00',
             model_name='flux',
-            prompt='test prompt',
+
             iteration=0,
         )
 
@@ -158,7 +158,7 @@ class TestImageStorage:
             base64_image=SAMPLE_IMAGE_BASE64,
             target='2025-11-16-10-30-00',
             model_name='gemini',
-            prompt='test prompt',
+
         )
 
         assert key is not None

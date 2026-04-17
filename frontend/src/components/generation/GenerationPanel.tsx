@@ -151,6 +151,13 @@ export const GenerationPanel: FC = () => {
   const closeCompare = useUIStore((s) => s.closeCompare);
   const { isDesktop } = useBreakpoint();
 
+  // Auto-close compare modal when preconditions no longer met
+  useEffect(() => {
+    if (isCompareOpen && (selectedModels.size < 2 || !currentSession)) {
+      closeCompare();
+    }
+  }, [isCompareOpen, selectedModels.size, currentSession, closeCompare]);
+
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [expandedImage, setExpandedImage] = useState<{
     model: ModelName;
@@ -438,7 +445,7 @@ export const GenerationPanel: FC = () => {
       )}
 
       {/* Compare Modal */}
-      {isCompareOpen && currentSession && (
+      {isCompareOpen && currentSession && selectedModels.size >= 2 && (
         <CompareModal
           models={Array.from(selectedModels)}
           session={currentSession}

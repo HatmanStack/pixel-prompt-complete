@@ -110,8 +110,14 @@ export const IterationCard: FC<IterationCardProps> = memo(
       if (!sessionId || isDownloading) return;
       setIsDownloading(true);
       try {
-        const { url } = await getDownloadUrl(sessionId, model, iteration.index);
-        window.open(url, '_blank');
+        const { url, filename } = await getDownloadUrl(sessionId, model, iteration.index);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
       } catch (err) {
         console.error('Download failed:', err);
       } finally {
@@ -132,7 +138,7 @@ export const IterationCard: FC<IterationCardProps> = memo(
         onKeyDown={
           isClickable
             ? (e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
+                if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) {
                   e.preventDefault();
                   onExpand?.();
                 }

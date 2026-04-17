@@ -12,8 +12,8 @@ import type { PromptHistoryItem } from '@/types';
 /**
  * Format a timestamp as relative time (e.g., "2h ago")
  */
-function formatRelativeTime(epochMs: number): string {
-  const diff = Date.now() - epochMs;
+function formatRelativeTime(epochSeconds: number): string {
+  const diff = Date.now() - epochSeconds * 1000;
   const minutes = Math.floor(diff / 60000);
   if (minutes < 1) return 'just now';
   if (minutes < 60) return `${minutes}m ago`;
@@ -92,22 +92,49 @@ export const PromptHistory: FC = () => {
   // Fetch recent prompts when tab is active and panel is open
   useEffect(() => {
     if (!isOpen || activeTab !== 'recent') return;
+    let ignore = false;
     setIsLoadingRecent(true);
     getRecentPrompts(20)
-      .then((res) => setRecentItems(res.prompts))
-      .catch((err) => console.error('Failed to fetch recent prompts:', err))
-      .finally(() => setIsLoadingRecent(false));
+      .then((res) => {
+        if (!ignore) setRecentItems(res.prompts);
+      })
+      .catch((err) => {
+        if (!ignore) console.error('Failed to fetch recent prompts:', err);
+      })
+      .finally(() => {
+        if (!ignore) setIsLoadingRecent(false);
+      });
+    return () => {
+      ignore = true;
+    };
   }, [isOpen, activeTab]);
 
   // Fetch history when tab is active and panel is open
   useEffect(() => {
     if (!isOpen || activeTab !== 'history' || !isAuthenticated) return;
+    let ignore = false;
     setIsLoadingHistory(true);
     getPromptHistory(20, searchQuery || undefined)
-      .then((res) => setHistoryItems(res.prompts))
-      .catch((err) => console.error('Failed to fetch prompt history:', err))
-      .finally(() => setIsLoadingHistory(false));
+      .then((res) => {
+        if (!ignore) setHistoryItems(res.prompts);
+      })
+      .catch((err) => {
+        if (!ignore) console.error('Failed to fetch prompt history:', err);
+      })
+      .finally(() => {
+        if (!ignore) setIsLoadingHistory(false);
+      });
+    return () => {
+      ignore = true;
+    };
   }, [isOpen, activeTab, isAuthenticated, searchQuery]);
+
+  // Clean up debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
 
   // Debounced search handler
   const handleSearchChange = (value: string) => {

@@ -124,17 +124,15 @@ Enhance the following prompt:"""
                     client_kwargs["base_url"] = self.prompt_model["base_url"]
                 client = get_openai_client(api_key, **client_kwargs)
 
+                model_id = self.prompt_model["id"]
                 completion_params: dict[str, Any] = {
-                    "model": self.prompt_model["id"],
+                    "model": model_id,
                     "messages": [
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": prompt},
                     ],
-                    "max_tokens": 1000,
-                    "temperature": 0.7,
-                    "timeout": 10.0,
+                    **_get_model_params(model_id),
                 }
-                model_id = self.prompt_model["id"]
                 if "gpt-4" in model_id or "gpt-5" in model_id:
                     completion_params["response_format"] = {"type": "json_object"}
 

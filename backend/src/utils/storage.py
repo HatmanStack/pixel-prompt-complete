@@ -65,10 +65,9 @@ class ImageStorage:
         base64_image: str,
         target: str,
         model_name: str,
-        prompt: str,
         iteration: Optional[int] = None,
     ) -> str:
-        """Upload a generated image to S3 under sessions prefix with metadata."""
+        """Upload a generated image to S3 as raw PNG bytes."""
         normalized_model = self._normalize_model_name(model_name)
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
 

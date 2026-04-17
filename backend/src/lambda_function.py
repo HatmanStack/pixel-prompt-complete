@@ -241,7 +241,6 @@ def _handle_successful_result(
         result["image"],
         target,
         model_name,
-        prompt,
         iteration=iteration_index,
     )
 
@@ -1153,10 +1152,13 @@ def handle_gallery_detail(event: LambdaEvent, correlation_id: str | None = None)
 
 def handle_prompts_recent(event: LambdaEvent, correlation_id: str | None = None) -> ApiResponse:
     """GET /prompts/recent - Global recent prompt feed (no auth required)."""
+    params = event.get("queryStringParameters") or {}
     try:
-        params = event.get("queryStringParameters") or {}
         limit = min(int(params.get("limit", 50)), 50)
+    except (ValueError, TypeError):
+        return response(400, {"error": "Invalid limit parameter"})
 
+    try:
         items = _prompt_history.get_recent_feed(limit=limit)
         return response(200, {"prompts": items, "total": len(items)})
 
@@ -1181,11 +1183,14 @@ def handle_prompts_history(event: LambdaEvent, correlation_id: str | None = None
     if not ctx.is_authenticated:
         return response(401, error_responses.auth_required())
 
+    params = event.get("queryStringParameters") or {}
     try:
-        params = event.get("queryStringParameters") or {}
         limit = min(int(params.get("limit", 50)), 100)
-        q = params.get("q")
+    except (ValueError, TypeError):
+        return response(400, {"error": "Invalid limit parameter"})
+    q = params.get("q")
 
+    try:
         if q:
             items = _prompt_history.search_user_history(ctx.user_id, q, limit=limit)
         else:

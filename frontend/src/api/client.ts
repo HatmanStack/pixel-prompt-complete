@@ -334,7 +334,7 @@ export async function getDownloadUrl(
   iterationIndex: number,
 ): Promise<DownloadResponse> {
   return apiFetch<DownloadResponse>(
-    `${API_ROUTES.DOWNLOAD}/${sessionId}/${model}/${iterationIndex}`,
+    `${API_ROUTES.DOWNLOAD}/${encodeURIComponent(sessionId)}/${encodeURIComponent(model)}/${iterationIndex}`,
     { method: 'GET' },
   );
 }

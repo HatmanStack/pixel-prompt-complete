@@ -11,8 +11,8 @@ On top of that foundation, four user-facing features ship: (1) prompt history wi
 ## Decisions
 
 1. **Image storage format**: Replace base64-in-JSON with raw image files in S3. Metadata references images by S3 key. Old format ages out via existing 30-day S3 lifecycle rule.
-2. **Prompt history storage**: DynamoDB single-table design, same `pixel-prompt-users` table. Per-user items keyed `PK=USER#<sub>, SK=PROMPT#<timestamp>`.
-3. **Global recent prompts**: DynamoDB with fixed partition key `PK=GLOBAL, SK=PROMPT#<timestamp>`. 50 items max, 7-day TTL. Prompts only (no thumbnails). Unfiltered (content filter already screens at generation time).
+2. **Prompt history storage**: DynamoDB single-table design, same `pixel-prompt-users` table. Items use `userId=prompt#<uuid>` as the base-table PK, with a GSI (`PromptHistoryIndex`) on `promptOwner` (HASH) + `createdAt` (RANGE). Per-user items set `promptOwner=USER#<sub>`. See ADR-3 in Phase-0.md and `backend/src/prompts/repository.py` for the shipped design.
+3. **Global recent prompts**: DynamoDB GSI query on `promptOwner=GLOBAL#RECENT`, newest-first. 50 items max, 7-day TTL. Prompts only (no thumbnails). Unfiltered (content filter already screens at generation time).
 4. **Guest prompt history**: Guests see the global recent prompts feed. No per-guest history.
 5. **Prompt re-run behavior**: Populates the prompt input field for editing. Does not auto-trigger generation.
 6. **Per-model prompt adaptation**: Automatic and transparent at generation time, server-side. No user toggle — always active.

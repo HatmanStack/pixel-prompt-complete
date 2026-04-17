@@ -25,7 +25,6 @@ class TestUploadImageRawPng:
             base64_image=SAMPLE_IMAGE_BASE64,
             target="2025-11-16-10-30-00",
             model_name="gemini",
-            prompt="test prompt",
             iteration=0,
         )
 
@@ -50,7 +49,6 @@ class TestUploadImageRawPng:
             base64_image=SAMPLE_IMAGE_BASE64,
             target="2025-11-16-10-30-00",
             model_name="gemini",
-            prompt="test prompt",
             iteration=2,
         )
 
@@ -68,7 +66,6 @@ class TestUploadImageRawPng:
             base64_image=SAMPLE_IMAGE_BASE64,
             target="2025-11-16-10-30-00",
             model_name="nova",
-            prompt="test",
         )
 
         assert key.endswith(".png")
