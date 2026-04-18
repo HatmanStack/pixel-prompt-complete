@@ -565,9 +565,33 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
         futures = {
             _executor.submit(generate_for_model, model): model for model in models_to_dispatch
         }
-        for future in as_completed(futures):
-            model_name, result = future.result()
-            results[model_name] = result
+        future_timeout = config.api_client_timeout + 10
+        try:
+            for future in as_completed(futures, timeout=future_timeout):
+                try:
+                    model_name, result = future.result(timeout=future_timeout)
+                    results[model_name] = result
+                except Exception as e:
+                    model_name = futures[future].name
+                    sanitized = sanitize_error_message(e)
+                    StructuredLogger.error(
+                        f"Thread pool failure for {model_name}: {sanitized}",
+                        correlation_id=correlation_id,
+                    )
+                    results[model_name] = {"status": "error", "error": sanitized}
+        except TimeoutError:
+            # Mark any models that didn't complete in time
+            for future, model_cfg in futures.items():
+                model_name = model_cfg.name
+                if model_name not in results:
+                    StructuredLogger.error(
+                        f"Model {model_name} timed out after {future_timeout}s",
+                        correlation_id=correlation_id,
+                    )
+                    results[model_name] = {
+                        "status": "error",
+                        "error": f"Model timed out after {future_timeout}s",
+                    }
 
         # Emit CloudWatch metrics per model (only in auth-enabled mode)
         if config.auth_enabled:
