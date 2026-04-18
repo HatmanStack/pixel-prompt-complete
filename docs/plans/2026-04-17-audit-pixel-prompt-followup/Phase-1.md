@@ -146,11 +146,11 @@ perf(backend): add Firefly OAuth2 token caching with 50-min TTL
 
 **Verification Checklist:**
 
-- [ ] `requests.ConnectionError` caught with specific message
-- [ ] `requests.HTTPError` caught with status code in message
-- [ ] `requests.Timeout` catch unchanged
-- [ ] Generic `except Exception` still present as fallback
-- [ ] `PYTHONPATH=backend/src pytest tests/backend/unit/test_openai_handler.py -v` passes
+- [x] `requests.ConnectionError` caught with specific message
+- [x] `requests.HTTPError` caught with status code in message
+- [x] `requests.Timeout` catch unchanged
+- [x] Generic `except Exception` still present as fallback
+- [x] `PYTHONPATH=backend/src pytest tests/backend/unit/test_openai_handler.py -v` passes
 
 **Testing Instructions:**
 

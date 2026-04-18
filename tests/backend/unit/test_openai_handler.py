@@ -101,3 +101,42 @@ def test_outpaint_openai_uses_gpt_image_1(openai_config):
         assert result["status"] == "success"
         kwargs = client.images.edit.call_args[1]
         assert kwargs["model"] == "gpt-image-1"
+
+
+# --- Download error handling tests ---
+
+
+def test_handle_openai_connection_error(openai_config):
+    """ConnectionError during image download produces a specific error message."""
+    with patch("models.providers.openai_provider._get_openai_client") as mock_factory:
+        client = Mock()
+        mock_factory.return_value = client
+        mock_response = Mock()
+        mock_response.data = [Mock(url="https://example.com/img.png")]
+        client.images.generate.return_value = mock_response
+
+        with patch("models.providers.openai_provider.requests.get") as mock_get:
+            mock_get.side_effect = requests.ConnectionError("Connection refused")
+            result = handle_openai(openai_config, "a cat", {})
+            assert result["status"] == "error"
+            assert "connection failed" in result["error"].lower()
+
+
+def test_handle_openai_http_error(openai_config):
+    """HTTPError during image download includes status code in error message."""
+    with patch("models.providers.openai_provider._get_openai_client") as mock_factory:
+        client = Mock()
+        mock_factory.return_value = client
+        mock_response = Mock()
+        mock_response.data = [Mock(url="https://example.com/img.png")]
+        client.images.generate.return_value = mock_response
+
+        with patch("models.providers.openai_provider.requests.get") as mock_get:
+            http_err_response = Mock()
+            http_err_response.status_code = 403
+            mock_get.side_effect = requests.HTTPError(
+                "403 Forbidden", response=http_err_response
+            )
+            result = handle_openai(openai_config, "a cat", {})
+            assert result["status"] == "error"
+            assert "403" in result["error"]
