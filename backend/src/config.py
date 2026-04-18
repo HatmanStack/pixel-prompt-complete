@@ -250,6 +250,15 @@ ses_region = os.environ.get("SES_REGION", "us-west-2")
 if ses_enabled and not ses_from_email:
     raise RuntimeError("SES_ENABLED=true requires SES_FROM_EMAIL to be set")
 
+# CORS + Auth compatibility check
+if auth_enabled and cors_allowed_origin == "*":
+    warnings.warn(
+        "CORS_ALLOWED_ORIGIN='*' with AUTH_ENABLED=true: "
+        "browsers will block credentialed requests. "
+        "Set CORS_ALLOWED_ORIGIN to your frontend domain.",
+        stacklevel=1,
+    )
+
 # Operational Timeouts (seconds) - configurable via environment
 api_client_timeout = _safe_float("API_CLIENT_TIMEOUT", 120.0)
 image_download_timeout = _safe_int("IMAGE_DOWNLOAD_TIMEOUT", 30)

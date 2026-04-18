@@ -165,3 +165,45 @@ def test_per_model_cap_override(monkeypatch):
     monkeypatch.setenv("MODEL_GEMINI_DAILY_CAP", "100")
     config = _reload_config()
     assert config.MODEL_DAILY_CAPS["gemini"] == 100
+
+
+def test_cors_wildcard_with_auth_warns(monkeypatch):
+    """CORS_ALLOWED_ORIGIN='*' with AUTH_ENABLED=true should emit a warning."""
+    monkeypatch.setenv("AUTH_ENABLED", "true")
+    monkeypatch.setenv("GUEST_TOKEN_SECRET", "test-secret")
+    monkeypatch.setenv("CORS_ALLOWED_ORIGIN", "*")
+    import warnings
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        config = _reload_config()
+        cors_warnings = [x for x in w if "CORS_ALLOWED_ORIGIN" in str(x.message)]
+        assert len(cors_warnings) == 1
+        assert "credentialed requests" in str(cors_warnings[0].message)
+
+
+def test_cors_specific_origin_with_auth_no_warning(monkeypatch):
+    """No warning when CORS_ALLOWED_ORIGIN is set to a specific domain."""
+    monkeypatch.setenv("AUTH_ENABLED", "true")
+    monkeypatch.setenv("GUEST_TOKEN_SECRET", "test-secret")
+    monkeypatch.setenv("CORS_ALLOWED_ORIGIN", "https://example.com")
+    import warnings
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        config = _reload_config()
+        cors_warnings = [x for x in w if "CORS_ALLOWED_ORIGIN" in str(x.message)]
+        assert len(cors_warnings) == 0
+
+
+def test_cors_wildcard_without_auth_no_warning(monkeypatch):
+    """No warning when AUTH_ENABLED=false even with wildcard CORS."""
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("CORS_ALLOWED_ORIGIN", "*")
+    import warnings
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        config = _reload_config()
+        cors_warnings = [x for x in w if "CORS_ALLOWED_ORIGIN" in str(x.message)]
+        assert len(cors_warnings) == 0
