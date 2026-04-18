@@ -1,13 +1,14 @@
 """
 Adobe Firefly provider handlers.
 
-Per ADR-4: a fresh OAuth2 access token is fetched on every invocation
-(no token caching). The Firefly client_id and client_secret are passed
-in the model_config dict via ``get_model_config_dict``.
+OAuth2 access tokens are cached at module level with a 50-minute TTL
+(Adobe IMS tokens are valid for 24 hours). The cache lives within a
+single Lambda container and resets on cold start.
 """
 
 from __future__ import annotations
 
+import time as _time
 from typing import Any
 
 import requests
@@ -30,9 +31,14 @@ _STORAGE_URL = "https://firefly-api.adobe.io/v2/storage/image"
 _TOKEN_TIMEOUT = 10
 _API_TIMEOUT = 60
 
+# Module-level token cache (lives within a single Lambda container)
+_cached_token: str | None = None
+_cached_token_expiry: float = 0.0
+_TOKEN_TTL = 50 * 60  # 50 minutes (Adobe tokens last 24h, refresh well before expiry)
+
 
 def _get_firefly_access_token(client_id: str, client_secret: str) -> str:
-    """Fetch an OAuth2 access token from Adobe IMS (no caching, per ADR-4)."""
+    """Fetch an OAuth2 access token from Adobe IMS."""
     if not client_id or not client_secret:
         raise ValueError("Firefly client_id and client_secret are required")
 
@@ -52,6 +58,18 @@ def _get_firefly_access_token(client_id: str, client_secret: str) -> str:
     token = payload.get("access_token")
     if not token:
         raise ValueError("Adobe IMS returned no access_token")
+    return token
+
+
+def _get_or_refresh_token(client_id: str, client_secret: str) -> str:
+    """Return a cached access token, refreshing if expired or missing."""
+    global _cached_token, _cached_token_expiry
+    now = _time.monotonic()
+    if _cached_token and now < _cached_token_expiry:
+        return _cached_token
+    token = _get_firefly_access_token(client_id, client_secret)
+    _cached_token = token
+    _cached_token_expiry = now + _TOKEN_TTL
     return token
 
 
@@ -103,7 +121,7 @@ def handle_firefly(
     try:
         client_id = model_config.get("client_id", "")
         client_secret = model_config.get("client_secret", "")
-        token = _get_firefly_access_token(client_id, client_secret)
+        token = _get_or_refresh_token(client_id, client_secret)
 
         body = {
             "prompt": prompt,
@@ -137,7 +155,7 @@ def iterate_firefly(
     try:
         client_id = model_config.get("client_id", "")
         client_secret = model_config.get("client_secret", "")
-        token = _get_firefly_access_token(client_id, client_secret)
+        token = _get_or_refresh_token(client_id, client_secret)
 
         image_bytes = _decode_source_image(source_image)
         upload_id = _upload_source_image(image_bytes, token, client_id)
@@ -180,7 +198,7 @@ def outpaint_firefly(
 
         client_id = model_config.get("client_id", "")
         client_secret = model_config.get("client_secret", "")
-        token = _get_firefly_access_token(client_id, client_secret)
+        token = _get_or_refresh_token(client_id, client_secret)
 
         image_bytes = _decode_source_image(source_image)
         width, height = get_image_dimensions(image_bytes)

@@ -4,13 +4,24 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+import models.providers.firefly as firefly_mod
 from models.providers.firefly import (
     _get_firefly_access_token,
+    _get_or_refresh_token,
     handle_firefly,
     iterate_firefly,
     outpaint_firefly,
 )
 from .fixtures.api_responses import SAMPLE_IMAGE_BASE64, SAMPLE_IMAGE_CONTENT
+
+
+@pytest.fixture(autouse=True)
+def reset_token_cache():
+    firefly_mod._cached_token = None
+    firefly_mod._cached_token_expiry = 0.0
+    yield
+    firefly_mod._cached_token = None
+    firefly_mod._cached_token_expiry = 0.0
 
 
 @pytest.fixture
@@ -131,3 +142,40 @@ def test_outpaint_firefly_success(firefly_config):
 
         result = outpaint_firefly(firefly_config, real_png, "16:9", "extend")
         assert result["status"] == "success"
+
+
+# --- Token caching tests ---
+
+
+def test_get_or_refresh_token_cache_hit():
+    """Cached token is returned without re-fetching when TTL has not expired."""
+    with patch("models.providers.firefly._get_firefly_access_token") as mock_fetch:
+        mock_fetch.return_value = "tok-1"
+        t1 = _get_or_refresh_token("cid", "csecret")
+        t2 = _get_or_refresh_token("cid", "csecret")
+        assert t1 == "tok-1"
+        assert t2 == "tok-1"
+        assert mock_fetch.call_count == 1
+
+
+def test_get_or_refresh_token_cache_expiry():
+    """Expired cache triggers a fresh token fetch."""
+    with patch("models.providers.firefly._get_firefly_access_token") as mock_fetch:
+        mock_fetch.return_value = "tok-new"
+        # Simulate expired cache
+        firefly_mod._cached_token = "tok-old"
+        firefly_mod._cached_token_expiry = 0.0  # already expired
+        token = _get_or_refresh_token("cid", "csecret")
+        assert token == "tok-new"
+        assert mock_fetch.call_count == 1
+
+
+def test_get_or_refresh_token_cold_start():
+    """First call with no cached token fetches from Adobe IMS."""
+    assert firefly_mod._cached_token is None
+    with patch("models.providers.firefly._get_firefly_access_token") as mock_fetch:
+        mock_fetch.return_value = "tok-fresh"
+        token = _get_or_refresh_token("cid", "csecret")
+        assert token == "tok-fresh"
+        assert mock_fetch.call_count == 1
+        assert firefly_mod._cached_token == "tok-fresh"
