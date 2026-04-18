@@ -194,13 +194,8 @@ class TestThreadPoolLifecycle:
         """atexit should have _shutdown_executors registered."""
         import importlib
 
-        from unittest.mock import patch
-
         with patch("atexit.register") as mock_register:
-            import lambda_function
+            importlib.reload(__import__("lambda_function"))
 
-            importlib.reload(lambda_function)
-
-        # Verify atexit.register was called with _shutdown_executors
         registered_funcs = [call.args[0].__name__ for call in mock_register.call_args_list]
         assert "_shutdown_executors" in registered_funcs

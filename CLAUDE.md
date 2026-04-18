@@ -383,7 +383,7 @@ Same pattern for outpaint: add `outpaint_<provider>()`, register in `_OUTPAINT_H
 - **Ruff Config**: `pyproject.toml` -- line-length 100, rules E/F/W/I, ignore E501
 - **Frontend**: React 19, Zustand 5, Tailwind CSS 4, Vite 8, Vitest 4
 - **DALL-E 3 iteration**: The `iterate_openai`/`outpaint_openai` handlers use `gpt-image-1` for `images.edit` regardless of `OPENAI_MODEL_ID`, because DALL-E 3 does not support image edits (see ADR-5)
-- **Firefly auth**: OAuth2 access tokens are fetched per request (no caching) via Adobe IMS client credentials
+- **Firefly auth**: OAuth2 access tokens are cached at module level with a 50-minute TTL (Adobe IMS tokens last 24h). Cache is per-container, resets on cold start, protected by `threading.Lock`
 - **Nova Canvas auth**: Uses the Lambda IAM role with `bedrock:InvokeModel` permission (no API key)
 - **Tier storage**: DynamoDB `USERS_TABLE_NAME` (default `pixel-prompt-users`), on-demand billing, TTL-backed guest records. Created by SAM even when `AUTH_ENABLED=false` (empty, no cost)
 - **JWT authorizer**: API Gateway HttpApi built-in JWT authorizer gates `/iterate`, `/outpaint`, `/me`, `/billing/checkout`, `/billing/portal` when `AUTH_ENABLED=true`. Lambda reads claims from `event.requestContext.authorizer.jwt.claims` and never re-verifies signatures

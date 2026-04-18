@@ -32,7 +32,8 @@ _STORAGE_URL = "https://firefly-api.adobe.io/v2/storage/image"
 _TOKEN_TIMEOUT = 10
 _API_TIMEOUT = 60
 
-# Module-level token cache (lives within a single Lambda container)
+# Module-level token cache (lives within a single Lambda container).
+# Assumes one set of Firefly credentials per container (single config).
 _token_lock = threading.Lock()
 _cached_token: str | None = None
 _cached_token_expiry: float = 0.0

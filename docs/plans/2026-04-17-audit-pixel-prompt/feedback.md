@@ -18,7 +18,7 @@ Approved after 1 iteration. All 9 tasks verified against spec:
 1. enhance_timeout sourced from config.py (flat import, default 30.0s)
 1. adapt_per_model accepts correlation_id parameter, warning log includes it
 1. _adapt_prompts_for_models extracted with docstring explaining batch optimization
-1. warnings.warn for CORS wildcard with AUTH_ENABLED=true
+1. CORS wildcard warning emitted via StructuredLogger.warning when AUTH_ENABLED=true
 1. All it.skip removed from galleryFlow.test.tsx (0 matches)
 1. Coverage thresholds raised to 57/57/52/60 in vite.config.ts
 

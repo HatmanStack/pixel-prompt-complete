@@ -10,7 +10,7 @@ prevention_tooling: Markdown linting (markdownlint) + link checking (lychee)
 ### SUMMARY
 - Docs scanned: 6 files (CLAUDE.md, README.md, backend/.env.example, frontend/.env.example, docs/adr/001-fixed-four-models.md, docs/adr/002-s3-session-state.md)
 - Code modules scanned: 30+ Python files, 5+ TypeScript config files
-- Total findings: 6 drift, 3 gaps, 2 stale (code comments), 3 config drift
+- Total findings: 6 drift, 3 gaps, 3 stale (code comments), 3 config drift
 
 ---
 

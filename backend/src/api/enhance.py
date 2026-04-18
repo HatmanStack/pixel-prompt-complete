@@ -123,7 +123,6 @@ Enhance the following prompt:"""
                     model=self.prompt_model["id"],
                     contents=f"{system_prompt}\n\n{prompt}",
                     config=generation_config,
-                    request_options={"timeout": enhance_timeout},
                 )
                 if not response.candidates or len(response.candidates) == 0:
                     raise ValueError("Gemini returned empty candidates")
@@ -208,7 +207,6 @@ Enhance the following prompt:"""
                 response = client.models.generate_content(
                     model=prompt_model["id"],
                     contents=f"{self.system_prompt}\n\n{prompt}",
-                    request_options={"timeout": enhance_timeout},
                 )
 
                 # Extract text from Gemini response

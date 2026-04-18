@@ -91,7 +91,7 @@ docs(readme): fix AI Models table to match current codebase
 
    | Method | Path | Handler | Description |
    |--------|------|---------|-------------|
-   | GET | /download/{imageId} | `handle_download` | Download a generated image |
+   | GET | /download/{sessionId}/{model}/{iterationIndex} | `handle_download` | Presigned download URL for a generated image |
    | GET | /prompts/recent | `handle_prompts_recent` | Get recent prompts across sessions |
    | GET | /prompts/history | `handle_prompts_history` | Get user's prompt history (JWT required) |
    | GET | /admin/users | `_route_admin` | Admin: list users (admin group required) |
@@ -327,8 +327,9 @@ docs(readme): add troubleshooting section
    **Backend:** 80% minimum coverage enforced by pytest-cov in CI. All new code must include tests.
 
    **Frontend:** Coverage thresholds are configured in `vite.config.ts`:
-   - Statements/lines: 60%+ (raised from 52% baseline)
-   - Branches/functions: 52%+ (raised from 45% baseline)
+   - Statements/lines: 57%
+   - Branches: 52%
+   - Functions: 60%
 
    Run `npm run test:coverage` to check coverage locally. The CI pipeline will fail if thresholds are not met.
    ```
@@ -349,7 +350,7 @@ No tests needed — documentation only.
 docs(contributing): document test coverage thresholds
 
 - Backend: 80% minimum (pytest-cov)
-- Frontend: 70% statements/lines, 60% branches/functions
+- Frontend: 57% statements/lines, 52% branches, 60% functions
 - Addresses eval Onboarding pillar (8→9)
 ```
 
