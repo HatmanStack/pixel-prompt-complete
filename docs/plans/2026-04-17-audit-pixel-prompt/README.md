@@ -4,7 +4,7 @@
 
 This plan remediates findings from the 2026-04-17 unified audit (health + eval + docs). The codebase was rated GOOD overall with 1 critical, 5 high, 8 medium, and 3 low health findings. The 12-pillar eval scored 6/12 at the 9/10 target, with the biggest gaps in Defensiveness (7/10) and Creativity, Pragmatism, Performance, Test Value, and Onboarding (all 8/10). Documentation audit found 6 drift items, 3 gaps, and 3 config drift issues.
 
-The remediation is organized into 3 phases following the audit pipeline ordering: subtractive cleanup first, then code fixes, then documentation.
+The remediation is organized into a foundation phase (Phase 0) plus 3 implementation phases following the audit pipeline ordering: subtractive cleanup first, then code fixes, then documentation.
 
 ## Prerequisites
 

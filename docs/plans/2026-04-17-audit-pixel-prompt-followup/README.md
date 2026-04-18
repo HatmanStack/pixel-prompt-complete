@@ -12,7 +12,7 @@ Follow-up plan addressing health findings from the 2026-04-17 audit that were no
 |-------------------|---------|-----------|
 | HIGH | Firefly OAuth2 token per-call | Real perf impact: ~500ms added to every Firefly request. Module-level cache with TTL is straightforward. |
 | HIGH | OpenAI download missing specific error handling | Generic `except Exception` catches it but error messages are vague. Adding `requests.RequestException` catch improves diagnostics. |
-| MEDIUM | API_CLIENT_TIMEOUT 120s default | 120s is 40% of a 300s Lambda timeout. Reducing default to 60s is a one-line config change with meaningful risk reduction. |
+| MEDIUM | API_CLIENT_TIMEOUT 120s default | 120s is generous for providers that typically respond in 10-30s. Reducing to 60s surfaces failures faster within the 900s Lambda timeout. |
 ### Findings Closed (already mitigated or low risk)
 
 | Original Severity | Finding | Why Closed |

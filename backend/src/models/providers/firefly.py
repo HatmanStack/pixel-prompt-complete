@@ -8,6 +8,7 @@ single Lambda container and resets on cold start.
 
 from __future__ import annotations
 
+import threading
 import time as _time
 from typing import Any
 
@@ -32,6 +33,7 @@ _TOKEN_TIMEOUT = 10
 _API_TIMEOUT = 60
 
 # Module-level token cache (lives within a single Lambda container)
+_token_lock = threading.Lock()
 _cached_token: str | None = None
 _cached_token_expiry: float = 0.0
 _TOKEN_TTL = 50 * 60  # 50 minutes (Adobe tokens last 24h, refresh well before expiry)
@@ -64,13 +66,14 @@ def _get_firefly_access_token(client_id: str, client_secret: str) -> str:
 def _get_or_refresh_token(client_id: str, client_secret: str) -> str:
     """Return a cached access token, refreshing if expired or missing."""
     global _cached_token, _cached_token_expiry
-    now = _time.monotonic()
-    if _cached_token and now < _cached_token_expiry:
-        return _cached_token
-    token = _get_firefly_access_token(client_id, client_secret)
-    _cached_token = token
-    _cached_token_expiry = now + _TOKEN_TTL
-    return token
+    with _token_lock:
+        now = _time.monotonic()
+        if _cached_token and now < _cached_token_expiry:
+            return _cached_token
+        token = _get_firefly_access_token(client_id, client_secret)
+        _cached_token = token
+        _cached_token_expiry = now + _TOKEN_TTL
+        return token
 
 
 def _firefly_headers(token: str, client_id: str, json_body: bool = True) -> dict[str, str]:

@@ -174,7 +174,7 @@ fix(backend): add specific error handling for OpenAI image downloads
 
 ### Task 3: Reduce API_CLIENT_TIMEOUT Default (MEDIUM)
 
-**Goal:** Reduce the default `API_CLIENT_TIMEOUT` from 120s to 60s to prevent a single hung provider from consuming 40% of the Lambda timeout budget.
+**Goal:** Reduce the default `API_CLIENT_TIMEOUT` from 120s to 60s so hung providers surface errors faster within the 900s Lambda timeout.
 
 **Files to Modify:**
 
@@ -208,7 +208,7 @@ No new tests needed. The default value is a config constant, not behavior. Run e
 ```text
 fix(backend): reduce API_CLIENT_TIMEOUT default from 120s to 60s
 
-- 120s consumed 40% of 300s Lambda timeout budget
+- 120s is generous; 60s still exceeds typical provider response times
 - 60s still generous for image generation APIs (typically 10-30s)
 - Configurable via API_CLIENT_TIMEOUT env var
 - Addresses MEDIUM health finding: config.py:254

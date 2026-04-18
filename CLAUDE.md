@@ -107,7 +107,7 @@ backend/src/
 | POST | /iterate | `handle_iterate` | Refine one model's image (JWT required when `AUTH_ENABLED=true`) |
 | POST | /outpaint | `handle_outpaint` | Expand image to new aspect ratio (JWT required when `AUTH_ENABLED=true`) |
 | GET | /status/{sessionId} | `handle_status` | Get session state with all model iterations |
-| GET | /download/{imageId} | `handle_download` | Download a generated image |
+| GET | /download/{sessionId}/{model}/{iterationIndex} | `handle_download` | Presigned download URL for a generated image |
 | POST | /enhance | `handle_enhance` | LLM prompt improvement |
 | GET | /gallery/list | `handle_gallery_list` | List galleries with CloudFront preview URLs |
 | GET | /gallery/{sessionId} | `handle_gallery_detail` | Get all images (CloudFront URLs) from a gallery |
@@ -119,7 +119,13 @@ backend/src/
 | POST | /billing/portal | `handle_billing_portal` | Create Stripe Customer Portal session (JWT required) |
 | POST | /stripe/webhook | `handle_stripe_webhook` | Stripe event webhook (signature-verified, no JWT) |
 | GET | /admin/users | `handle_admin_users_list` | Admin: list users (admin group required) |
+| GET | /admin/users/{userId} | `handle_admin_user_detail` | Admin: user detail |
+| POST | /admin/users/{userId}/suspend | `handle_admin_suspend` | Admin: suspend user |
+| POST | /admin/users/{userId}/unsuspend | `handle_admin_unsuspend` | Admin: unsuspend user |
+| POST | /admin/users/{userId}/notify | `handle_admin_notify` | Admin: send notification to user |
 | GET | /admin/models | `handle_admin_models_list` | Admin: model status and runtime config |
+| POST | /admin/models/{modelName}/disable | `handle_admin_model_disable` | Admin: disable model at runtime |
+| POST | /admin/models/{modelName}/enable | `handle_admin_model_enable` | Admin: enable model at runtime |
 | GET | /admin/metrics | `handle_admin_metrics` | Admin: usage metrics dashboard |
 | GET | /admin/revenue | `handle_admin_revenue` | Admin: revenue metrics (admin group required) |
 

@@ -22,8 +22,8 @@ Key points:
 
 ### ADR: Firefly Token Caching
 
-The current code fetches a fresh OAuth2 token per request (per ADR-4 which states "no caching"). This plan overrides that decision with a module-level cache. Rationale: Adobe IMS tokens have a 24-hour TTL. Caching with a 50-minute TTL saves ~500ms per request and reduces Adobe IMS rate-limit risk. The cache is module-scoped, so it lives within a single Lambda container and resets on cold start.
+The previous implementation fetched a fresh OAuth2 token per request (per ADR-4 which stated "no caching"). This ADR overrides that decision with a module-level cache. Rationale: Adobe IMS tokens have a 24-hour TTL. Caching with a 50-minute TTL saves ~500ms per request and reduces Adobe IMS rate-limit risk. The cache is module-scoped, protected by a `threading.Lock`, lives within a single Lambda container, and resets on cold start.
 
 ### ADR: API Timeout Default
 
-Reducing `API_CLIENT_TIMEOUT` from 120s to 60s. Image generation APIs typically respond in 10-30s. A 120s timeout means a hung provider consumes 40% of a 300s Lambda timeout. At 60s, a hung provider still allows time for other operations and cleaner error reporting.
+Reducing `API_CLIENT_TIMEOUT` from 120s to 60s. Image generation APIs typically respond in 10-30s. A 120s timeout is generous but with 4 parallel providers, a hung provider blocks its thread for the full duration. At 60s, failures surface faster and Lambda has ample headroom within its 900s timeout and 3008 MB memory allocation.

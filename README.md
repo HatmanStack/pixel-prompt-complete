@@ -35,15 +35,15 @@ Pixel Prompt is a serverless platform that generates images from text prompts us
                           │  (Python)    │
                           └──────┬───────┘
                                  │
-              ┌──────────────────┼──────────────────┐
-              │    ThreadPoolExecutor (4 workers)    │
-              ├──────────┬──────────┬───────────┐    │
-              │  Gemini  │  Nova    │  DALL-E 3 │ Firefly
-              │ (Google) │ (AWS)   │ (OpenAI)  │ (Adobe)
-              └──────────┴──────┬───┴───────────┘    │
-                                │                    │
-                         ┌──────▼───────┐            │
-                         │      S3      │────────────┘
+              ┌─────────────────────────────────────────────┐
+              │       ThreadPoolExecutor (4 workers)         │
+              ├──────────┬──────────┬───────────┬────────────┤
+              │  Gemini  │  Nova    │  DALL-E 3 │  Firefly   │
+              │ (Google) │ (AWS)    │ (OpenAI)  │  (Adobe)   │
+              └──────────┴──────┬───┴───────────┴────────────┘
+                                │
+                         ┌──────▼───────┐
+                         │      S3      │
                          │  (sessions)  │
                          └──────┬───────┘
                                 │

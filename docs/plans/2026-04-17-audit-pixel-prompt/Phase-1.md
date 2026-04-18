@@ -25,11 +25,10 @@ Fix stale code comments and docstrings that reference the old model names ("flux
 
 **Implementation Steps:**
 
-1. Read `backend/src/config.py` and find the comment on line 43 that says `'flux', 'recraft', 'gemini', 'openai'`
-1. Change it to `'gemini', 'nova', 'openai', 'firefly'`
-1. Read `backend/src/jobs/manager.py` and find:
-   - Line 39: comment `4 model columns (flux, recraft, gemini, openai)` — change to `4 model columns (gemini, nova, openai, firefly)`
-   - Line 125: docstring `Model name ('flux', 'recraft', 'gemini', 'openai')` — change to `Model name ('gemini', 'nova', 'openai', 'firefly')`
+1. Verify `backend/src/config.py` line 43 comment reads `'gemini', 'nova', 'openai', 'firefly'`
+1. Verify `backend/src/jobs/manager.py` contains:
+   - Line 39: comment `4 model columns (gemini, nova, openai, firefly)`
+   - Line 125: docstring `Model name ('gemini', 'nova', 'openai', 'firefly')`
 
 **Verification Checklist:**
 

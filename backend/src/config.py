@@ -252,11 +252,12 @@ if ses_enabled and not ses_from_email:
 
 # CORS + Auth compatibility check
 if auth_enabled and cors_allowed_origin == "*":
-    warnings.warn(
+    from utils.logger import StructuredLogger as _CfgLogger
+
+    _CfgLogger.warning(
         "CORS_ALLOWED_ORIGIN='*' with AUTH_ENABLED=true: "
         "browsers will block credentialed requests. "
-        "Set CORS_ALLOWED_ORIGIN to your frontend domain.",
-        stacklevel=1,
+        "Set CORS_ALLOWED_ORIGIN to your frontend domain."
     )
 
 # Operational Timeouts (seconds) - configurable via environment

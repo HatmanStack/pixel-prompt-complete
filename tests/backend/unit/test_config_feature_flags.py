@@ -168,18 +168,17 @@ def test_per_model_cap_override(monkeypatch):
 
 
 def test_cors_wildcard_with_auth_warns(monkeypatch):
-    """CORS_ALLOWED_ORIGIN='*' with AUTH_ENABLED=true should emit a warning."""
+    """CORS_ALLOWED_ORIGIN='*' with AUTH_ENABLED=true should log a warning."""
     monkeypatch.setenv("AUTH_ENABLED", "true")
     monkeypatch.setenv("GUEST_TOKEN_SECRET", "test-secret")
     monkeypatch.setenv("CORS_ALLOWED_ORIGIN", "*")
-    import warnings
+    from unittest.mock import patch
 
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        config = _reload_config()
-        cors_warnings = [x for x in w if "CORS_ALLOWED_ORIGIN" in str(x.message)]
-        assert len(cors_warnings) == 1
-        assert "credentialed requests" in str(cors_warnings[0].message)
+    with patch("utils.logger.StructuredLogger.warning") as mock_warn:
+        _reload_config()
+        cors_calls = [c for c in mock_warn.call_args_list if "CORS_ALLOWED_ORIGIN" in str(c)]
+        assert len(cors_calls) == 1
+        assert "credentialed requests" in str(cors_calls[0])
 
 
 def test_cors_specific_origin_with_auth_no_warning(monkeypatch):
@@ -187,23 +186,21 @@ def test_cors_specific_origin_with_auth_no_warning(monkeypatch):
     monkeypatch.setenv("AUTH_ENABLED", "true")
     monkeypatch.setenv("GUEST_TOKEN_SECRET", "test-secret")
     monkeypatch.setenv("CORS_ALLOWED_ORIGIN", "https://example.com")
-    import warnings
+    from unittest.mock import patch
 
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        config = _reload_config()
-        cors_warnings = [x for x in w if "CORS_ALLOWED_ORIGIN" in str(x.message)]
-        assert len(cors_warnings) == 0
+    with patch("utils.logger.StructuredLogger.warning") as mock_warn:
+        _reload_config()
+        cors_calls = [c for c in mock_warn.call_args_list if "CORS_ALLOWED_ORIGIN" in str(c)]
+        assert len(cors_calls) == 0
 
 
 def test_cors_wildcard_without_auth_no_warning(monkeypatch):
     """No warning when AUTH_ENABLED=false even with wildcard CORS."""
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("CORS_ALLOWED_ORIGIN", "*")
-    import warnings
+    from unittest.mock import patch
 
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        config = _reload_config()
-        cors_warnings = [x for x in w if "CORS_ALLOWED_ORIGIN" in str(x.message)]
-        assert len(cors_warnings) == 0
+    with patch("utils.logger.StructuredLogger.warning") as mock_warn:
+        _reload_config()
+        cors_calls = [c for c in mock_warn.call_args_list if "CORS_ALLOWED_ORIGIN" in str(c)]
+        assert len(cors_calls) == 0

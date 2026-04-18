@@ -434,23 +434,6 @@ def lambda_handler(event: LambdaEvent, context: LambdaContext) -> ApiResponse:
         return response(500, {"error": "Internal server error"})
 
 
-def _adapt_prompts_for_models(
-    prompt: str,
-    model_names: list[str],
-    correlation_id: str,
-) -> dict[str, str]:
-    """Adapt a single user prompt into model-specific prompts.
-
-    Uses a single LLM call with a JSON response to produce per-model adapted
-    prompts instead of making N separate calls.  This reduces latency and
-    cost by ~4x compared to individual adaptation calls.
-
-    Returns a dict mapping model name to adapted prompt.  Falls back to the
-    original prompt for any model whose adaptation fails.
-    """
-    return prompt_enhancer.adapt_per_model(prompt, model_names, correlation_id=correlation_id)
-
-
 def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> ApiResponse:
     """
     POST /generate - Create new session and generate initial images.
@@ -505,8 +488,10 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
 
         enabled_model_names = [m.name for m in models_to_dispatch]
 
-        # Adapt prompt per model (single LLM call)
-        adapted_prompts = _adapt_prompts_for_models(prompt, enabled_model_names, correlation_id)
+        # Adapt prompt per model (single LLM call, ~4x cheaper than per-model calls)
+        adapted_prompts = prompt_enhancer.adapt_per_model(
+            prompt, enabled_model_names, correlation_id=correlation_id
+        )
 
         # Create session
         session_id = session_manager.create_session(prompt, enabled_model_names)
@@ -598,7 +583,7 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
         try:
             for future in as_completed(futures, timeout=future_timeout):
                 try:
-                    model_name, result = future.result(timeout=future_timeout)
+                    model_name, result = future.result()
                     results[model_name] = result
                 except Exception as e:
                     model_name = futures[future].name

@@ -7,7 +7,7 @@ Fix all documentation drift, gaps, and config mismatches found in the doc audit.
 **Success criteria:**
 
 - README.md AI Models table matches `config.py` exactly
-- CLAUDE.md API endpoints table lists all 18+ endpoints
+- CLAUDE.md API endpoints table lists all endpoints from the routing block
 - CLAUDE.md frontend env vars table matches `frontend/src/api/config.ts`
 - `frontend/.env.example` uses port 3000 (matching `vite.config.ts`)
 - README.md includes troubleshooting section
@@ -103,7 +103,7 @@ docs(readme): fix AI Models table to match current codebase
 
 **Verification Checklist:**
 
-- [x] Table has 19 endpoint entries (12 existing + 7 new)
+- [x] Table includes all endpoints from the lambda_function.py routing block
 - [x] Every route in `lambda_function.py`'s routing block has a corresponding row
 - [x] Handler function names are correct
 - [x] Auth requirements are noted where applicable
@@ -356,7 +356,7 @@ docs(contributing): document test coverage thresholds
 ## Phase Verification
 
 1. `grep -n "flux\|recraft\|BFL\|flux-2-pro\|recraftv3" README.md` — no results
-1. CLAUDE.md API endpoints table has 18 entries matching the routing block in `lambda_function.py`
+1. CLAUDE.md API endpoints table matches all routes in the `lambda_function.py` routing block
 1. CLAUDE.md frontend env vars table matches `frontend/src/api/config.ts` exactly
 1. `grep "5173" frontend/.env.example` — no results
 1. README.md has a Troubleshooting section

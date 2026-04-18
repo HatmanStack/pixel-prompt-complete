@@ -31,7 +31,7 @@ prevention_tooling: Markdown linting (markdownlint) + link checking (lychee)
 
 3. **`CLAUDE.md:102-117`** — API Endpoints table incomplete
    - Doc only lists 11 endpoints; code implements 18+ endpoints
-   - Missing endpoints: `/prompts/recent`, `/prompts/history`, `/download/{imageId}`, `/admin/users`, `/admin/models`, `/admin/metrics`, `/admin/revenue`
+   - Missing endpoints: `/prompts/recent`, `/prompts/history`, `/download/{sessionId}/{model}/{iterationIndex}`, `/admin/users`, `/admin/models`, `/admin/metrics`, `/admin/revenue`
    - Code source: `backend/src/lambda_function.py:378-415`
 
 4. **`README.md:56-64`** — Quick Start port inconsistency
@@ -57,7 +57,7 @@ prevention_tooling: Markdown linting (markdownlint) + link checking (lychee)
    - Handlers: `handle_prompts_recent`, `handle_prompts_history`
    - Code source: `backend/src/lambda_function.py:396-398`
 
-2. **`/download/{imageId}` endpoint** — No mention in CLAUDE.md API table
+2. **`/download/{sessionId}/{model}/{iterationIndex}` endpoint** — No mention in CLAUDE.md API table
    - Code source: `backend/src/lambda_function.py:386-387, 1024-1093`
 
 3. **Admin endpoints** (`/admin/users`, `/admin/models`, `/admin/metrics`, `/admin/revenue`) — No mention in CLAUDE.md API table
