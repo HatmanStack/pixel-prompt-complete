@@ -253,4 +253,5 @@ if ses_enabled and not ses_from_email:
 # Operational Timeouts (seconds) - configurable via environment
 api_client_timeout = _safe_float("API_CLIENT_TIMEOUT", 120.0)
 image_download_timeout = _safe_int("IMAGE_DOWNLOAD_TIMEOUT", 30)
+enhance_timeout = _safe_float("ENHANCE_TIMEOUT", 30.0)
 generate_thread_workers = _safe_int("GENERATE_THREAD_WORKERS", 4)

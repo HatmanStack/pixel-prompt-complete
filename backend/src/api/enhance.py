@@ -9,7 +9,7 @@ import json
 import warnings
 from typing import Any, Optional
 
-from config import prompt_model_api_key, prompt_model_id, prompt_model_provider
+from config import enhance_timeout, prompt_model_api_key, prompt_model_id, prompt_model_provider
 from utils.clients import get_genai_client, get_openai_client
 from utils.logger import StructuredLogger
 
@@ -119,7 +119,7 @@ Enhance the following prompt:"""
                     raise ValueError("Gemini returned empty candidates")
                 response_text = response.candidates[0].content.parts[0].text.strip()
             else:
-                client_kwargs: dict[str, Any] = {"timeout": 10.0}
+                client_kwargs: dict[str, Any] = {"timeout": enhance_timeout}
                 if "base_url" in self.prompt_model:
                     client_kwargs["base_url"] = self.prompt_model["base_url"]
                 client = get_openai_client(api_key, **client_kwargs)
@@ -208,7 +208,7 @@ Enhance the following prompt:"""
                 if not api_key:
                     return prompt
 
-                client_kwargs = {"timeout": 30.0}
+                client_kwargs = {"timeout": enhance_timeout}
 
                 # Support custom base_url for OpenAI-compatible providers
                 if "base_url" in prompt_model:

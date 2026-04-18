@@ -256,3 +256,49 @@ class TestPromptEnhancer:
                 result = enhancer.enhance("test")
 
                 assert result == "Enhanced prompt with whitespace"
+
+    def test_enhance_uses_configurable_timeout(self):
+        """Test that enhance uses enhance_timeout from config."""
+        with patch('api.enhance.prompt_model_provider', 'openai'), \
+             patch('api.enhance.prompt_model_id', 'gpt-4o-mini'), \
+             patch('api.enhance.prompt_model_api_key', 'test-key'), \
+             patch('api.enhance.enhance_timeout', 15.0):
+
+            enhancer = PromptEnhancer()
+
+            with patch('api.enhance.get_openai_client') as mock_get_client:
+                mock_client = Mock()
+                mock_get_client.return_value = mock_client
+
+                mock_response = Mock()
+                mock_response.choices = [Mock()]
+                mock_response.choices[0].message.content = "Enhanced"
+                mock_client.chat.completions.create.return_value = mock_response
+
+                enhancer.enhance("test")
+
+                call_args = mock_get_client.call_args
+                assert call_args.kwargs['timeout'] == 15.0
+
+    def test_adapt_per_model_uses_configurable_timeout(self):
+        """Test that adapt_per_model uses enhance_timeout from config."""
+        with patch('api.enhance.prompt_model_provider', 'openai'), \
+             patch('api.enhance.prompt_model_id', 'gpt-4o-mini'), \
+             patch('api.enhance.prompt_model_api_key', 'test-key'), \
+             patch('api.enhance.enhance_timeout', 42.0):
+
+            enhancer = PromptEnhancer()
+
+            with patch('api.enhance.get_openai_client') as mock_get_client:
+                mock_client = Mock()
+                mock_get_client.return_value = mock_client
+
+                mock_response = Mock()
+                mock_response.choices = [Mock()]
+                mock_response.choices[0].message.content = '{"gemini": "adapted"}'
+                mock_client.chat.completions.create.return_value = mock_response
+
+                enhancer.adapt_per_model("test", ["gemini"])
+
+                call_args = mock_get_client.call_args
+                assert call_args.kwargs['timeout'] == 42.0
