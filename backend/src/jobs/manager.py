@@ -36,7 +36,7 @@ class SessionManager:
 
     Each session tracks:
     - Original prompt
-    - 4 model columns (flux, recraft, gemini, openai)
+    - 4 model columns (gemini, nova, openai, firefly)
     - Up to 7 iterations per model
     - Status per model and overall
     """
@@ -58,7 +58,7 @@ class SessionManager:
 
         Args:
             prompt: Original text prompt
-            enabled_models: List of enabled model names ('flux', 'recraft', etc.)
+            enabled_models: List of enabled model names ('gemini', 'nova', etc.)
 
         Returns:
             Session ID (UUID)
@@ -122,7 +122,7 @@ class SessionManager:
 
         Args:
             session_id: Session identifier
-            model: Model name ('flux', 'recraft', 'gemini', 'openai')
+            model: Model name ('gemini', 'nova', 'openai', 'firefly')
             prompt: Iteration prompt
             is_outpaint: Whether this is an outpaint operation
             outpaint_preset: Outpaint preset if applicable

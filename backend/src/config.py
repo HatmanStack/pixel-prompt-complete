@@ -40,7 +40,7 @@ def _safe_float(env_var: str, default: float) -> float:
 class ModelConfig:
     """Configuration for a single image generation model."""
 
-    name: str  # Internal name: 'flux', 'recraft', 'gemini', 'openai'
+    name: str  # Internal name: 'gemini', 'nova', 'openai', 'firefly'
     provider: str  # Provider identifier for handler lookup
     enabled: bool
     api_key: str
@@ -190,7 +190,7 @@ def get_model(name: str) -> ModelConfig:
     Get specific model config by name.
 
     Args:
-        name: Model name ('flux', 'recraft', 'gemini', 'openai')
+        name: Model name ('gemini', 'nova', 'openai', 'firefly')
 
     Returns:
         ModelConfig for the requested model
