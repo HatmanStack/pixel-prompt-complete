@@ -260,7 +260,7 @@ if auth_enabled and cors_allowed_origin == "*":
     )
 
 # Operational Timeouts (seconds) - configurable via environment
-api_client_timeout = _safe_float("API_CLIENT_TIMEOUT", 120.0)
+api_client_timeout = _safe_float("API_CLIENT_TIMEOUT", 60.0)
 image_download_timeout = _safe_int("IMAGE_DOWNLOAD_TIMEOUT", 30)
 enhance_timeout = _safe_float("ENHANCE_TIMEOUT", 30.0)
 generate_thread_workers = _safe_int("GENERATE_THREAD_WORKERS", 4)

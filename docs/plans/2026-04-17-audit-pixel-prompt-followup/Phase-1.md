@@ -194,10 +194,10 @@ fix(backend): add specific error handling for OpenAI image downloads
 
 **Verification Checklist:**
 
-- [ ] `config.py` defaults `API_CLIENT_TIMEOUT` to `60.0`
-- [ ] `CLAUDE.md` Operational Timeouts table shows `60.0` for `API_CLIENT_TIMEOUT`
-- [ ] `ruff check backend/src/` passes
-- [ ] Existing tests pass (tests should not depend on the default timeout value)
+- [x] `config.py` defaults `API_CLIENT_TIMEOUT` to `60.0`
+- [x] `CLAUDE.md` Operational Timeouts table shows `60.0` for `API_CLIENT_TIMEOUT`
+- [x] `ruff check backend/src/` passes
+- [x] Existing tests pass (tests should not depend on the default timeout value)
 
 **Testing Instructions:**
 

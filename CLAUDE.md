@@ -261,7 +261,7 @@ Cost ceiling checks run only when `AUTH_ENABLED=true`. Models at their daily cap
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `API_CLIENT_TIMEOUT` | No | `120.0` | Timeout for AI provider API calls (seconds, float) |
+| `API_CLIENT_TIMEOUT` | No | `60.0` | Timeout for AI provider API calls (seconds, float) |
 | `IMAGE_DOWNLOAD_TIMEOUT` | No | `30` | Timeout for downloading generated images (seconds) |
 | `ENHANCE_TIMEOUT` | No | `30.0` | Timeout for prompt enhancement/adaptation LLM calls (seconds, float) |
 | `GENERATE_THREAD_WORKERS` | No | `4` | Number of parallel generation threads |
