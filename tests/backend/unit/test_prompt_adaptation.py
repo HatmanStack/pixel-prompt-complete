@@ -291,7 +291,7 @@ class TestGenerateAdaptation:
             return future
 
         gen_mocks["_executor"].submit.side_effect = submit_sync
-        mock_as_completed.side_effect = lambda futures: futures.keys()
+        mock_as_completed.side_effect = lambda futures, **kwargs: futures.keys()
 
         lambda_handler = _get_lambda_handler()
         resp = lambda_handler(_make_event(body={"prompt": "sunset"}), None)
@@ -330,7 +330,7 @@ class TestGenerateAdaptation:
             return future
 
         gen_mocks["_executor"].submit.side_effect = submit_sync
-        mock_as_completed.side_effect = lambda futures: futures.keys()
+        mock_as_completed.side_effect = lambda futures, **kwargs: futures.keys()
 
         lambda_handler(_make_event(body={"prompt": "sunset"}), None)
 
@@ -367,7 +367,7 @@ class TestGenerateAdaptation:
             return future
 
         gen_mocks["_executor"].submit.side_effect = submit_sync
-        mock_as_completed.side_effect = lambda futures: futures.keys()
+        mock_as_completed.side_effect = lambda futures, **kwargs: futures.keys()
 
         lambda_handler(_make_event(body={"prompt": "original sunset"}), None)
 
@@ -411,7 +411,7 @@ class TestGenerateAdaptation:
             return future
 
         gen_mocks["_executor"].submit.side_effect = submit_sync
-        mock_as_completed.side_effect = lambda futures: futures.keys()
+        mock_as_completed.side_effect = lambda futures, **kwargs: futures.keys()
 
         resp = lambda_handler(_make_event(body={"prompt": "original sunset"}), None)
         assert resp["statusCode"] == 200
