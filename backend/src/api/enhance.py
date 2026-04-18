@@ -115,7 +115,7 @@ Enhance the following prompt:"""
             system_prompt = self.adaptation_system_prompt.format(model_keys=model_keys)
 
             if provider == "google_gemini":
-                client = get_genai_client(api_key)
+                client = get_genai_client(api_key, timeout=enhance_timeout)
                 generation_config: dict[str, Any] = {
                     "response_mime_type": "application/json",
                 }
@@ -202,7 +202,7 @@ Enhance the following prompt:"""
                 if not api_key:
                     return prompt
 
-                client = get_genai_client(api_key)
+                client = get_genai_client(api_key, timeout=enhance_timeout)
 
                 response = client.models.generate_content(
                     model=prompt_model["id"],

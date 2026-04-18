@@ -16,7 +16,7 @@ from config import api_client_timeout, aws_region
 
 # Module-level client singletons for Lambda container reuse
 _openai_clients: Dict[Any, OpenAI] = {}
-_genai_clients: Dict[str, genai.Client] = {}
+_genai_clients: Dict[Any, genai.Client] = {}
 _bedrock_clients: Dict[str, Any] = {}
 
 
@@ -41,11 +41,12 @@ def get_openai_client(api_key: str, **kwargs) -> OpenAI:
     return _openai_clients[cache_key]
 
 
-def get_genai_client(api_key: str) -> genai.Client:
-    """Get or create a cached Google genai client keyed by api_key."""
-    cache_key = api_key or "__default__"
+def get_genai_client(api_key: str, timeout: float | None = None) -> genai.Client:
+    """Get or create a cached Google genai client keyed by api_key and timeout."""
+    cache_key = (api_key or "__default__", timeout)
     if cache_key not in _genai_clients:
-        _genai_clients[cache_key] = genai.Client(api_key=api_key or None)
+        http_opts = genai.types.HttpOptions(timeout=int(timeout * 1000)) if timeout else None
+        _genai_clients[cache_key] = genai.Client(api_key=api_key or None, http_options=http_opts)
     return _genai_clients[cache_key]
 
 
