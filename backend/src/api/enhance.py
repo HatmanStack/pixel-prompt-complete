@@ -80,12 +80,18 @@ Enhance the following prompt:"""
             "Return ONLY valid JSON. No markdown, no explanation."
         )
 
-    def adapt_per_model(self, prompt: str, enabled_models: list[str]) -> dict[str, str]:
+    def adapt_per_model(
+        self,
+        prompt: str,
+        enabled_models: list[str],
+        correlation_id: str | None = None,
+    ) -> dict[str, str]:
         """Adapt a prompt for each enabled model's strengths via a single LLM call.
 
         Args:
             prompt: The user's original prompt.
             enabled_models: List of enabled model names (e.g. ["gemini", "nova"]).
+            correlation_id: Optional request correlation ID for structured logging.
 
         Returns:
             Dict mapping model name to adapted prompt string.
@@ -159,7 +165,10 @@ Enhance the following prompt:"""
             return result
 
         except Exception as e:
-            StructuredLogger.warning(f"Prompt adaptation failed: {e}")
+            StructuredLogger.warning(
+                f"Prompt adaptation failed: {e}",
+                correlation_id=correlation_id,
+            )
             return fallback
 
     def enhance(self, prompt: str) -> Optional[str]:

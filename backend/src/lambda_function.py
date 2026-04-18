@@ -489,7 +489,9 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
         enabled_model_names = [m.name for m in models_to_dispatch]
 
         # Adapt prompt per model (single LLM call)
-        adapted_prompts = prompt_enhancer.adapt_per_model(prompt, enabled_model_names)
+        adapted_prompts = prompt_enhancer.adapt_per_model(
+            prompt, enabled_model_names, correlation_id=correlation_id
+        )
 
         # Create session
         session_id = session_manager.create_session(prompt, enabled_model_names)
