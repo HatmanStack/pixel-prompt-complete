@@ -563,8 +563,11 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
                 if iteration_index is not None:
                     try:
                         _handle_failed_result(session_id, model_name, iteration_index, sanitized)
-                    except Exception:
-                        pass  # Best-effort; don't mask the original error
+                    except Exception as fail_err:
+                        StructuredLogger.warning(
+                            f"Failed to mark iteration as failed: {fail_err}",
+                            correlation_id=correlation_id,
+                        )
                 return model_name, {"status": "error", "error": sanitized}
 
         # Include skipped models in results
@@ -840,8 +843,11 @@ def _handle_refinement(
                 _handle_failed_result(
                     session_id, model_name, iteration_index, sanitize_error_message(e)
                 )
-            except Exception:
-                pass  # Best-effort; don't mask the original error
+            except Exception as fail_err:
+                StructuredLogger.warning(
+                    f"Failed to mark iteration as failed: {fail_err}",
+                    correlation_id=correlation_id,
+                )
         StructuredLogger.error(
             f"Error in {handler_name}: {e}",
             correlation_id=correlation_id,
