@@ -4,6 +4,7 @@ Routes API requests to appropriate handlers for image generation,
 iteration, outpainting, and session status.
 """
 
+import atexit
 import base64
 import json
 import re
@@ -106,6 +107,14 @@ prompt_enhancer = PromptEnhancer()
 # Separate pools prevent gallery metadata fetches from starving generation threads.
 _executor = ThreadPoolExecutor(max_workers=generate_thread_workers)
 _gallery_executor = ThreadPoolExecutor(max_workers=4)
+
+
+def _shutdown_executors():
+    _executor.shutdown(wait=False)
+    _gallery_executor.shutdown(wait=False)
+
+
+atexit.register(_shutdown_executors)
 
 
 @dataclass
