@@ -60,6 +60,20 @@ def handle_openai(
             "openai",
         )
 
+    except requests.ConnectionError as e:
+        return _error_result(
+            f"Image download connection failed: {e}",
+            model_config,
+            "openai",
+        )
+
+    except requests.HTTPError as e:
+        return _error_result(
+            f"Image download HTTP error: {e.response.status_code if e.response else 'unknown'}",
+            model_config,
+            "openai",
+        )
+
     except Exception as e:
         return _error_result(e, model_config, "openai")
 

@@ -107,14 +107,27 @@ backend/src/
 | POST | /iterate | `handle_iterate` | Refine one model's image (JWT required when `AUTH_ENABLED=true`) |
 | POST | /outpaint | `handle_outpaint` | Expand image to new aspect ratio (JWT required when `AUTH_ENABLED=true`) |
 | GET | /status/{sessionId} | `handle_status` | Get session state with all model iterations |
+| GET | /download/{sessionId}/{model}/{iterationIndex} | `handle_download` | Presigned download URL for a generated image |
 | POST | /enhance | `handle_enhance` | LLM prompt improvement |
 | GET | /gallery/list | `handle_gallery_list` | List galleries with CloudFront preview URLs |
 | GET | /gallery/{sessionId} | `handle_gallery_detail` | Get all images (CloudFront URLs) from a gallery |
+| GET | /prompts/recent | `handle_prompts_recent` | Get recent prompts across sessions |
+| GET | /prompts/history | `handle_prompts_history` | Get user's prompt history (JWT required) |
 | POST | /log | `handle_log_endpoint` | Client error logging |
 | GET | /me | `handle_me` | User info + tier + current quota (JWT required) |
-| POST | /billing/checkout | `handle_checkout` | Create Stripe Checkout session (JWT required) |
-| POST | /billing/portal | `handle_portal` | Create Stripe Customer Portal session (JWT required) |
+| POST | /billing/checkout | `handle_billing_checkout` | Create Stripe Checkout session (JWT required) |
+| POST | /billing/portal | `handle_billing_portal` | Create Stripe Customer Portal session (JWT required) |
 | POST | /stripe/webhook | `handle_stripe_webhook` | Stripe event webhook (signature-verified, no JWT) |
+| GET | /admin/users | `handle_admin_users_list` | Admin: list users (admin group required) |
+| GET | /admin/users/{userId} | `handle_admin_user_detail` | Admin: user detail |
+| POST | /admin/users/{userId}/suspend | `handle_admin_suspend` | Admin: suspend user |
+| POST | /admin/users/{userId}/unsuspend | `handle_admin_unsuspend` | Admin: unsuspend user |
+| POST | /admin/users/{userId}/notify | `handle_admin_notify` | Admin: send notification to user |
+| GET | /admin/models | `handle_admin_models_list` | Admin: model status and runtime config |
+| POST | /admin/models/{modelName}/disable | `handle_admin_model_disable` | Admin: disable model at runtime |
+| POST | /admin/models/{modelName}/enable | `handle_admin_model_enable` | Admin: enable model at runtime |
+| GET | /admin/metrics | `handle_admin_metrics` | Admin: usage metrics dashboard |
+| GET | /admin/revenue | `handle_admin_revenue` | Admin: revenue metrics (admin group required) |
 
 ### Model Configuration (Fixed 4 Models)
 
@@ -254,8 +267,9 @@ Cost ceiling checks run only when `AUTH_ENABLED=true`. Models at their daily cap
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `API_CLIENT_TIMEOUT` | No | `120.0` | Timeout for AI provider API calls (seconds, float) |
+| `API_CLIENT_TIMEOUT` | No | `60.0` | Timeout for AI provider API calls (seconds, float) |
 | `IMAGE_DOWNLOAD_TIMEOUT` | No | `30` | Timeout for downloading generated images (seconds) |
+| `ENHANCE_TIMEOUT` | No | `30.0` | Timeout for prompt enhancement/adaptation LLM calls (seconds, float) |
 | `GENERATE_THREAD_WORKERS` | No | `4` | Number of parallel generation threads |
 
 **Frontend** (Vite, set in `.env` or `.env.local`):
@@ -263,9 +277,17 @@ Cost ceiling checks run only when `AUTH_ENABLED=true`. Models at their daily cap
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `VITE_API_ENDPOINT` | Yes (prod) | -- | API Gateway endpoint URL |
-| `VITE_CLOUDFRONT_DOMAIN` | No | -- | CloudFront distribution domain |
-| `VITE_S3_BUCKET` | No | -- | S3 bucket name |
-| `VITE_ENVIRONMENT` | No | -- | Environment name |
+| `VITE_AUTH_ENABLED` | No | `false` | Enable Cognito auth UI |
+| `VITE_BILLING_ENABLED` | No | `false` | Enable Stripe billing UI |
+| `VITE_COGNITO_DOMAIN` | Yes* | -- | Cognito Hosted UI domain |
+| `VITE_COGNITO_CLIENT_ID` | Yes* | -- | Cognito App Client ID |
+| `VITE_COGNITO_REDIRECT_URI` | Yes* | -- | OAuth2 callback URL |
+| `VITE_COGNITO_LOGOUT_URI` | Yes* | -- | Post-logout redirect URL |
+| `VITE_ADMIN_ENABLED` | No | `false` | Enable admin dashboard UI |
+| `VITE_CAPTCHA_ENABLED` | No | `false` | Enable Turnstile CAPTCHA UI |
+| `VITE_TURNSTILE_SITE_KEY` | Yes** | -- | Cloudflare Turnstile site key |
+
+*Required when `VITE_AUTH_ENABLED=true`. **Required when `VITE_CAPTCHA_ENABLED=true`.
 
 See `backend/.env.example` for a copyable template of backend variables.
 
@@ -361,7 +383,7 @@ Same pattern for outpaint: add `outpaint_<provider>()`, register in `_OUTPAINT_H
 - **Ruff Config**: `pyproject.toml` -- line-length 100, rules E/F/W/I, ignore E501
 - **Frontend**: React 19, Zustand 5, Tailwind CSS 4, Vite 8, Vitest 4
 - **DALL-E 3 iteration**: The `iterate_openai`/`outpaint_openai` handlers use `gpt-image-1` for `images.edit` regardless of `OPENAI_MODEL_ID`, because DALL-E 3 does not support image edits (see ADR-5)
-- **Firefly auth**: OAuth2 access tokens are fetched per request (no caching) via Adobe IMS client credentials
+- **Firefly auth**: OAuth2 access tokens are cached at module level with a 50-minute TTL (Adobe IMS tokens last 24h). Cache is per-container, resets on cold start, protected by `threading.Lock`
 - **Nova Canvas auth**: Uses the Lambda IAM role with `bedrock:InvokeModel` permission (no API key)
 - **Tier storage**: DynamoDB `USERS_TABLE_NAME` (default `pixel-prompt-users`), on-demand billing, TTL-backed guest records. Created by SAM even when `AUTH_ENABLED=false` (empty, no cost)
 - **JWT authorizer**: API Gateway HttpApi built-in JWT authorizer gates `/iterate`, `/outpaint`, `/me`, `/billing/checkout`, `/billing/portal` when `AUTH_ENABLED=true`. Lambda reads claims from `event.requestContext.authorizer.jwt.claims` and never re-verifies signatures

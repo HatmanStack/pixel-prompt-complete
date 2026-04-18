@@ -15,7 +15,7 @@
 
 ## What is this?
 
-Pixel Prompt is a serverless platform that generates images from text prompts using four AI models simultaneously. Submit a prompt, get results from Flux, Recraft, Gemini, and OpenAI side-by-side, then iterate on any model's output with follow-up prompts or expand images to different aspect ratios. Deployed on AWS with Lambda, S3, and CloudFront — no servers to manage.
+Pixel Prompt is a serverless platform that generates images from text prompts using four AI models simultaneously. Submit a prompt, get results from Gemini, Nova Canvas, DALL-E 3, and Firefly side-by-side, then iterate on any model's output with follow-up prompts or expand images to different aspect ratios. Deployed on AWS with Lambda, S3, and CloudFront — no servers to manage.
 
 ## Architecture
 
@@ -35,15 +35,15 @@ Pixel Prompt is a serverless platform that generates images from text prompts us
                           │  (Python)    │
                           └──────┬───────┘
                                  │
-              ┌──────────────────┼──────────────────┐
-              │    ThreadPoolExecutor (4 workers)    │
-              ├──────────┬──────────┬───────────┐    │
-              │  Flux    │ Recraft  │  Gemini   │ OpenAI
-              │  (BFL)   │          │ (Google)  │    │
-              └──────────┴──────┬───┴───────────┘    │
-                                │                    │
-                         ┌──────▼───────┐            │
-                         │      S3      │────────────┘
+              ┌─────────────────────────────────────────────┐
+              │       ThreadPoolExecutor (4 workers)         │
+              ├──────────┬──────────┬───────────┬────────────┤
+              │  Gemini  │  Nova    │  DALL-E 3 │  Firefly   │
+              │ (Google) │ (AWS)    │ (OpenAI)  │  (Adobe)   │
+              └──────────┴──────┬───┴───────────┴────────────┘
+                                │
+                         ┌──────▼───────┐
+                         │      S3      │
                          │  (sessions)  │
                          └──────┬───────┘
                                 │
@@ -165,12 +165,29 @@ Four fixed models run in parallel for every generation:
 
 | Name | Provider | Default Model ID | Enable Env Var |
 |------|----------|-------------------|----------------|
-| Flux | BFL | flux-2-pro | `FLUX_ENABLED` |
-| Recraft | Recraft | recraftv3 | `RECRAFT_ENABLED` |
-| Gemini | Google | gemini-2.5-flash-image | `GEMINI_ENABLED` |
-| OpenAI | OpenAI | gpt-image-1 | `OPENAI_ENABLED` |
+| Gemini | Google | gemini-3.1-flash-image-preview | `GEMINI_ENABLED` |
+| Nova Canvas | Amazon Bedrock | amazon.nova-canvas-v1:0 | `NOVA_ENABLED` |
+| DALL-E 3 | OpenAI | dall-e-3 | `OPENAI_ENABLED` |
+| Firefly | Adobe | firefly-image-5 | `FIREFLY_ENABLED` |
 
-Each model requires its own API key env var (e.g., `FLUX_API_KEY`). Models can be individually disabled.
+Each model requires its own credentials. Gemini and OpenAI need API keys (`GEMINI_API_KEY`, `OPENAI_API_KEY`). Firefly uses OAuth2 (`FIREFLY_CLIENT_ID`, `FIREFLY_CLIENT_SECRET`). Nova Canvas uses the Lambda IAM role (no API key). Models can be individually disabled.
+
+## Troubleshooting
+
+**Python version mismatch**
+This project requires Python 3.13+. Check with `python3 --version`. If using pyenv: `pyenv install 3.13` and `pyenv local 3.13`.
+
+**Frontend port conflict**
+The dev server runs on port 3000 (`vite.config.ts`). If the port is taken, Vite will fail with `EADDRINUSE`. Kill the conflicting process or temporarily edit `vite.config.ts`.
+
+**Backend tests fail with import errors**
+Always run backend tests with `PYTHONPATH=backend/src` prefix. The test conftest adds this automatically in CI but not locally.
+
+**SAM deploy fails on first run**
+Use `sam deploy --guided` for the initial deployment to create `samconfig.toml`. Subsequent deploys use `sam deploy`.
+
+**Models return errors in local dev**
+Each model needs its credentials. Check `backend/.env.example` for required env vars per model. Models can be individually disabled (e.g., `NOVA_ENABLED=false`).
 
 ## Contributing
 

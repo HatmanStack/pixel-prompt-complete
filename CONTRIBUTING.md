@@ -80,6 +80,18 @@ Vitest + React Testing Library:
 cd frontend && npm test
 ```
 
+### Test Coverage
+
+**Backend:** 80% minimum coverage enforced by pytest-cov in CI. All new code must include tests.
+
+**Frontend:** Coverage thresholds are configured in `vite.config.ts`:
+
+- Statements/lines: 57%+
+- Branches: 52%+
+- Functions: 60%+
+
+Run `npm run test:coverage` to check coverage locally. The CI pipeline will fail if thresholds are not met.
+
 ## Commit Message Format
 
 We use [Conventional Commits](https://www.conventionalcommits.org/). The commit-msg hook enforces this.

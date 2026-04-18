@@ -49,5 +49,23 @@
     "date": "2026-04-16",
     "plan": "2026-04-15-ux-enhancements",
     "verdict": "GO"
+  },
+  {
+    "skill": "audit",
+    "date": "2026-04-17",
+    "plan": "2026-04-17-audit-pixel-prompt",
+    "audits": ["health", "eval", "docs"]
+  },
+  {
+    "skill": "pipeline",
+    "date": "2026-04-17",
+    "plan": "2026-04-17-audit-pixel-prompt",
+    "verdict": "GO"
+  },
+  {
+    "skill": "pipeline",
+    "date": "2026-04-18",
+    "plan": "2026-04-17-audit-pixel-prompt-followup",
+    "verdict": "GO"
   }
 ]

@@ -4,6 +4,7 @@ Routes API requests to appropriate handlers for image generation,
 iteration, outpainting, and session status.
 """
 
+import atexit
 import base64
 import json
 import re
@@ -106,6 +107,14 @@ prompt_enhancer = PromptEnhancer()
 # Separate pools prevent gallery metadata fetches from starving generation threads.
 _executor = ThreadPoolExecutor(max_workers=generate_thread_workers)
 _gallery_executor = ThreadPoolExecutor(max_workers=4)
+
+
+def _shutdown_executors():
+    _executor.shutdown(wait=False)
+    _gallery_executor.shutdown(wait=False)
+
+
+atexit.register(_shutdown_executors)
 
 
 @dataclass
@@ -479,8 +488,10 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
 
         enabled_model_names = [m.name for m in models_to_dispatch]
 
-        # Adapt prompt per model (single LLM call)
-        adapted_prompts = prompt_enhancer.adapt_per_model(prompt, enabled_model_names)
+        # Adapt prompt per model (single LLM call, ~4x cheaper than per-model calls)
+        adapted_prompts = prompt_enhancer.adapt_per_model(
+            prompt, enabled_model_names, correlation_id=correlation_id
+        )
 
         # Create session
         session_id = session_manager.create_session(prompt, enabled_model_names)
@@ -554,8 +565,11 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
                 if iteration_index is not None:
                     try:
                         _handle_failed_result(session_id, model_name, iteration_index, sanitized)
-                    except Exception:
-                        pass  # Best-effort; don't mask the original error
+                    except Exception as fail_err:
+                        StructuredLogger.warning(
+                            f"Failed to mark iteration as failed: {fail_err}",
+                            correlation_id=correlation_id,
+                        )
                 return model_name, {"status": "error", "error": sanitized}
 
         # Include skipped models in results
@@ -565,9 +579,33 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
         futures = {
             _executor.submit(generate_for_model, model): model for model in models_to_dispatch
         }
-        for future in as_completed(futures):
-            model_name, result = future.result()
-            results[model_name] = result
+        future_timeout = config.api_client_timeout + 10
+        try:
+            for future in as_completed(futures, timeout=future_timeout):
+                try:
+                    model_name, result = future.result()
+                    results[model_name] = result
+                except Exception as e:
+                    model_name = futures[future].name
+                    sanitized = sanitize_error_message(e)
+                    StructuredLogger.error(
+                        f"Thread pool failure for {model_name}: {sanitized}",
+                        correlation_id=correlation_id,
+                    )
+                    results[model_name] = {"status": "error", "error": sanitized}
+        except TimeoutError:
+            # Mark any models that didn't complete in time
+            for future, model_cfg in futures.items():
+                model_name = model_cfg.name
+                if model_name not in results:
+                    StructuredLogger.error(
+                        f"Model {model_name} timed out after {future_timeout}s",
+                        correlation_id=correlation_id,
+                    )
+                    results[model_name] = {
+                        "status": "error",
+                        "error": f"Model timed out after {future_timeout}s",
+                    }
 
         # Emit CloudWatch metrics per model (only in auth-enabled mode)
         if config.auth_enabled:
@@ -807,8 +845,11 @@ def _handle_refinement(
                 _handle_failed_result(
                     session_id, model_name, iteration_index, sanitize_error_message(e)
                 )
-            except Exception:
-                pass  # Best-effort; don't mask the original error
+            except Exception as fail_err:
+                StructuredLogger.warning(
+                    f"Failed to mark iteration as failed: {fail_err}",
+                    correlation_id=correlation_id,
+                )
         StructuredLogger.error(
             f"Error in {handler_name}: {e}",
             correlation_id=correlation_id,

@@ -40,7 +40,7 @@ def _safe_float(env_var: str, default: float) -> float:
 class ModelConfig:
     """Configuration for a single image generation model."""
 
-    name: str  # Internal name: 'flux', 'recraft', 'gemini', 'openai'
+    name: str  # Internal name: 'gemini', 'nova', 'openai', 'firefly'
     provider: str  # Provider identifier for handler lookup
     enabled: bool
     api_key: str
@@ -190,7 +190,7 @@ def get_model(name: str) -> ModelConfig:
     Get specific model config by name.
 
     Args:
-        name: Model name ('flux', 'recraft', 'gemini', 'openai')
+        name: Model name ('gemini', 'nova', 'openai', 'firefly')
 
     Returns:
         ModelConfig for the requested model
@@ -250,7 +250,18 @@ ses_region = os.environ.get("SES_REGION", "us-west-2")
 if ses_enabled and not ses_from_email:
     raise RuntimeError("SES_ENABLED=true requires SES_FROM_EMAIL to be set")
 
+# CORS + Auth compatibility check
+if auth_enabled and cors_allowed_origin == "*":
+    from utils.logger import StructuredLogger as _CfgLogger
+
+    _CfgLogger.warning(
+        "CORS_ALLOWED_ORIGIN='*' with AUTH_ENABLED=true: "
+        "browsers will block credentialed requests. "
+        "Set CORS_ALLOWED_ORIGIN to your frontend domain."
+    )
+
 # Operational Timeouts (seconds) - configurable via environment
-api_client_timeout = _safe_float("API_CLIENT_TIMEOUT", 120.0)
+api_client_timeout = _safe_float("API_CLIENT_TIMEOUT", 60.0)
 image_download_timeout = _safe_int("IMAGE_DOWNLOAD_TIMEOUT", 30)
+enhance_timeout = _safe_float("ENHANCE_TIMEOUT", 30.0)
 generate_thread_workers = _safe_int("GENERATE_THREAD_WORKERS", 4)

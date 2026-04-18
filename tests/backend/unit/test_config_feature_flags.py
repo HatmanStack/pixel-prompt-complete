@@ -165,3 +165,42 @@ def test_per_model_cap_override(monkeypatch):
     monkeypatch.setenv("MODEL_GEMINI_DAILY_CAP", "100")
     config = _reload_config()
     assert config.MODEL_DAILY_CAPS["gemini"] == 100
+
+
+def test_cors_wildcard_with_auth_warns(monkeypatch):
+    """CORS_ALLOWED_ORIGIN='*' with AUTH_ENABLED=true should log a warning."""
+    monkeypatch.setenv("AUTH_ENABLED", "true")
+    monkeypatch.setenv("GUEST_TOKEN_SECRET", "test-secret")
+    monkeypatch.setenv("CORS_ALLOWED_ORIGIN", "*")
+    from unittest.mock import patch
+
+    with patch("utils.logger.StructuredLogger.warning") as mock_warn:
+        _reload_config()
+        cors_calls = [c for c in mock_warn.call_args_list if "CORS_ALLOWED_ORIGIN" in str(c)]
+        assert len(cors_calls) == 1
+        assert "credentialed requests" in str(cors_calls[0])
+
+
+def test_cors_specific_origin_with_auth_no_warning(monkeypatch):
+    """No warning when CORS_ALLOWED_ORIGIN is set to a specific domain."""
+    monkeypatch.setenv("AUTH_ENABLED", "true")
+    monkeypatch.setenv("GUEST_TOKEN_SECRET", "test-secret")
+    monkeypatch.setenv("CORS_ALLOWED_ORIGIN", "https://example.com")
+    from unittest.mock import patch
+
+    with patch("utils.logger.StructuredLogger.warning") as mock_warn:
+        _reload_config()
+        cors_calls = [c for c in mock_warn.call_args_list if "CORS_ALLOWED_ORIGIN" in str(c)]
+        assert len(cors_calls) == 0
+
+
+def test_cors_wildcard_without_auth_no_warning(monkeypatch):
+    """No warning when AUTH_ENABLED=false even with wildcard CORS."""
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("CORS_ALLOWED_ORIGIN", "*")
+    from unittest.mock import patch
+
+    with patch("utils.logger.StructuredLogger.warning") as mock_warn:
+        _reload_config()
+        cors_calls = [c for c in mock_warn.call_args_list if "CORS_ALLOWED_ORIGIN" in str(c)]
+        assert len(cors_calls) == 0

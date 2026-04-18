@@ -577,7 +577,7 @@ class TestGenerateForModelErrorHandling:
             return f
 
         mocks["_executor"].submit.side_effect = capture_submit
-        mock_as_completed.side_effect = lambda futs: futs
+        mock_as_completed.side_effect = lambda futs, **kwargs: futs
 
         resp = lambda_handler(_make_event(body={"prompt": "test"}), None)
         real_executor.shutdown(wait=True)

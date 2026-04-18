@@ -322,7 +322,7 @@ class TestPromptEndpoints:
             return future
 
         ep_mocks["_executor"].submit.side_effect = submit_sync
-        mock_as_completed.side_effect = lambda futures: futures.keys()
+        mock_as_completed.side_effect = lambda futures, **kwargs: futures.keys()
 
         mock_repo = MagicMock()
         with patch("lambda_function._prompt_history", mock_repo):
@@ -359,7 +359,7 @@ class TestPromptEndpoints:
             return future
 
         ep_mocks["_executor"].submit.side_effect = submit_sync
-        mock_as_completed.side_effect = lambda futures: futures.keys()
+        mock_as_completed.side_effect = lambda futures, **kwargs: futures.keys()
 
         mock_repo = MagicMock()
         mock_repo.record_prompt.side_effect = Exception("DynamoDB error")

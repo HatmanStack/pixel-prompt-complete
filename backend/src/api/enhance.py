@@ -6,10 +6,9 @@ Includes per-model prompt adaptation for tailored image generation.
 """
 
 import json
-import warnings
 from typing import Any, Optional
 
-from config import prompt_model_api_key, prompt_model_id, prompt_model_provider
+from config import enhance_timeout, prompt_model_api_key, prompt_model_id, prompt_model_provider
 from utils.clients import get_genai_client, get_openai_client
 from utils.logger import StructuredLogger
 
@@ -80,12 +79,22 @@ Enhance the following prompt:"""
             "Return ONLY valid JSON. No markdown, no explanation."
         )
 
-    def adapt_per_model(self, prompt: str, enabled_models: list[str]) -> dict[str, str]:
-        """Adapt a prompt for each enabled model's strengths via a single LLM call.
+    def adapt_per_model(
+        self,
+        prompt: str,
+        enabled_models: list[str],
+        correlation_id: str | None = None,
+    ) -> dict[str, str]:
+        """Adapt a single user prompt into model-specific prompts via one LLM call.
+
+        Uses a single LLM call with a JSON response to produce per-model adapted
+        prompts instead of making N separate calls.  This reduces latency and
+        cost by ~4x compared to individual adaptation calls.
 
         Args:
             prompt: The user's original prompt.
             enabled_models: List of enabled model names (e.g. ["gemini", "nova"]).
+            correlation_id: Optional request correlation ID for structured logging.
 
         Returns:
             Dict mapping model name to adapted prompt string.
@@ -106,7 +115,7 @@ Enhance the following prompt:"""
             system_prompt = self.adaptation_system_prompt.format(model_keys=model_keys)
 
             if provider == "google_gemini":
-                client = get_genai_client(api_key)
+                client = get_genai_client(api_key, timeout=enhance_timeout)
                 generation_config: dict[str, Any] = {
                     "response_mime_type": "application/json",
                 }
@@ -119,7 +128,7 @@ Enhance the following prompt:"""
                     raise ValueError("Gemini returned empty candidates")
                 response_text = response.candidates[0].content.parts[0].text.strip()
             else:
-                client_kwargs: dict[str, Any] = {"timeout": 10.0}
+                client_kwargs: dict[str, Any] = {"timeout": enhance_timeout}
                 if "base_url" in self.prompt_model:
                     client_kwargs["base_url"] = self.prompt_model["base_url"]
                 client = get_openai_client(api_key, **client_kwargs)
@@ -159,7 +168,10 @@ Enhance the following prompt:"""
             return result
 
         except Exception as e:
-            StructuredLogger.warning(f"Prompt adaptation failed: {e}")
+            StructuredLogger.warning(
+                f"Prompt adaptation failed: {e}",
+                correlation_id=correlation_id,
+            )
             return fallback
 
     def enhance(self, prompt: str) -> Optional[str]:
@@ -190,10 +202,11 @@ Enhance the following prompt:"""
                 if not api_key:
                     return prompt
 
-                client = get_genai_client(api_key)
+                client = get_genai_client(api_key, timeout=enhance_timeout)
 
                 response = client.models.generate_content(
-                    model=prompt_model["id"], contents=f"{self.system_prompt}\n\n{prompt}"
+                    model=prompt_model["id"],
+                    contents=f"{self.system_prompt}\n\n{prompt}",
                 )
 
                 # Extract text from Gemini response
@@ -208,7 +221,7 @@ Enhance the following prompt:"""
                 if not api_key:
                     return prompt
 
-                client_kwargs = {"timeout": 30.0}
+                client_kwargs = {"timeout": enhance_timeout}
 
                 # Support custom base_url for OpenAI-compatible providers
                 if "base_url" in prompt_model:
@@ -241,7 +254,7 @@ Enhance the following prompt:"""
 
         except Exception as e:
             # Return original prompt on error, but warn about failure
-            warnings.warn(f"Prompt enhancement failed: {e}")
+            StructuredLogger.warning(f"Prompt enhancement failed: {e}")
             return prompt
 
     def enhance_safe(self, prompt: str) -> str:

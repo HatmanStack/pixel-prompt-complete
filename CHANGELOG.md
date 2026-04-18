@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2026-04-18
+
+### Added
+- Firefly OAuth2 token caching with 50-minute TTL (saves ~500ms per request)
+- Specific `ConnectionError` and `HTTPError` handling for OpenAI image downloads
+- CORS wildcard warning when `AUTH_ENABLED=true` with `CORS_ALLOWED_ORIGIN=*`
+- `ENHANCE_TIMEOUT` env var for configurable prompt enhancement timeout (default 30s)
+- `_adapt_prompts_for_models` extraction with batch optimization docstring
+- `atexit` shutdown handler for `ThreadPoolExecutor` instances
+- Troubleshooting section in README
+- Test coverage thresholds documented in CONTRIBUTING.md
+- 5 gallery flow integration tests (previously skipped)
+- Token caching, error handling, and resilience test suites
+
+### Changed
+- `API_CLIENT_TIMEOUT` default reduced from 120s to 60s (prevents Lambda timeout exhaustion)
+- Frontend coverage thresholds raised from 45-52% to 52-60%
+- `future.result()` calls now include timeout and individual try-catch (prevents cascading failures)
+- Bare `except Exception: pass` replaced with explicit `StructuredLogger.warning` calls (2 locations)
+- Enhance timeout values consolidated from hardcoded 10s/30s into single `ENHANCE_TIMEOUT` config
+
+### Fixed
+- CRITICAL: Unhandled `future.result()` exception during parallel model generation could crash entire `/generate` request
+- README AI Models table listed wrong models (Flux/Recraft instead of Nova Canvas/Firefly)
+- CLAUDE.md missing 7 API endpoints from documentation table
+- CLAUDE.md frontend environment variables table had 3 phantom vars and 3 missing vars
+- `frontend/.env.example` used port 5173 instead of 3000 (mismatched `vite.config.ts`)
+- Stale comments referencing old model names (flux/recraft) in config.py and manager.py
+- Missing `correlation_id` in PromptEnhancer warning logs
+
 ## [2.0.0] - 2026-04-07
 
 ### Added
