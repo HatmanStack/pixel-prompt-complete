@@ -1,6 +1,6 @@
 pytest>=8.0.0
 pytest-cov>=4.1.0
-requests>=2.32.3
+requests>=2.33.1
 moto>=5.1.0
 boto3>=1.42.0
 Pillow>=12.0.0
