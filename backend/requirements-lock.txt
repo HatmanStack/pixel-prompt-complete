@@ -47,7 +47,7 @@ jmespath==1.1.0
     # via
     #   boto3
     #   botocore
-openai==2.30.0
+openai==2.37.0
     # via -r requirements.txt
 pillow==12.2.0
     # via -r requirements.txt
