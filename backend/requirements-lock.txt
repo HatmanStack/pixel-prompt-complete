@@ -11,7 +11,7 @@ botocore==1.42.81
     # via
     #   boto3
     #   s3transfer
-certifi==2026.2.25
+certifi==2026.4.22
     # via
     #   httpcore
     #   httpx
