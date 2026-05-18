@@ -2,7 +2,7 @@
 boto3==1.42.81
 
 # HTTP client for external APIs
-requests==2.34.0
+requests==2.34.2
 
 # Image processing
 Pillow==12.2.0
