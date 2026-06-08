@@ -1,5 +1,5 @@
 # AWS SDK
-boto3==1.43.9
+boto3==1.43.24
 
 # HTTP client for external APIs
 requests==2.34.2
