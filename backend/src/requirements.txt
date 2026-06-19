@@ -9,7 +9,7 @@ Pillow==12.2.0
 
 # AI provider SDKs
 openai==2.41.1
-google-genai==1.68.0
+google-genai==2.8.0
 
 # Billing
 stripe==15.0.1
