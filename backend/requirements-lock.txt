@@ -61,7 +61,7 @@ pydantic==2.12.5
     # via
     #   google-genai
     #   openai
-pydantic-core==2.41.5
+pydantic-core==2.47.0
     # via pydantic
 python-dateutil==2.9.0.post0
     # via botocore
