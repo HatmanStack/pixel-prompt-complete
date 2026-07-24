@@ -59,15 +59,13 @@ function useGallery(): UseGalleryReturn {
       const response = await listSessions();
 
       // Map API response to GalleryItem using CloudFront preview URLs
-      const galleriesWithPreviews = (response.galleries || []).map(
-        (gallery): GalleryItem => ({
-          id: gallery.id,
-          timestamp: gallery.timestamp,
-          imageCount: gallery.imageCount,
-          previewUrl: gallery.previewUrl,
-          preview: gallery.previewUrl,
-        }),
-      );
+      const galleriesWithPreviews = (response.galleries || []).map((gallery): GalleryItem => ({
+        id: gallery.id,
+        timestamp: gallery.timestamp,
+        imageCount: gallery.imageCount,
+        previewUrl: gallery.previewUrl,
+        preview: gallery.previewUrl,
+      }));
 
       setGalleries(galleriesWithPreviews);
     } catch (err) {
