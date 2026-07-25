@@ -408,11 +408,11 @@ def test_handler_failure_releases_claim_so_retry_succeeds(wired, monkeypatch):
     calls = {"n": 0}
     real = wh._DISPATCH["checkout.session.completed"]
 
-    def flaky(obj, repo):
+    def flaky(obj, repo, event_type):
         calls["n"] += 1
         if calls["n"] == 1:
             raise RuntimeError("transient")
-        return real(obj, repo)
+        return real(obj, repo, event_type)
 
     monkeypatch.setitem(wh._DISPATCH, "checkout.session.completed", flaky)
 
@@ -437,6 +437,76 @@ def test_handler_exception_returns_500(wired, monkeypatch):
         checkout_session(user_id="u7", customer="cus_7"),
     )
     assert _send(wired, payload)["statusCode"] == 500
+
+
+def test_partial_counter_failure_does_not_double_apply(wired, monkeypatch):
+    """Revenue deltas must be atomic across a mid-handler failure.
+
+    _on_subscription_deleted previously did two sequential ADD updates. If
+    the first landed and the second threw, the idempotency claim was
+    released and Stripe's retry re-applied the first — driving
+    activeSubscribers negative, which is the very thing dedup exists to
+    prevent, reached through a narrower window than full redelivery.
+    """
+    _seed_subscriber(wired, "u_partial", "cus_partial")
+    wired._user_repo.increment_revenue_counter("activeSubscribers", 1)
+
+    real = wired._user_repo.apply_revenue_deltas
+    state = {"n": 0}
+
+    def flaky_deltas(deltas):
+        state["n"] += 1
+        if state["n"] == 1:
+            raise RuntimeError("dynamo throttled on hot revenue# item")
+        return real(deltas)
+
+    monkeypatch.setattr(wired._user_repo, "apply_revenue_deltas", flaky_deltas)
+
+    payload = build_event(
+        "customer.subscription.deleted",
+        subscription(subscription_id="sub_p", customer="cus_partial", status="canceled"),
+        event_id="evt_partial",
+    )
+    assert _send(wired, payload)["statusCode"] == 500
+    assert _send(wired, payload)["statusCode"] == 200
+
+    revenue = wired._user_repo.get_revenue()
+    assert revenue.get("activeSubscribers", 0) == 0
+    assert revenue.get("monthlyChurn", 0) == 1
+    assert wired._user_repo.get_user("u_partial")["tier"] == "free"
+
+
+def test_apply_revenue_deltas_is_all_or_nothing(wired):
+    """Both counters move in a single UpdateItem."""
+    repo = wired._user_repo
+    repo.increment_revenue_counter("activeSubscribers", 5)
+    repo.apply_revenue_deltas({"activeSubscribers": -1, "monthlyChurn": 1})
+    revenue = repo.get_revenue()
+    assert revenue.get("activeSubscribers", 0) == 4
+    assert revenue.get("monthlyChurn", 0) == 1
+
+
+def test_apply_revenue_deltas_noop_on_empty(wired):
+    wired._user_repo.apply_revenue_deltas({})
+    assert wired._user_repo.get_revenue().get("activeSubscribers", 0) == 0
+
+
+def test_unresolved_log_uses_the_real_event_type(wired, monkeypatch):
+    """created vs updated must be distinguishable in the ERROR log."""
+    from billing import webhook as wh
+
+    seen: list[str] = []
+    monkeypatch.setattr(wh, "_unresolved", lambda obj, event_type: seen.append(event_type))
+
+    for event_type in ("customer.subscription.created", "customer.subscription.updated"):
+        _send(
+            wired,
+            build_event(
+                event_type,
+                subscription(subscription_id="sub_ghost", customer="cus_never_seen"),
+            ),
+        )
+    assert seen == ["customer.subscription.created", "customer.subscription.updated"]
 
 
 def test_dedup_store_failure_fails_closed(wired, monkeypatch):

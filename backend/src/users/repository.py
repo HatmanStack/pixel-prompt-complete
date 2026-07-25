@@ -465,6 +465,34 @@ class UserRepository:
         """Atomically decrement a counter (increment by negative delta)."""
         self.increment_revenue_counter(field, -delta)
 
+    def apply_revenue_deltas(self, deltas: dict[str, int]) -> None:
+        """Atomically apply several counter deltas in one UpdateItem.
+
+        All revenue counters live on the single ``revenue#current`` item, so
+        one UpdateItem applies every delta or none of them.
+
+        Sequential calls are NOT equivalent: if the first succeeds and the
+        second throws, the webhook releases its idempotency claim and
+        Stripe's retry re-runs the handler, re-applying the delta that
+        already landed. That drives ``activeSubscribers`` negative — the
+        failure mode webhook dedup exists to prevent, reached through a
+        mid-handler window instead of a full redelivery.
+        """
+        if not deltas:
+            return
+        now = int(time.time())
+        add_parts: list[str] = []
+        values: dict[str, Any] = {":now": now}
+        for i, (field, delta) in enumerate(deltas.items()):
+            placeholder = f":d{i}"
+            add_parts.append(f"{field} {placeholder}")
+            values[placeholder] = delta
+        self._table.update_item(
+            Key={"userId": "revenue#current"},
+            UpdateExpression="SET updatedAt = :now ADD " + ", ".join(add_parts),
+            ExpressionAttributeValues=values,
+        )
+
     def get_revenue(self) -> dict:
         """Return the ``revenue#current`` item, or empty dict if none."""
         return self.get_user("revenue#current") or {}

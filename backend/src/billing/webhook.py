@@ -112,10 +112,12 @@ def _unresolved(obj: dict[str, Any], event_type: str) -> None:
     )
 
 
-def _on_checkout_completed(obj: dict[str, Any], repo: UserRepository) -> None:
+def _on_checkout_completed(
+    obj: dict[str, Any], repo: UserRepository, event_type: str
+) -> None:
     user_id = _user_id_from_object(obj, repo)
     if not user_id:
-        _unresolved(obj, "checkout.session.completed")
+        _unresolved(obj, event_type)
         return
     fields: dict[str, Any] = {}
     if obj.get("customer"):
@@ -128,10 +130,12 @@ def _on_checkout_completed(obj: dict[str, Any], repo: UserRepository) -> None:
     _send_lifecycle_email(repo, user_id, email_templates.welcome_email)
 
 
-def _on_subscription_upsert(obj: dict[str, Any], repo: UserRepository) -> None:
+def _on_subscription_upsert(
+    obj: dict[str, Any], repo: UserRepository, event_type: str
+) -> None:
     user_id = _user_id_from_object(obj, repo)
     if not user_id:
-        _unresolved(obj, "customer.subscription.upsert")
+        _unresolved(obj, event_type)
         return
     status = obj.get("status", "active")
     tier = "paid" if status in ("active", "trialing") else "free"
@@ -146,10 +150,12 @@ def _on_subscription_upsert(obj: dict[str, Any], repo: UserRepository) -> None:
         _send_lifecycle_email(repo, user_id, email_templates.subscription_activated_email)
 
 
-def _on_subscription_deleted(obj: dict[str, Any], repo: UserRepository) -> None:
+def _on_subscription_deleted(
+    obj: dict[str, Any], repo: UserRepository, event_type: str
+) -> None:
     user_id = _user_id_from_object(obj, repo)
     if not user_id:
-        _unresolved(obj, "customer.subscription.deleted")
+        _unresolved(obj, event_type)
         return
     repo.set_tier(
         user_id,
@@ -157,15 +163,19 @@ def _on_subscription_deleted(obj: dict[str, Any], repo: UserRepository) -> None:
         subscriptionStatus="canceled",
         stripeSubscriptionId="",
     )
-    repo.decrement_revenue_counter("activeSubscribers", 1)
-    repo.increment_revenue_counter("monthlyChurn", 1)
+    # One atomic UpdateItem, not two sequential ones: a failure between
+    # them would release the idempotency claim with the first delta already
+    # applied, and Stripe's retry would apply it a second time.
+    repo.apply_revenue_deltas({"activeSubscribers": -1, "monthlyChurn": 1})
     _send_lifecycle_email(repo, user_id, email_templates.subscription_cancelled_email)
 
 
-def _on_payment_failed(obj: dict[str, Any], repo: UserRepository) -> None:
+def _on_payment_failed(
+    obj: dict[str, Any], repo: UserRepository, event_type: str
+) -> None:
     user_id = _user_id_from_object(obj, repo)
     if not user_id:
-        _unresolved(obj, "invoice.payment_failed")
+        _unresolved(obj, event_type)
         return
     user = repo.get_user(user_id)
     if user is None:
@@ -251,7 +261,7 @@ def handle_stripe_webhook(
                 obj = raw_obj.to_dict()
             else:
                 obj = raw_obj
-            handler(obj, repo)
+            handler(obj, repo, event_type)
         except Exception as e:
             StructuredLogger.error(
                 f"Webhook handler error for {event_type}: {e}",
