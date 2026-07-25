@@ -128,6 +128,27 @@ def test_creates_customer_if_missing(wired):
     assert item["stripeCustomerId"] == "cus_new"
 
 
+def test_checkout_stamps_user_id_on_the_subscription(wired):
+    """The Subscription itself must carry metadata.userId.
+
+    ``client_reference_id`` lives only on the Checkout Session. Without
+    ``subscription_data.metadata``, every later customer.subscription.*
+    event arrives with no way to identify the user — which is how
+    cancellations were silently dropped.
+    """
+    fake = MagicMock()
+    fake.Customer.create.return_value = {"id": "cus_sub"}
+    fake.checkout.Session.create.return_value = {"url": "https://stripe/checkout"}
+    fake.error = __import__("stripe").error
+    with patch("billing.checkout.get_stripe", return_value=fake):
+        r = wired.lambda_handler(
+            _event(claims={"sub": "u_sub", "email": "s@x.com"}), None
+        )
+    assert r["statusCode"] == 200
+    kwargs = fake.checkout.Session.create.call_args.kwargs
+    assert kwargs["subscription_data"] == {"metadata": {"userId": "u_sub"}}
+
+
 def test_reuses_existing_customer(wired):
     wired._user_repo.get_or_create_user("u2")
     wired._user_repo.set_stripe_customer_id("u2", "cus_existing")

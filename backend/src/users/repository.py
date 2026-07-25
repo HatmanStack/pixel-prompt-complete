@@ -15,6 +15,14 @@ from botocore.exceptions import ClientError
 
 _GLOBAL_GUEST_KEY = "guest#__global__"
 _MAX_RETRIES = 3
+# How long a processed Stripe event id is remembered for dedup. Stripe retries
+# a failing webhook for up to 3 days; 30 days is a comfortable margin.
+_WEBHOOK_EVENT_TTL_SECONDS = 30 * 86400
+# How long a single delivery may hold the claim before another delivery may
+# reclaim it. Bounds the damage when release-on-failure itself fails: without
+# a lease the claim would persist and every Stripe retry would be answered
+# "duplicate", silently losing the event.
+_WEBHOOK_LEASE_SECONDS = 900
 
 
 class UserRepository:
@@ -198,7 +206,15 @@ class UserRepository:
 
     # ---------- admin scan ----------
 
-    _NON_USER_PREFIXES = ("guest#", "model#", "metrics#", "revenue#", "config#")
+    _NON_USER_PREFIXES = (
+        "guest#",
+        "model#",
+        "metrics#",
+        "revenue#",
+        "config#",
+        "event#",
+        "prompt#",
+    )
 
     def scan_users(
         self,
@@ -318,6 +334,31 @@ class UserRepository:
             ExpressionAttributeValues={":cid": customer_id, ":now": now},
         )
 
+    def get_user_by_stripe_customer_id(self, customer_id: str) -> dict | None:
+        """Reverse-lookup a user from their Stripe customer id.
+
+        Backs the webhook resolver's last-resort path: real
+        ``customer.subscription.*`` payloads carry no ``client_reference_id``
+        and, for subscriptions created before ``subscription_data.metadata``
+        was set at checkout, no ``metadata.userId`` either. The customer id
+        is the only identifier such an event always carries.
+
+        The index is ``KEYS_ONLY``, so this costs one query plus one
+        ``GetItem`` to hydrate the full record.
+        """
+        if not customer_id:
+            return None
+        response = self._table.query(
+            IndexName="StripeCustomerIndex",
+            KeyConditionExpression="stripeCustomerId = :cid",
+            ExpressionAttributeValues={":cid": customer_id},
+            Limit=1,
+        )
+        items = response.get("Items") or []
+        if not items:
+            return None
+        return self.get_user(items[0]["userId"])
+
     # ---------- guest items ----------
 
     def upsert_guest(self, token_id: str, ip_hash: str, ttl: int) -> dict:
@@ -361,6 +402,80 @@ class UserRepository:
             create_if_missing=False,
         )
 
+    # ---------- webhook idempotency ----------
+
+    def claim_webhook_event(self, event_id: str, now: int | None = None) -> bool:
+        """Atomically claim a Stripe event id before processing it.
+
+        Stripe guarantees at-least-once delivery, so the same event id can
+        arrive repeatedly. Handlers mutate revenue counters, so replaying an
+        event double-counts subscribers (and can drive ``activeSubscribers``
+        negative via the cancellation path).
+
+        Returns True if this caller won the claim and should process the
+        event, False if it was already processed.
+        """
+        if not event_id:
+            # No id to dedupe on: process rather than silently drop.
+            return True
+        if now is None:
+            now = int(time.time())
+        try:
+            self._table.put_item(
+                Item={
+                    "userId": f"event#{event_id}",
+                    "claimedAt": now,
+                    "leaseExpiresAt": now + _WEBHOOK_LEASE_SECONDS,
+                    "ttl": now + _WEBHOOK_EVENT_TTL_SECONDS,
+                },
+                ConditionExpression=(
+                    "attribute_not_exists(userId) OR "
+                    "(attribute_not_exists(completedAt) AND leaseExpiresAt < :now)"
+                ),
+                ExpressionAttributeValues={":now": now},
+            )
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                return False
+            raise
+        return True
+
+    def complete_webhook_event(self, event_id: str, now: int | None = None) -> None:
+        """Mark an event fully processed so retries are suppressed for the TTL.
+
+        Only a completed record blocks redelivery. An in-flight claim merely
+        holds a lease, so a delivery that dies without completing (or whose
+        release fails) is retried once the lease lapses rather than being
+        swallowed forever.
+        """
+        if not event_id:
+            return
+        if now is None:
+            now = int(time.time())
+        self._table.update_item(
+            Key={"userId": f"event#{event_id}"},
+            UpdateExpression=(
+                "SET completedAt = :now, #ttl = :ttl REMOVE leaseExpiresAt"
+            ),
+            ExpressionAttributeNames={"#ttl": "ttl"},
+            ExpressionAttributeValues={
+                ":now": now,
+                ":ttl": now + _WEBHOOK_EVENT_TTL_SECONDS,
+            },
+        )
+
+    def release_webhook_event(self, event_id: str) -> None:
+        """Drop a claim so Stripe's retry can re-process the event.
+
+        Called when the handler raised after the claim was taken. Without
+        this, a single transient failure would permanently swallow the
+        event — which for a cancellation means a churned user keeps paid
+        access forever.
+        """
+        if not event_id:
+            return
+        self._table.delete_item(Key={"userId": f"event#{event_id}"})
+
     # ---------- revenue counters ----------
 
     def increment_revenue_counter(self, field: str, delta: int) -> None:
@@ -383,6 +498,34 @@ class UserRepository:
     def decrement_revenue_counter(self, field: str, delta: int) -> None:
         """Atomically decrement a counter (increment by negative delta)."""
         self.increment_revenue_counter(field, -delta)
+
+    def apply_revenue_deltas(self, deltas: dict[str, int]) -> None:
+        """Atomically apply several counter deltas in one UpdateItem.
+
+        All revenue counters live on the single ``revenue#current`` item, so
+        one UpdateItem applies every delta or none of them.
+
+        Sequential calls are NOT equivalent: if the first succeeds and the
+        second throws, the webhook releases its idempotency claim and
+        Stripe's retry re-runs the handler, re-applying the delta that
+        already landed. That drives ``activeSubscribers`` negative — the
+        failure mode webhook dedup exists to prevent, reached through a
+        mid-handler window instead of a full redelivery.
+        """
+        if not deltas:
+            return
+        now = int(time.time())
+        add_parts: list[str] = []
+        values: dict[str, Any] = {":now": now}
+        for i, (field, delta) in enumerate(deltas.items()):
+            placeholder = f":d{i}"
+            add_parts.append(f"{field} {placeholder}")
+            values[placeholder] = delta
+        self._table.update_item(
+            Key={"userId": "revenue#current"},
+            UpdateExpression="SET updatedAt = :now ADD " + ", ".join(add_parts),
+            ExpressionAttributeValues=values,
+        )
 
     def get_revenue(self) -> dict:
         """Return the ``revenue#current`` item, or empty dict if none."""

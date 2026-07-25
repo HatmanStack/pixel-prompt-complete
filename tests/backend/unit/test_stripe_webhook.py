@@ -1,4 +1,17 @@
-"""Tests for POST /stripe/webhook."""
+"""Tests for POST /stripe/webhook.
+
+These tests use **unmodified, real-shaped Stripe payloads**. Subscription and
+invoice objects carry ``metadata: {}`` and no ``client_reference_id``, because
+that is what Stripe actually sends. An earlier version of this suite
+hand-injected ``metadata: {"userId": ...}`` into those objects, which made a
+broken cancellation path look green — see ``test_no_fixture_injects_user_id``,
+which exists to stop that regressing.
+
+A user is resolved from a subscription/invoice event via the
+``StripeCustomerIndex`` reverse lookup on ``stripeCustomerId``. That is the
+only path real traffic can take for subscriptions created before
+``subscription_data.metadata`` was added at checkout.
+"""
 
 from __future__ import annotations
 
@@ -11,7 +24,14 @@ import boto3
 import pytest
 from moto import mock_aws
 
-from .fixtures.stripe_events import build_event, sign_payload
+from .fixtures import stripe_events
+from .fixtures.stripe_events import (
+    build_event,
+    checkout_session,
+    invoice,
+    sign_payload,
+    subscription,
+)
 
 os.environ.setdefault("S3_BUCKET", "test-bucket")
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
@@ -31,8 +51,10 @@ def billing_on(monkeypatch):
     monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", WEBHOOK_SECRET)
     monkeypatch.setenv("USERS_TABLE_NAME", TABLE_NAME)
     import config
+
     importlib.reload(config)
     from billing import stripe_client
+
     stripe_client.reset_stripe_client()
     yield
     monkeypatch.delenv("AUTH_ENABLED", raising=False)
@@ -51,7 +73,19 @@ def wired(billing_on):
             ddb.create_table(
                 TableName=TABLE_NAME,
                 KeySchema=[{"AttributeName": "userId", "KeyType": "HASH"}],
-                AttributeDefinitions=[{"AttributeName": "userId", "AttributeType": "S"}],
+                AttributeDefinitions=[
+                    {"AttributeName": "userId", "AttributeType": "S"},
+                    {"AttributeName": "stripeCustomerId", "AttributeType": "S"},
+                ],
+                GlobalSecondaryIndexes=[
+                    {
+                        "IndexName": "StripeCustomerIndex",
+                        "KeySchema": [
+                            {"AttributeName": "stripeCustomerId", "KeyType": "HASH"}
+                        ],
+                        "Projection": {"ProjectionType": "KEYS_ONLY"},
+                    }
+                ],
                 BillingMode="PAY_PER_REQUEST",
             )
         except Exception:
@@ -61,11 +95,11 @@ def wired(billing_on):
         for item in scan.get("Items", []):
             table.delete_item(Key={"userId": item["userId"]})
         import lambda_function
+
         importlib.reload(lambda_function)
         from users.repository import UserRepository
-        lambda_function._user_repo = UserRepository(
-            TABLE_NAME, dynamodb_resource=ddb
-        )
+
+        lambda_function._user_repo = UserRepository(TABLE_NAME, dynamodb_resource=ddb)
         yield lambda_function
 
 
@@ -73,10 +107,7 @@ def _event(body: str, sig: str | None = None, b64: bool = False) -> dict:
     headers = {}
     if sig is not None:
         headers["Stripe-Signature"] = sig
-    if b64:
-        body_field = base64.b64encode(body.encode()).decode()
-    else:
-        body_field = body
+    body_field = base64.b64encode(body.encode()).decode() if b64 else body
     return {
         "rawPath": "/stripe/webhook",
         "requestContext": {"http": {"method": "POST", "sourceIp": "1.2.3.4"}},
@@ -95,12 +126,45 @@ def _body(r):
     return json.loads(r["body"])
 
 
+def _seed_subscriber(wired, user_id: str, customer: str, **extra):
+    """Create a user who has completed checkout (so the GSI can find them)."""
+    wired._user_repo.get_or_create_user(user_id, email=extra.pop("email", None))
+    wired._user_repo.set_tier(
+        user_id,
+        extra.pop("tier", "paid"),
+        stripeCustomerId=customer,
+        **extra,
+    )
+
+
+# ---- Fixture integrity ----
+
+
+def test_no_fixture_injects_user_id():
+    """Guard: subscription/invoice fixtures must never carry metadata.userId.
+
+    Hand-injecting that key is what concealed the cancellation bug. If this
+    fails, the suite has drifted back to testing a payload Stripe never sends.
+    """
+    sub = subscription(subscription_id="sub_x", customer="cus_x")
+    inv = invoice(customer="cus_x")
+    assert sub["metadata"] == {}
+    assert inv["metadata"] == {}
+    assert "client_reference_id" not in sub
+    assert "client_reference_id" not in inv
+
+
+# ---- Signature / config gates ----
+
+
 def test_flags_off_returns_501(monkeypatch):
     monkeypatch.delenv("BILLING_ENABLED", raising=False)
     monkeypatch.delenv("AUTH_ENABLED", raising=False)
     import config
+
     importlib.reload(config)
     import lambda_function
+
     importlib.reload(lambda_function)
     r = lambda_function.lambda_handler(_event("{}", sig="t=1,v1=x"), None)
     assert r["statusCode"] == 501
@@ -112,19 +176,72 @@ def test_missing_signature_returns_400(wired):
 
 
 def test_bad_signature_returns_400(wired):
-    payload = build_event("checkout.session.completed", {"client_reference_id": "u1"})
+    payload = build_event(
+        "checkout.session.completed",
+        checkout_session(user_id="u1", customer="cus_1"),
+    )
     r = _send(wired, payload, sign=False)
     assert r["statusCode"] == 400
 
 
+def test_invalid_payload_returns_400(wired):
+    from billing import webhook as wh
+
+    def raise_value(*a, **k):
+        raise ValueError("not json")
+
+    orig = wh.stripe.Webhook.construct_event
+    wh.stripe.Webhook.construct_event = raise_value
+    try:
+        r = wired.lambda_handler(
+            _event("{}", sig=sign_payload("{}", WEBHOOK_SECRET)), None
+        )
+    finally:
+        wh.stripe.Webhook.construct_event = orig
+    assert r["statusCode"] == 400
+
+
+def test_stripe_not_configured_returns_500(wired, monkeypatch):
+    import config as cfg
+    from billing import stripe_client
+
+    monkeypatch.setattr(cfg, "stripe_secret_key", "")
+    stripe_client.reset_stripe_client()
+    payload = build_event(
+        "checkout.session.completed",
+        checkout_session(user_id="u", customer="cus_u"),
+    )
+    r = _send(wired, payload)
+    assert r["statusCode"] == 500
+
+
+def test_base64_body_verified_correctly(wired):
+    wired._user_repo.get_or_create_user("u6")
+    payload = build_event(
+        "checkout.session.completed",
+        checkout_session(user_id="u6", customer="cus_6", subscription="sub_6"),
+    )
+    r = _send(wired, payload, b64=True)
+    assert r["statusCode"] == 200
+    assert wired._user_repo.get_user("u6")["tier"] == "paid"
+
+
+def test_unknown_event_type_returns_200_noop(wired):
+    payload = build_event("customer.updated", {"id": "cus_x", "object": "customer"})
+    r = _send(wired, payload)
+    assert r["statusCode"] == 200
+    assert _body(r)["received"] is True
+
+
+# ---- Checkout: the one object that carries client_reference_id ----
+
+
 def test_checkout_session_completed_sets_paid(wired):
     wired._user_repo.get_or_create_user("u1", email="u@x.com")
-    obj = {
-        "client_reference_id": "u1",
-        "customer": "cus_1",
-        "subscription": "sub_1",
-    }
-    payload = build_event("checkout.session.completed", obj)
+    payload = build_event(
+        "checkout.session.completed",
+        checkout_session(user_id="u1", customer="cus_1", subscription="sub_1"),
+    )
     r = _send(wired, payload)
     assert r["statusCode"] == 200
     item = wired._user_repo.get_user("u1")
@@ -134,16 +251,40 @@ def test_checkout_session_completed_sets_paid(wired):
     assert item["subscriptionStatus"] == "active"
 
 
-def test_subscription_updated_syncs_status(wired):
-    wired._user_repo.get_or_create_user("u2")
-    wired._user_repo.set_tier("u2", "paid", stripeCustomerId="cus_2")
-    obj = {
-        "id": "sub_2",
-        "status": "active",
-        "customer": "cus_2",
-        "metadata": {"userId": "u2"},
-    }
-    payload = build_event("customer.subscription.updated", obj)
+# ---- REGRESSION: real cancellation payloads must downgrade ----
+
+
+def test_real_subscription_deleted_downgrades_to_free(wired):
+    """The bug this suite previously concealed.
+
+    A real customer.subscription.deleted carries no client_reference_id and
+    empty metadata. Resolution must fall through to the customer reverse
+    lookup, or the churned user keeps paid access forever.
+    """
+    _seed_subscriber(
+        wired,
+        "u3",
+        "cus_3",
+        stripeSubscriptionId="sub_3",
+        subscriptionStatus="active",
+    )
+    payload = build_event(
+        "customer.subscription.deleted",
+        subscription(subscription_id="sub_3", customer="cus_3", status="canceled"),
+    )
+    r = _send(wired, payload)
+    assert r["statusCode"] == 200
+    item = wired._user_repo.get_user("u3")
+    assert item["tier"] == "free"
+    assert item["subscriptionStatus"] == "canceled"
+
+
+def test_real_subscription_updated_syncs_status(wired):
+    _seed_subscriber(wired, "u2", "cus_2")
+    payload = build_event(
+        "customer.subscription.updated",
+        subscription(subscription_id="sub_2", customer="cus_2", status="active"),
+    )
     r = _send(wired, payload)
     assert r["statusCode"] == 200
     item = wired._user_repo.get_user("u2")
@@ -152,33 +293,20 @@ def test_subscription_updated_syncs_status(wired):
     assert item["stripeSubscriptionId"] == "sub_2"
 
 
-def test_subscription_deleted_downgrades_to_free(wired):
-    wired._user_repo.get_or_create_user("u3")
-    wired._user_repo.set_tier(
-        "u3",
-        "paid",
-        stripeCustomerId="cus_3",
-        stripeSubscriptionId="sub_3",
-        subscriptionStatus="active",
+def test_real_subscription_canceled_status_downgrades(wired):
+    _seed_subscriber(wired, "u8", "cus_8")
+    payload = build_event(
+        "customer.subscription.updated",
+        subscription(subscription_id="sub_8", customer="cus_8", status="canceled"),
     )
-    obj = {
-        "id": "sub_3",
-        "customer": "cus_3",
-        "metadata": {"userId": "u3"},
-    }
-    payload = build_event("customer.subscription.deleted", obj)
     r = _send(wired, payload)
     assert r["statusCode"] == 200
-    item = wired._user_repo.get_user("u3")
-    assert item["tier"] == "free"
-    assert item["subscriptionStatus"] == "canceled"
+    assert wired._user_repo.get_user("u8")["tier"] == "free"
 
 
-def test_invoice_payment_failed_marks_past_due_but_keeps_paid(wired):
-    wired._user_repo.get_or_create_user("u4")
-    wired._user_repo.set_tier("u4", "paid", stripeCustomerId="cus_4")
-    obj = {"customer": "cus_4", "metadata": {"userId": "u4"}}
-    payload = build_event("invoice.payment_failed", obj)
+def test_real_invoice_payment_failed_marks_past_due_but_keeps_paid(wired):
+    _seed_subscriber(wired, "u4", "cus_4")
+    payload = build_event("invoice.payment_failed", invoice(customer="cus_4"))
     r = _send(wired, payload)
     assert r["statusCode"] == 200
     item = wired._user_repo.get_user("u4")
@@ -186,141 +314,320 @@ def test_invoice_payment_failed_marks_past_due_but_keeps_paid(wired):
     assert item["subscriptionStatus"] == "past_due"
 
 
-def test_unknown_event_type_returns_200_noop(wired):
-    payload = build_event("customer.updated", {"id": "cus_x"})
+def test_post_fix_subscription_metadata_also_resolves(wired):
+    """Forward path: subscriptions created after subscription_data.metadata
+    was added carry metadata.userId and resolve without touching the GSI."""
+    wired._user_repo.get_or_create_user("u_meta")
+    payload = build_event(
+        "customer.subscription.deleted",
+        subscription(
+            subscription_id="sub_meta",
+            customer="cus_unknown_to_us",
+            status="canceled",
+            metadata={"userId": "u_meta"},
+        ),
+    )
     r = _send(wired, payload)
     assert r["statusCode"] == 200
-    assert _body(r)["received"] is True
+    assert wired._user_repo.get_user("u_meta")["tier"] == "free"
 
 
-def test_duplicate_event_is_idempotent(wired):
+def test_unresolvable_event_is_noop_and_logged(wired):
+    """No client_reference_id, no metadata, unknown customer -> no crash."""
+    payload = build_event(
+        "customer.subscription.deleted",
+        subscription(subscription_id="sub_ghost", customer="cus_never_seen"),
+    )
+    r = _send(wired, payload)
+    assert r["statusCode"] == 200
+    assert wired._user_repo.get_revenue().get("activeSubscribers", 0) == 0
+
+
+# ---- Idempotency ----
+
+
+def test_duplicate_event_applies_counters_exactly_once(wired):
+    """Stripe delivers at-least-once. A redelivery must not double-count."""
     wired._user_repo.get_or_create_user("u5")
-    obj = {
-        "client_reference_id": "u5",
-        "customer": "cus_5",
-        "subscription": "sub_5",
-    }
-    payload = build_event("checkout.session.completed", obj, event_id="evt_dup")
+    payload = build_event(
+        "checkout.session.completed",
+        checkout_session(user_id="u5", customer="cus_5", subscription="sub_5"),
+        event_id="evt_dup_fixed",
+    )
     r1 = _send(wired, payload)
     r2 = _send(wired, payload)
     assert r1["statusCode"] == 200
     assert r2["statusCode"] == 200
-    item = wired._user_repo.get_user("u5")
-    assert item["tier"] == "paid"
-    assert item["stripeCustomerId"] == "cus_5"
+    assert _body(r2).get("duplicate") is True
+    assert wired._user_repo.get_user("u5")["tier"] == "paid"
+    assert wired._user_repo.get_revenue().get("activeSubscribers", 0) == 1
 
 
-def test_event_without_user_id_is_noop(wired):
-    payload = build_event("checkout.session.completed", {"customer": "cus_x"})
-    r = _send(wired, payload)
-    assert r["statusCode"] == 200
+def test_duplicate_cancellation_cannot_drive_subscribers_negative(wired):
+    _seed_subscriber(wired, "u_neg", "cus_neg")
+    wired._user_repo.increment_revenue_counter("activeSubscribers", 1)
+    payload = build_event(
+        "customer.subscription.deleted",
+        subscription(subscription_id="sub_neg", customer="cus_neg", status="canceled"),
+        event_id="evt_cancel_dup",
+    )
+    _send(wired, payload)
+    _send(wired, payload)
+    _send(wired, payload)
+    revenue = wired._user_repo.get_revenue()
+    assert revenue.get("activeSubscribers", 0) == 0
+    assert revenue.get("monthlyChurn", 0) == 1
+
+
+def test_distinct_event_ids_both_apply(wired):
+    """Dedup must key on the event id, not the payload contents."""
+    wired._user_repo.get_or_create_user("u_a")
+    wired._user_repo.get_or_create_user("u_b")
+    for uid, cus in (("u_a", "cus_a"), ("u_b", "cus_b")):
+        _send(
+            wired,
+            build_event(
+                "checkout.session.completed",
+                checkout_session(user_id=uid, customer=cus),
+            ),
+        )
+    assert wired._user_repo.get_revenue().get("activeSubscribers", 0) == 2
+
+
+def test_handler_failure_releases_claim_so_retry_succeeds(wired, monkeypatch):
+    """A transient failure must not permanently swallow the event."""
+    from billing import webhook as wh
+
+    wired._user_repo.get_or_create_user("u_retry")
+    payload = build_event(
+        "checkout.session.completed",
+        checkout_session(user_id="u_retry", customer="cus_retry"),
+        event_id="evt_retry",
+    )
+
+    calls = {"n": 0}
+    real = wh._DISPATCH["checkout.session.completed"]
+
+    def flaky(obj, repo, event_type):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("transient")
+        return real(obj, repo, event_type)
+
+    monkeypatch.setitem(wh._DISPATCH, "checkout.session.completed", flaky)
+
+    first = _send(wired, payload)
+    assert first["statusCode"] == 500
+
+    # Stripe retries the same event id; the claim must have been released.
+    second = _send(wired, payload)
+    assert second["statusCode"] == 200
+    assert wired._user_repo.get_user("u_retry")["tier"] == "paid"
 
 
 def test_handler_exception_returns_500(wired, monkeypatch):
-    payload = build_event(
-        "checkout.session.completed",
-        {"client_reference_id": "u7", "customer": "cus_7"},
-    )
     from billing import webhook as wh
 
     def boom(*a, **k):
         raise RuntimeError("boom")
 
     monkeypatch.setitem(wh._DISPATCH, "checkout.session.completed", boom)
-    r = _send(wired, payload)
-    assert r["statusCode"] == 500
+    payload = build_event(
+        "checkout.session.completed",
+        checkout_session(user_id="u7", customer="cus_7"),
+    )
+    assert _send(wired, payload)["statusCode"] == 500
 
 
-def test_invalid_payload_returns_400(wired):
-    import stripe as real_stripe
+def test_partial_counter_failure_does_not_double_apply(wired, monkeypatch):
+    """Revenue deltas must be atomic across a mid-handler failure.
 
+    _on_subscription_deleted previously did two sequential ADD updates. If
+    the first landed and the second threw, the idempotency claim was
+    released and Stripe's retry re-applied the first — driving
+    activeSubscribers negative, which is the very thing dedup exists to
+    prevent, reached through a narrower window than full redelivery.
+    """
+    _seed_subscriber(wired, "u_partial", "cus_partial")
+    wired._user_repo.increment_revenue_counter("activeSubscribers", 1)
+
+    real = wired._user_repo.apply_revenue_deltas
+    state = {"n": 0}
+
+    def flaky_deltas(deltas):
+        state["n"] += 1
+        if state["n"] == 1:
+            raise RuntimeError("dynamo throttled on hot revenue# item")
+        return real(deltas)
+
+    monkeypatch.setattr(wired._user_repo, "apply_revenue_deltas", flaky_deltas)
+
+    payload = build_event(
+        "customer.subscription.deleted",
+        subscription(subscription_id="sub_p", customer="cus_partial", status="canceled"),
+        event_id="evt_partial",
+    )
+    assert _send(wired, payload)["statusCode"] == 500
+    assert _send(wired, payload)["statusCode"] == 200
+
+    revenue = wired._user_repo.get_revenue()
+    assert revenue.get("activeSubscribers", 0) == 0
+    assert revenue.get("monthlyChurn", 0) == 1
+    assert wired._user_repo.get_user("u_partial")["tier"] == "free"
+
+
+def test_apply_revenue_deltas_is_all_or_nothing(wired):
+    """Both counters move in a single UpdateItem."""
+    repo = wired._user_repo
+    repo.increment_revenue_counter("activeSubscribers", 5)
+    repo.apply_revenue_deltas({"activeSubscribers": -1, "monthlyChurn": 1})
+    revenue = repo.get_revenue()
+    assert revenue.get("activeSubscribers", 0) == 4
+    assert revenue.get("monthlyChurn", 0) == 1
+
+
+def test_apply_revenue_deltas_noop_on_empty(wired):
+    wired._user_repo.apply_revenue_deltas({})
+    assert wired._user_repo.get_revenue().get("activeSubscribers", 0) == 0
+
+
+def test_unresolved_log_uses_the_real_event_type(wired, monkeypatch):
+    """created vs updated must be distinguishable in the ERROR log."""
     from billing import webhook as wh
 
-    def raise_value(*a, **k):
-        raise ValueError("not json")
+    seen: list[str] = []
+    monkeypatch.setattr(wh, "_unresolved", lambda obj, event_type: seen.append(event_type))
 
-    wh_module = wh.stripe.Webhook
-    orig = wh_module.construct_event
-    wh.stripe.Webhook.construct_event = raise_value
-    try:
-        r = wired.lambda_handler(
-            _event("{}", sig=sign_payload("{}", WEBHOOK_SECRET)), None
+    for event_type in ("customer.subscription.created", "customer.subscription.updated"):
+        _send(
+            wired,
+            build_event(
+                event_type,
+                subscription(subscription_id="sub_ghost", customer="cus_never_seen"),
+            ),
         )
-    finally:
-        wh.stripe.Webhook.construct_event = orig
-    assert r["statusCode"] == 400
-    _ = real_stripe  # keep import happy
+    assert seen == ["customer.subscription.created", "customer.subscription.updated"]
 
 
-def test_subscription_canceled_status_downgrades(wired):
-    wired._user_repo.get_or_create_user("u8")
-    obj = {
-        "id": "sub_8",
-        "status": "canceled",
-        "customer": "cus_8",
-        "metadata": {"userId": "u8"},
-    }
-    payload = build_event("customer.subscription.updated", obj)
-    r = _send(wired, payload)
-    assert r["statusCode"] == 200
-    item = wired._user_repo.get_user("u8")
-    assert item["tier"] == "free"
+def test_failed_release_does_not_lose_the_event_forever(wired, monkeypatch):
+    """If release-on-failure itself fails, the lease must let a retry through.
+
+    Without a lease the orphaned claim answers every Stripe retry with
+    "duplicate" and the cancellation is lost permanently — the original bug,
+    reintroduced by its own fix.
+    """
+    from billing import webhook as wh
+
+    _seed_subscriber(wired, "u_orphan", "cus_orphan")
+    payload = build_event(
+        "customer.subscription.deleted",
+        subscription(subscription_id="sub_orphan", customer="cus_orphan", status="canceled"),
+        event_id="evt_orphan",
+    )
+
+    real = wh._DISPATCH["customer.subscription.deleted"]
+    state = {"n": 0}
+
+    def fails_once(obj, repo, event_type):
+        state["n"] += 1
+        if state["n"] == 1:
+            raise RuntimeError("handler blew up")
+        return real(obj, repo, event_type)
+
+    monkeypatch.setitem(wh._DISPATCH, "customer.subscription.deleted", fails_once)
+    # Release also fails, orphaning the claim.
+    monkeypatch.setattr(
+        wired._user_repo,
+        "release_webhook_event",
+        lambda event_id: (_ for _ in ()).throw(RuntimeError("delete failed")),
+    )
+
+    assert _send(wired, payload)["statusCode"] == 500
+    assert wired._user_repo.get_user("u_orphan")["tier"] == "paid"
+
+    # Immediately after, the lease is still held: retry is correctly suppressed.
+    assert _body(_send(wired, payload)).get("duplicate") is True
+
+    # Once the lease lapses, Stripe's retry gets through and the user downgrades.
+    import time as _time
+
+    wired._user_repo._table.update_item(
+        Key={"userId": "event#evt_orphan"},
+        UpdateExpression="SET leaseExpiresAt = :past",
+        ExpressionAttributeValues={":past": int(_time.time()) - 1},
+    )
+    assert _send(wired, payload)["statusCode"] == 200
+    assert wired._user_repo.get_user("u_orphan")["tier"] == "free"
 
 
-def test_stripe_not_configured_returns_500(wired, monkeypatch):
-    from billing import stripe_client
-    import config as cfg
+def test_completed_event_is_never_reclaimed(wired):
+    """A completed record blocks redelivery even past the lease window."""
+    import time as _time
 
-    monkeypatch.setattr(cfg, "stripe_secret_key", "")
-    stripe_client.reset_stripe_client()
-    payload = build_event("checkout.session.completed", {"client_reference_id": "u"})
-    r = _send(wired, payload)
-    assert r["statusCode"] == 500
+    wired._user_repo.get_or_create_user("u_done")
+    payload = build_event(
+        "checkout.session.completed",
+        checkout_session(user_id="u_done", customer="cus_done"),
+        event_id="evt_done",
+    )
+    assert _send(wired, payload)["statusCode"] == 200
+
+    marker = wired._user_repo.get_user("event#evt_done")
+    assert marker is not None
+    assert "completedAt" in marker
+    assert "leaseExpiresAt" not in marker
+
+    # Even with an expired lease attribute forced back on, completion wins.
+    wired._user_repo._table.update_item(
+        Key={"userId": "event#evt_done"},
+        UpdateExpression="SET leaseExpiresAt = :past",
+        ExpressionAttributeValues={":past": int(_time.time()) - 1},
+    )
+    assert _body(_send(wired, payload)).get("duplicate") is True
+    assert wired._user_repo.get_revenue().get("activeSubscribers", 0) == 1
 
 
-def test_base64_body_verified_correctly(wired):
-    wired._user_repo.get_or_create_user("u6")
-    obj = {"client_reference_id": "u6", "customer": "cus_6", "subscription": "sub_6"}
-    payload = build_event("checkout.session.completed", obj)
-    r = _send(wired, payload, b64=True)
-    assert r["statusCode"] == 200
-    item = wired._user_repo.get_user("u6")
-    assert item["tier"] == "paid"
+def test_dedup_store_failure_fails_closed(wired, monkeypatch):
+    """If the dedup claim cannot be taken, prefer a retry over a double-apply."""
+
+    def boom(*a, **k):
+        raise RuntimeError("dynamo down")
+
+    monkeypatch.setattr(wired._user_repo, "claim_webhook_event", boom)
+    payload = build_event(
+        "checkout.session.completed",
+        checkout_session(user_id="u_fc", customer="cus_fc"),
+    )
+    assert _send(wired, payload)["statusCode"] == 500
 
 
-# ---- Email notification tests ----
+# ---- Email notifications ----
+
+
+def _capture_emails(monkeypatch):
+    from notifications import sender
+
+    calls: list[dict] = []
+
+    def mock_send(to, subject, html, text):
+        calls.append({"to": to, "subject": subject})
+        return True
+
+    monkeypatch.setattr(sender, "send_email", mock_send)
+    return calls
 
 
 def test_checkout_completed_sends_welcome_email(wired, monkeypatch):
-    """When SES is enabled, checkout.session.completed sends a welcome email."""
     import config as cfg
 
     monkeypatch.setattr(cfg, "ses_enabled", True)
     wired._user_repo.get_or_create_user("u_email1", email="user1@example.com")
-    obj = {
-        "client_reference_id": "u_email1",
-        "customer": "cus_e1",
-        "subscription": "sub_e1",
-    }
-    calls = []
-    from billing import webhook as wh
-
-    original_send = None
-    try:
-        from notifications import sender
-
-        original_send = sender.send_email
-
-        def mock_send(to, subject, html, text):
-            calls.append({"to": to, "subject": subject})
-            return True
-
-        monkeypatch.setattr(sender, "send_email", mock_send)
-        payload = build_event("checkout.session.completed", obj)
-        r = _send(wired, payload)
-    finally:
-        if original_send:
-            sender.send_email = original_send
+    calls = _capture_emails(monkeypatch)
+    payload = build_event(
+        "checkout.session.completed",
+        checkout_session(user_id="u_email1", customer="cus_e1"),
+    )
+    r = _send(wired, payload)
     assert r["statusCode"] == 200
     assert len(calls) == 1
     assert calls[0]["to"] == "user1@example.com"
@@ -328,28 +635,21 @@ def test_checkout_completed_sends_welcome_email(wired, monkeypatch):
 
 
 def test_subscription_deleted_sends_cancellation_email(wired, monkeypatch):
-    """When SES is enabled, subscription deleted sends cancellation email."""
     import config as cfg
 
     monkeypatch.setattr(cfg, "ses_enabled", True)
-    wired._user_repo.get_or_create_user("u_email2", email="user2@example.com")
-    wired._user_repo.set_tier(
-        "u_email2", "paid", stripeCustomerId="cus_e2", subscriptionStatus="active"
+    _seed_subscriber(
+        wired,
+        "u_email2",
+        "cus_e2",
+        email="user2@example.com",
+        subscriptionStatus="active",
     )
-    obj = {
-        "id": "sub_e2",
-        "customer": "cus_e2",
-        "metadata": {"userId": "u_email2"},
-    }
-    calls = []
-    from notifications import sender
-
-    def mock_send(to, subject, html, text):
-        calls.append({"to": to, "subject": subject})
-        return True
-
-    monkeypatch.setattr(sender, "send_email", mock_send)
-    payload = build_event("customer.subscription.deleted", obj)
+    calls = _capture_emails(monkeypatch)
+    payload = build_event(
+        "customer.subscription.deleted",
+        subscription(subscription_id="sub_e2", customer="cus_e2", status="canceled"),
+    )
     r = _send(wired, payload)
     assert r["statusCode"] == 200
     assert len(calls) == 1
@@ -358,23 +658,12 @@ def test_subscription_deleted_sends_cancellation_email(wired, monkeypatch):
 
 
 def test_payment_failed_sends_warning_email(wired, monkeypatch):
-    """When SES is enabled, payment failed sends payment warning email."""
     import config as cfg
 
     monkeypatch.setattr(cfg, "ses_enabled", True)
-    wired._user_repo.get_or_create_user("u_email3", email="user3@example.com")
-    wired._user_repo.set_tier("u_email3", "paid", stripeCustomerId="cus_e3")
-    obj = {"customer": "cus_e3", "metadata": {"userId": "u_email3"}}
-    calls = []
-    from notifications import sender
-
-    def mock_send(to, subject, html, text):
-        calls.append({"to": to, "subject": subject})
-        return True
-
-    monkeypatch.setattr(sender, "send_email", mock_send)
-    payload = build_event("invoice.payment_failed", obj)
-    r = _send(wired, payload)
+    _seed_subscriber(wired, "u_email3", "cus_e3", email="user3@example.com")
+    calls = _capture_emails(monkeypatch)
+    r = _send(wired, build_event("invoice.payment_failed", invoice(customer="cus_e3")))
     assert r["statusCode"] == 200
     assert len(calls) == 1
     assert calls[0]["to"] == "user3@example.com"
@@ -382,27 +671,15 @@ def test_payment_failed_sends_warning_email(wired, monkeypatch):
 
 
 def test_subscription_upsert_active_sends_activated_email(wired, monkeypatch):
-    """When SES is enabled, subscription upsert with status 'active' sends activated email."""
     import config as cfg
 
     monkeypatch.setattr(cfg, "ses_enabled", True)
-    wired._user_repo.get_or_create_user("u_email_act", email="activated@example.com")
-    wired._user_repo.set_tier("u_email_act", "paid", stripeCustomerId="cus_act")
-    obj = {
-        "id": "sub_act",
-        "status": "active",
-        "customer": "cus_act",
-        "metadata": {"userId": "u_email_act"},
-    }
-    calls = []
-    from notifications import sender
-
-    def mock_send(to, subject, html, text):
-        calls.append({"to": to, "subject": subject})
-        return True
-
-    monkeypatch.setattr(sender, "send_email", mock_send)
-    payload = build_event("customer.subscription.updated", obj)
+    _seed_subscriber(wired, "u_email_act", "cus_act", email="activated@example.com")
+    calls = _capture_emails(monkeypatch)
+    payload = build_event(
+        "customer.subscription.updated",
+        subscription(subscription_id="sub_act", customer="cus_act", status="active"),
+    )
     r = _send(wired, payload)
     assert r["statusCode"] == 200
     assert len(calls) == 1
@@ -411,147 +688,105 @@ def test_subscription_upsert_active_sends_activated_email(wired, monkeypatch):
 
 
 def test_subscription_upsert_non_active_skips_email(wired, monkeypatch):
-    """When subscription upsert has non-active status, no email is sent."""
     import config as cfg
 
     monkeypatch.setattr(cfg, "ses_enabled", True)
-    wired._user_repo.get_or_create_user("u_email_noact", email="noact@example.com")
-    wired._user_repo.set_tier("u_email_noact", "paid", stripeCustomerId="cus_noact")
-    obj = {
-        "id": "sub_noact",
-        "status": "past_due",
-        "customer": "cus_noact",
-        "metadata": {"userId": "u_email_noact"},
-    }
-    calls = []
-    from notifications import sender
-
-    def mock_send(to, subject, html, text):
-        calls.append({"to": to, "subject": subject})
-        return True
-
-    monkeypatch.setattr(sender, "send_email", mock_send)
-    payload = build_event("customer.subscription.updated", obj)
+    _seed_subscriber(wired, "u_email_noact", "cus_noact", email="noact@example.com")
+    calls = _capture_emails(monkeypatch)
+    payload = build_event(
+        "customer.subscription.updated",
+        subscription(
+            subscription_id="sub_noact", customer="cus_noact", status="past_due"
+        ),
+    )
     r = _send(wired, payload)
     assert r["statusCode"] == 200
     assert len(calls) == 0
 
 
-def test_no_email_when_ses_disabled(wired, monkeypatch):
-    """When SES is disabled, no emails are sent."""
-    import config as cfg
-
-    monkeypatch.setattr(cfg, "ses_enabled", False)
-    wired._user_repo.get_or_create_user("u_email4", email="user4@example.com")
-    obj = {
-        "client_reference_id": "u_email4",
-        "customer": "cus_e4",
-        "subscription": "sub_e4",
-    }
-    calls = []
-    from notifications import sender
-
-    def mock_send(to, subject, html, text):
-        calls.append({"to": to, "subject": subject})
-        return True
-
-    monkeypatch.setattr(sender, "send_email", mock_send)
-    payload = build_event("checkout.session.completed", obj)
-    r = _send(wired, payload)
-    assert r["statusCode"] == 200
-    # send_email returns False for disabled SES, so it should not call the mock
-    # The webhook code calls sender.send_email, which checks ses_enabled internally
-    # But the mock bypasses that check. The webhook code should check ses_enabled
-    # before calling send_email, or rely on send_email's internal check.
-    # Per the plan, send_email handles the gate internally.
-    # The webhook just calls send_email unconditionally and it returns False.
-    # So calls will be 1 since the mock bypasses the gate.
-    # The real test is: does the webhook still return 200?
-    assert r["statusCode"] == 200
-
-
 def test_no_email_when_user_has_no_email(wired, monkeypatch):
-    """When user has no email address, no email is sent."""
     import config as cfg
 
     monkeypatch.setattr(cfg, "ses_enabled", True)
-    # Create user without email
     wired._user_repo.get_or_create_user("u_email5")
-    obj = {
-        "client_reference_id": "u_email5",
-        "customer": "cus_e5",
-        "subscription": "sub_e5",
-    }
-    calls = []
-    from notifications import sender
-
-    def mock_send(to, subject, html, text):
-        calls.append({"to": to, "subject": subject})
-        return True
-
-    monkeypatch.setattr(sender, "send_email", mock_send)
-    payload = build_event("checkout.session.completed", obj)
+    calls = _capture_emails(monkeypatch)
+    payload = build_event(
+        "checkout.session.completed",
+        checkout_session(user_id="u_email5", customer="cus_e5"),
+    )
     r = _send(wired, payload)
     assert r["statusCode"] == 200
     assert len(calls) == 0
 
 
 def test_webhook_returns_200_when_email_fails(wired, monkeypatch):
-    """Webhook must always return 200 even if email sending raises."""
+    """Email is fire-and-forget: an SES failure must not fail the webhook."""
     import config as cfg
+    from notifications import sender
 
     monkeypatch.setattr(cfg, "ses_enabled", True)
     wired._user_repo.get_or_create_user("u_email6", email="user6@example.com")
-    obj = {
-        "client_reference_id": "u_email6",
-        "customer": "cus_e6",
-        "subscription": "sub_e6",
-    }
-    from notifications import sender
 
     def exploding_send(to, subject, html, text):
         raise RuntimeError("SES exploded")
 
     monkeypatch.setattr(sender, "send_email", exploding_send)
-    payload = build_event("checkout.session.completed", obj)
-    r = _send(wired, payload)
-    # The webhook must still succeed even if email sending raises
-    assert r["statusCode"] == 200
+    payload = build_event(
+        "checkout.session.completed",
+        checkout_session(user_id="u_email6", customer="cus_e6"),
+    )
+    assert _send(wired, payload)["statusCode"] == 200
 
 
-# ---- Revenue tracking tests ----
+# ---- Revenue counters ----
 
 
 def test_checkout_completed_increments_active_subscribers(wired):
-    """checkout.session.completed increments activeSubscribers revenue counter."""
     wired._user_repo.get_or_create_user("u_rev1")
-    obj = {
-        "client_reference_id": "u_rev1",
-        "customer": "cus_r1",
-        "subscription": "sub_r1",
-    }
-    payload = build_event("checkout.session.completed", obj)
+    payload = build_event(
+        "checkout.session.completed",
+        checkout_session(user_id="u_rev1", customer="cus_r1"),
+    )
     r = _send(wired, payload)
     assert r["statusCode"] == 200
-    revenue = wired._user_repo.get_revenue()
-    assert revenue.get("activeSubscribers", 0) == 1
+    assert wired._user_repo.get_revenue().get("activeSubscribers", 0) == 1
 
 
-def test_subscription_deleted_decrements_and_churns(wired):
-    """subscription deleted decrements activeSubscribers and increments monthlyChurn."""
-    # Set up a subscriber first
-    wired._user_repo.get_or_create_user("u_rev2")
-    wired._user_repo.set_tier("u_rev2", "paid", stripeCustomerId="cus_r2")
+def test_real_subscription_deleted_decrements_and_churns(wired):
+    _seed_subscriber(wired, "u_rev2", "cus_r2")
     wired._user_repo.increment_revenue_counter("activeSubscribers", 1)
-
-    obj = {
-        "id": "sub_r2",
-        "customer": "cus_r2",
-        "metadata": {"userId": "u_rev2"},
-    }
-    payload = build_event("customer.subscription.deleted", obj)
+    payload = build_event(
+        "customer.subscription.deleted",
+        subscription(subscription_id="sub_r2", customer="cus_r2", status="canceled"),
+    )
     r = _send(wired, payload)
     assert r["statusCode"] == 200
     revenue = wired._user_repo.get_revenue()
     assert revenue.get("activeSubscribers", 0) == 0
     assert revenue.get("monthlyChurn", 0) == 1
+
+
+# ---- Reverse lookup unit coverage ----
+
+
+def test_reverse_lookup_returns_none_for_unknown_customer(wired):
+    assert wired._user_repo.get_user_by_stripe_customer_id("cus_nope") is None
+
+
+def test_reverse_lookup_returns_none_for_empty_customer(wired):
+    assert wired._user_repo.get_user_by_stripe_customer_id("") is None
+
+
+def test_reverse_lookup_finds_seeded_subscriber(wired):
+    _seed_subscriber(wired, "u_lookup", "cus_lookup")
+    found = wired._user_repo.get_user_by_stripe_customer_id("cus_lookup")
+    assert found is not None
+    assert found["userId"] == "u_lookup"
+
+
+def test_event_ids_are_unique_by_default():
+    """build_event must not reuse ids, or tests silently dedup each other."""
+    a = json.loads(build_event("customer.updated", {}))
+    b = json.loads(build_event("customer.updated", {}))
+    assert a["id"] != b["id"]
+    assert stripe_events is not None

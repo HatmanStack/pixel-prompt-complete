@@ -1,7 +1,8 @@
 """POST /stripe/webhook handler.
 
-Verifies Stripe signatures against the raw request body and dispatches
-events to idempotent handlers that update the users table.
+Verifies Stripe signatures against the raw request body, deduplicates on the
+Stripe event id (delivery is at-least-once), and dispatches to handlers that
+update the users table.
 """
 
 from __future__ import annotations
@@ -65,23 +66,58 @@ def _send_lifecycle_email(repo: UserRepository, user_id: str, template_fn, *temp
         StructuredLogger.warning(f"Lifecycle email failed for {user_id}: {e}")
 
 
-def _user_id_from_object(obj: dict[str, Any]) -> str | None:
-    """Extract the userId (Cognito sub) from a Stripe object.
+def _user_id_from_object(obj: dict[str, Any], repo: UserRepository) -> str | None:
+    """Resolve the userId (Cognito sub) from a Stripe object.
 
-    Checkout sessions carry ``client_reference_id``; subscriptions and
-    invoices carry ``metadata.userId`` set at checkout time (see
-    ``billing.checkout.handle_billing_checkout``).
+    Three paths, in order of reliability:
+
+    1. ``client_reference_id`` — Checkout Sessions only. Does not exist on
+       Subscription or Invoice objects.
+    2. ``metadata.userId`` — set via ``subscription_data.metadata`` at
+       checkout, so present only on subscriptions created after that was
+       added (see ``billing.checkout.handle_billing_checkout``).
+    3. ``customer`` → ``StripeCustomerIndex`` reverse lookup — the only
+       identifier every relevant event carries, and the sole path that
+       works for subscriptions predating (2).
+
+    Returns None only when all three miss, which the caller must treat as
+    an error rather than a silent no-op.
     """
     ref = obj.get("client_reference_id")
     if ref:
         return ref
     metadata = obj.get("metadata") or {}
-    return metadata.get("userId")
+    user_id = metadata.get("userId")
+    if user_id:
+        return user_id
+    customer_id = obj.get("customer")
+    if customer_id:
+        user = repo.get_user_by_stripe_customer_id(customer_id)
+        if user:
+            return str(user["userId"])
+    return None
 
 
-def _on_checkout_completed(obj: dict[str, Any], repo: UserRepository) -> None:
-    user_id = _user_id_from_object(obj)
+def _unresolved(obj: dict[str, Any], event_type: str) -> None:
+    """Log a resolution failure loudly.
+
+    A silent return here is exactly how cancellations were lost: Stripe sees
+    HTTP 200, the operator sees nothing, and the user keeps paid access.
+    """
+    StructuredLogger.error(
+        f"Webhook {event_type}: could not resolve userId — event ignored",
+        stripe_object_id=obj.get("id"),
+        stripe_customer_id=obj.get("customer"),
+        event_type=event_type,
+    )
+
+
+def _on_checkout_completed(
+    obj: dict[str, Any], repo: UserRepository, event_type: str
+) -> None:
+    user_id = _user_id_from_object(obj, repo)
     if not user_id:
+        _unresolved(obj, event_type)
         return
     fields: dict[str, Any] = {}
     if obj.get("customer"):
@@ -94,9 +130,12 @@ def _on_checkout_completed(obj: dict[str, Any], repo: UserRepository) -> None:
     _send_lifecycle_email(repo, user_id, email_templates.welcome_email)
 
 
-def _on_subscription_upsert(obj: dict[str, Any], repo: UserRepository) -> None:
-    user_id = _user_id_from_object(obj)
+def _on_subscription_upsert(
+    obj: dict[str, Any], repo: UserRepository, event_type: str
+) -> None:
+    user_id = _user_id_from_object(obj, repo)
     if not user_id:
+        _unresolved(obj, event_type)
         return
     status = obj.get("status", "active")
     tier = "paid" if status in ("active", "trialing") else "free"
@@ -111,9 +150,12 @@ def _on_subscription_upsert(obj: dict[str, Any], repo: UserRepository) -> None:
         _send_lifecycle_email(repo, user_id, email_templates.subscription_activated_email)
 
 
-def _on_subscription_deleted(obj: dict[str, Any], repo: UserRepository) -> None:
-    user_id = _user_id_from_object(obj)
+def _on_subscription_deleted(
+    obj: dict[str, Any], repo: UserRepository, event_type: str
+) -> None:
+    user_id = _user_id_from_object(obj, repo)
     if not user_id:
+        _unresolved(obj, event_type)
         return
     repo.set_tier(
         user_id,
@@ -121,14 +163,19 @@ def _on_subscription_deleted(obj: dict[str, Any], repo: UserRepository) -> None:
         subscriptionStatus="canceled",
         stripeSubscriptionId="",
     )
-    repo.decrement_revenue_counter("activeSubscribers", 1)
-    repo.increment_revenue_counter("monthlyChurn", 1)
+    # One atomic UpdateItem, not two sequential ones: a failure between
+    # them would release the idempotency claim with the first delta already
+    # applied, and Stripe's retry would apply it a second time.
+    repo.apply_revenue_deltas({"activeSubscribers": -1, "monthlyChurn": 1})
     _send_lifecycle_email(repo, user_id, email_templates.subscription_cancelled_email)
 
 
-def _on_payment_failed(obj: dict[str, Any], repo: UserRepository) -> None:
-    user_id = _user_id_from_object(obj)
+def _on_payment_failed(
+    obj: dict[str, Any], repo: UserRepository, event_type: str
+) -> None:
+    user_id = _user_id_from_object(obj, repo)
     if not user_id:
+        _unresolved(obj, event_type)
         return
     user = repo.get_user(user_id)
     if user is None:
@@ -178,8 +225,32 @@ def handle_stripe_webhook(
         return _response(400, {"error": "invalid payload"})
 
     event_type = stripe_event["type"]
+    # Subscript, not .get(): StripeObject's custom __getattr__ raises
+    # AttributeError for dict methods it doesn't define.
+    try:
+        event_id = str(stripe_event["id"] or "")
+    except (KeyError, AttributeError):
+        event_id = ""
     handler = _DISPATCH.get(event_type)
     if handler:
+        # Stripe delivers at-least-once. Claim the event id before mutating
+        # anything so a redelivery cannot double-count revenue counters.
+        try:
+            claimed = repo.claim_webhook_event(event_id)
+        except Exception as e:
+            StructuredLogger.error(
+                f"Webhook dedup claim failed for {event_id}: {e}",
+                correlation_id=correlation_id,
+                traceback=traceback.format_exc(),
+            )
+            # Fail closed: let Stripe retry rather than risk a double-apply.
+            return _response(500, {"error": "dedup unavailable"})
+        if not claimed:
+            StructuredLogger.info(
+                f"Webhook {event_type} {event_id} already processed — skipping",
+                correlation_id=correlation_id,
+            )
+            return _response(200, {"received": True, "duplicate": True})
         try:
             raw_obj = stripe_event["data"]["object"]
             # Normalize StripeObject to a plain dict so handlers can use
@@ -190,12 +261,25 @@ def handle_stripe_webhook(
                 obj = raw_obj.to_dict()
             else:
                 obj = raw_obj
-            handler(obj, repo)
+            handler(obj, repo, event_type)
+            # Only a completed record suppresses redelivery. Until this lands
+            # the claim is just a lease, so a crash mid-handler is retried.
+            repo.complete_webhook_event(event_id)
         except Exception as e:
             StructuredLogger.error(
                 f"Webhook handler error for {event_type}: {e}",
                 correlation_id=correlation_id,
                 traceback=traceback.format_exc(),
             )
+            # Release the claim so Stripe's retry can re-process. Holding it
+            # would turn one transient failure into a permanently dropped
+            # event — for a cancellation, that is paid access kept forever.
+            try:
+                repo.release_webhook_event(event_id)
+            except Exception as release_err:
+                StructuredLogger.error(
+                    f"Failed to release dedup claim for {event_id}: {release_err}",
+                    correlation_id=correlation_id,
+                )
             return _response(500, {"error": "handler failed"})
     return _response(200, {"received": True})
