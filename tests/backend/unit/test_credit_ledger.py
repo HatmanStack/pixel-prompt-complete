@@ -462,3 +462,85 @@ def test_top_up_does_not_extend_an_active_period(repo):
     repo.debit_credits("u_act", amount=100, allotment=500, period_end=NOW + 100, now=NOW)
     repo.grant_credits("u_act", 200, now=NOW, period_end=NOW + 999999)
     assert repo.get_credit_balance("u_act")["creditPeriodEnd"] == NOW + 100
+
+
+# ---- Refund when a paid-for request produces nothing ----
+
+
+def test_refund_helper_returns_the_exact_charge(credits_on, repo, monkeypatch):
+    """A refund must equal the charge, or the ledger drifts."""
+    import lambda_function
+    from users.quota import enforce_quota
+
+    monkeypatch.setattr(lambda_function, "_user_repo", repo)
+    ctx = _ctx("paid", "u_refund")
+
+    before = credits_on.paid_monthly_credits
+    charged = enforce_quota(ctx, "generate", repo, NOW)
+    assert repo.get_credit_balance("u_refund")["creditsRemaining"] == (
+        before - credits_on.credits_per_generate
+    )
+
+    lambda_function._refund_credits(ctx, "generate", "corr-1")
+    assert repo.get_credit_balance("u_refund")["creditsRemaining"] == before
+    assert charged.usage["creditsCharged"] == credits_on.credits_per_generate
+
+
+def test_refund_matches_the_charge_for_every_action(credits_on, repo, monkeypatch):
+    import lambda_function
+    from users.quota import enforce_quota
+
+    monkeypatch.setattr(lambda_function, "_user_repo", repo)
+    for kind, user in (("generate", "u_a"), ("refine", "u_b"), ("outpaint", "u_c")):
+        ctx = _ctx("paid", user)
+        enforce_quota(ctx, kind, repo, NOW)
+        spent = credits_on.paid_monthly_credits - repo.get_credit_balance(user)[
+            "creditsRemaining"
+        ]
+        lambda_function._refund_credits(ctx, kind, "corr-1")
+        restored = repo.get_credit_balance(user)["creditsRemaining"]
+        assert restored == credits_on.paid_monthly_credits, f"{kind} refund != charge"
+        assert spent == credits_on.credit_cost(kind)
+
+
+def test_no_refund_when_credits_disabled(repo, monkeypatch):
+    """Nothing was charged, so nothing may be granted."""
+    import config
+    import lambda_function
+
+    monkeypatch.setattr(lambda_function, "_user_repo", repo)
+    monkeypatch.setattr(config, "credits_enabled", False)
+    repo.get_or_create_user("u_off", now=NOW)
+    lambda_function._refund_credits(_ctx("paid", "u_off"), "generate", "corr-1")
+    assert repo.get_credit_balance("u_off")["creditsRemaining"] == 0
+
+
+def test_no_refund_for_guests(credits_on, repo, monkeypatch):
+    """Guests are not on the ledger, so a refund would mint credits."""
+    import lambda_function
+
+    monkeypatch.setattr(lambda_function, "_user_repo", repo)
+    repo.get_or_create_user("guest#abc", now=NOW)
+    lambda_function._refund_credits(_ctx("guest", "guest#abc"), "generate", "corr-1")
+    assert repo.get_credit_balance("guest#abc")["creditsRemaining"] == 0
+
+
+def test_refund_failure_is_swallowed(credits_on, repo, monkeypatch):
+    """The caller is already on an error path; a failed refund must not raise."""
+    import lambda_function
+
+    monkeypatch.setattr(lambda_function, "_user_repo", repo)
+    monkeypatch.setattr(
+        repo,
+        "grant_credits",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("dynamo down")),
+    )
+    # Must not propagate.
+    lambda_function._refund_credits(_ctx("paid", "u_boom"), "generate", "corr-1")
+
+
+def test_no_refund_when_tier_context_missing(credits_on, repo, monkeypatch):
+    import lambda_function
+
+    monkeypatch.setattr(lambda_function, "_user_repo", repo)
+    lambda_function._refund_credits(None, "generate", "corr-1")

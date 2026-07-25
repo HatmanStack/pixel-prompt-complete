@@ -351,3 +351,110 @@ def test_enhance_not_billed_when_enhancer_unconfigured():
     happened would corrupt the cost data the meter exists to gather.
     """
     assert _generate_with_enhancer(False)["include_enhance"] is False
+
+
+# ---- Refund wiring: a request that produced nothing must not be charged ----
+
+
+def _generate_with_results(future_result, side_effect=None):
+    """Run /generate with a controllable model outcome, capturing refunds."""
+    tier, quota = _tier_and_quota()
+    with (
+        patch("config.auth_enabled", True),
+        patch("config.credits_enabled", True),
+        patch("lambda_function._guest_service", MagicMock()),
+        patch("lambda_function._user_repo") as mock_repo,
+        patch("lambda_function.resolve_tier", return_value=tier),
+        patch("lambda_function.enforce_quota", return_value=quota),
+        patch("lambda_function.content_filter") as mock_cf,
+        patch("lambda_function.get_enabled_models") as mock_models,
+        patch("lambda_function._model_counter_service") as mock_counter,
+        patch("lambda_function.session_manager") as mock_sm,
+        patch("lambda_function._executor") as mock_exec,
+        patch("lambda_function._cost_meter"),
+        patch("lambda_function._refund_credits") as mock_refund,
+    ):
+        mock_repo.get_model_runtime_config.return_value = None
+        mock_cf.check_prompt.return_value = False
+        mock_models.return_value = [_model("gemini", "google_gemini")]
+        mock_counter.consume_model_slot.return_value = True
+        mock_sm.create_session.return_value = "session-1"
+
+        future = MagicMock()
+        if side_effect:
+            future.result.side_effect = side_effect
+        else:
+            future.result.return_value = future_result
+        mock_exec.submit.return_value = future
+
+        from lambda_function import handle_generate
+
+        with patch("lambda_function.as_completed", return_value=[future]):
+            handle_generate(_make_event(), "corr-1")
+        return mock_refund
+
+
+def test_generate_refunds_when_every_model_fails():
+    """Charged before dispatch, so a total failure took money for nothing."""
+    mock_refund = _generate_with_results(("gemini", {"status": "error", "error": "boom"}))
+    mock_refund.assert_called_once()
+    assert mock_refund.call_args.args[1] == "generate"
+
+
+def test_generate_refunds_when_the_thread_pool_raises():
+    mock_refund = _generate_with_results(None, side_effect=RuntimeError("exploded"))
+    mock_refund.assert_called_once()
+
+
+def test_generate_does_not_refund_on_success():
+    mock_refund = _generate_with_results(
+        ("gemini", {"status": "completed", "duration": 1.0})
+    )
+    mock_refund.assert_not_called()
+
+
+def test_refine_refunds_when_the_model_fails():
+    """One model, so its failure means the request produced nothing."""
+    tier, quota = _tier_and_quota()
+    ctx = _refinement_patches(None)
+    handler = MagicMock(return_value={"status": "error", "error": "provider down"})
+    with (
+        patch("config.auth_enabled", True),
+        patch("config.credits_enabled", True),
+        patch("lambda_function._guest_service", MagicMock()),
+        patch("lambda_function._user_repo", MagicMock()),
+        patch("lambda_function._model_counter_service") as mock_counter,
+        patch("lambda_function.resolve_tier", return_value=tier),
+        patch("lambda_function.enforce_quota", return_value=quota),
+        patch("lambda_function.content_filter") as mock_cf,
+        patch("lambda_function._validate_refinement_request") as mock_val,
+        patch("lambda_function._load_source_image") as mock_load,
+        patch("lambda_function.session_manager") as mock_sm,
+        patch("lambda_function._handle_failed_result"),
+        patch("lambda_function.context_manager", MagicMock()),
+        patch("lambda_function.get_iterate_handler", return_value=handler),
+        patch("lambda_function._cost_meter"),
+        patch("lambda_function._refund_credits") as mock_refund,
+    ):
+        mock_counter.consume_model_slot.return_value = True
+        mock_cf.check_prompt.return_value = False
+        mock_val.return_value = (("sess-1", "gemini", ctx["model_cfg"]), None)
+        mock_load.return_value = (("img", 1), None)
+        mock_sm.add_iteration.return_value = 1
+
+        import lambda_function
+
+        resp = lambda_function.handle_iterate(
+            {
+                "body": json.dumps(
+                    {"sessionId": "sess-1", "model": "gemini", "prompt": "bluer"}
+                ),
+                "requestContext": {"http": {"sourceIp": "127.0.0.1"}},
+                "headers": {},
+            },
+            "corr-1",
+        )
+
+    assert resp["statusCode"] == 500
+    mock_refund.assert_called_once()
+    assert mock_refund.call_args.args[1] == "refine"
