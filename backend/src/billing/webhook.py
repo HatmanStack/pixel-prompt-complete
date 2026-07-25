@@ -145,6 +145,16 @@ def _on_subscription_upsert(
     }
     if obj.get("customer"):
         fields["stripeCustomerId"] = obj["customer"]
+    # Credit allotments renew on Stripe's own period boundary, not a fixed
+    # 30-day clock: Stripe's monthly cycles run 28-31 days, so a fixed window
+    # would grant credits before the customer is billed in some months and
+    # leave them short after renewal in others.
+    period_end = obj.get("current_period_end")
+    if period_end:
+        fields["stripeCurrentPeriodEnd"] = int(period_end)
+    period_start = obj.get("current_period_start")
+    if period_start:
+        fields["stripeCurrentPeriodStart"] = int(period_start)
     repo.set_tier(user_id, tier, **fields)
     if status == "active":
         _send_lifecycle_email(repo, user_id, email_templates.subscription_activated_email)

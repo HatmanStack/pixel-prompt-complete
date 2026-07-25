@@ -296,6 +296,16 @@ def _parse_and_validate_request(
                 return None, response(403, error_responses.account_suspended())
             if result.reason == "guest_global":
                 return None, response(429, error_responses.guest_global_limit())
+            if result.reason == "insufficient_credits":
+                return None, response(
+                    402,
+                    error_responses.insufficient_credits(
+                        tier_ctx.tier,
+                        result.reset_at,
+                        remaining=result.usage.get("creditsRemaining", 0),
+                        required=config.credit_cost(endpoint_kind),
+                    ),
+                )
             return None, response(
                 429,
                 error_responses.tier_quota_exceeded(tier_ctx.tier, result.reset_at),

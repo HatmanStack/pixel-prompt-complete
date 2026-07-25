@@ -103,6 +103,61 @@ free_window_seconds = _safe_int("FREE_WINDOW_SECONDS", 3600)
 paid_daily_limit = _safe_int("PAID_DAILY_LIMIT", 200)
 paid_window_seconds = _safe_int("PAID_WINDOW_SECONDS", 86400)
 
+# ---------------------------------------------------------------------------
+# Credit ledger (P0-C: subscription + hard credit allotment).
+#
+# Credits are stored as integer CENTI-credits (1 credit = 100) so fractional
+# action costs — a refine is a quarter of a generate — never need floats in a
+# DynamoDB counter.
+# ---------------------------------------------------------------------------
+credits_per_generate = _safe_int("CREDITS_PER_GENERATE", 100)  # 1.00 credit
+credits_per_refine = _safe_int("CREDITS_PER_REFINE", 25)  # 0.25 credit
+credits_per_outpaint = _safe_int("CREDITS_PER_OUTPAINT", 25)  # 0.25 credit
+
+# Per-tier monthly allotments, in centi-credits.
+free_monthly_credits = _safe_int("FREE_MONTHLY_CREDITS", 500)  # 5 credits
+paid_monthly_credits = _safe_int("PAID_MONTHLY_CREDITS", 6500)  # 65 credits
+
+# Free-tier renewal window. PAID tiers renew on Stripe's own subscription
+# period boundaries (current_period_end), never on a fixed clock: Stripe's
+# monthly cycles run 28-31 days, so a fixed window would hand out credits
+# before the customer is billed in some months and leave them short after
+# renewal in others.
+free_credit_period_seconds = _safe_int("FREE_CREDIT_PERIOD_SECONDS", 2592000)  # 30d
+
+# Fallback renewal window for a paid user whose Stripe period we do not have
+# (webhook missed, or subscription predates period persistence). Used only as
+# a floor so a paying customer is never left with zero credits.
+paid_credit_fallback_period_seconds = _safe_int(
+    "PAID_CREDIT_FALLBACK_PERIOD_SECONDS", 2592000
+)
+
+# Master switch. Off keeps the legacy call-counting quotas, so the ledger can
+# be rolled out and rolled back without a redeploy of the old code path.
+credits_enabled = os.environ.get("CREDITS_ENABLED", "false").lower() == "true"
+
+
+CREDIT_COSTS: dict[str, int] = {
+    "generate": credits_per_generate,
+    "refine": credits_per_refine,
+    "outpaint": credits_per_outpaint,
+}
+
+
+def credit_cost(endpoint_kind: str) -> int:
+    """Credits charged for one call to ``endpoint_kind``, in centi-credits."""
+    return CREDIT_COSTS.get(endpoint_kind, 0)
+
+
+def monthly_credit_allotment(tier: str) -> int:
+    """Centi-credits granted per period for ``tier``."""
+    if tier == "paid":
+        return paid_monthly_credits
+    if tier == "free":
+        return free_monthly_credits
+    return 0
+
+
 # Stripe
 stripe_secret_key = os.environ.get("STRIPE_SECRET_KEY", "")
 stripe_webhook_secret = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
