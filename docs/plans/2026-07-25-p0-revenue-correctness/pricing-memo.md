@@ -79,7 +79,9 @@ CREDITS_PER_ENHANCE=0
 FREE_MONTHLY_CREDITS=500                # 5 credits
 PRO_MONTHLY_CREDITS=6500                # 65 credits
 STUDIO_MONTHLY_CREDITS=17000            # 170 credits
-CREDIT_PERIOD_SECONDS=2592000           # 30 days
+# Free accounts only. PAID allotments reset on Stripe's subscription period
+# boundaries (current_period_start/end), never on a fixed clock — see below.
+FREE_CREDIT_PERIOD_SECONDS=2592000      # 30 days
 
 # --- Display price + Stripe wiring ---
 PRO_PRICE_USD_CENTS=1900
@@ -92,6 +94,17 @@ STRIPE_PRICE_ID_STUDIO=price_xxx
 GLOBAL_DAILY_SPEND_CEILING_USD_CENTS=...
 FREE_TIER_DAILY_SPEND_CEILING_USD_CENTS=...
 ```
+
+### Paid credits reset on Stripe's period, not a fixed 30 days
+
+Stripe's monthly billing cycles run 28–31 days. A fixed 30-day credit window
+drifts against them, so a subscriber gets a fresh allotment before they are
+billed in some months and goes short after renewal in others — both of which
+are support tickets, and the second is a refund request.
+
+Persist `current_period_start` / `current_period_end` from the subscription
+webhook and reset paid allotments against those boundaries. Only free accounts,
+which have no Stripe period, use a fixed cycle.
 
 ### Serve pricing from the backend, not `VITE_` vars
 

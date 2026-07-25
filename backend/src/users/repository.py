@@ -18,6 +18,11 @@ _MAX_RETRIES = 3
 # How long a processed Stripe event id is remembered for dedup. Stripe retries
 # a failing webhook for up to 3 days; 30 days is a comfortable margin.
 _WEBHOOK_EVENT_TTL_SECONDS = 30 * 86400
+# How long a single delivery may hold the claim before another delivery may
+# reclaim it. Bounds the damage when release-on-failure itself fails: without
+# a lease the claim would persist and every Stripe retry would be answered
+# "duplicate", silently losing the event.
+_WEBHOOK_LEASE_SECONDS = 900
 
 
 class UserRepository:
@@ -420,15 +425,44 @@ class UserRepository:
                 Item={
                     "userId": f"event#{event_id}",
                     "claimedAt": now,
+                    "leaseExpiresAt": now + _WEBHOOK_LEASE_SECONDS,
                     "ttl": now + _WEBHOOK_EVENT_TTL_SECONDS,
                 },
-                ConditionExpression="attribute_not_exists(userId)",
+                ConditionExpression=(
+                    "attribute_not_exists(userId) OR "
+                    "(attribute_not_exists(completedAt) AND leaseExpiresAt < :now)"
+                ),
+                ExpressionAttributeValues={":now": now},
             )
         except ClientError as e:
             if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
                 return False
             raise
         return True
+
+    def complete_webhook_event(self, event_id: str, now: int | None = None) -> None:
+        """Mark an event fully processed so retries are suppressed for the TTL.
+
+        Only a completed record blocks redelivery. An in-flight claim merely
+        holds a lease, so a delivery that dies without completing (or whose
+        release fails) is retried once the lease lapses rather than being
+        swallowed forever.
+        """
+        if not event_id:
+            return
+        if now is None:
+            now = int(time.time())
+        self._table.update_item(
+            Key={"userId": f"event#{event_id}"},
+            UpdateExpression=(
+                "SET completedAt = :now, #ttl = :ttl REMOVE leaseExpiresAt"
+            ),
+            ExpressionAttributeNames={"#ttl": "ttl"},
+            ExpressionAttributeValues={
+                ":now": now,
+                ":ttl": now + _WEBHOOK_EVENT_TTL_SECONDS,
+            },
+        )
 
     def release_webhook_event(self, event_id: str) -> None:
         """Drop a claim so Stripe's retry can re-process the event.

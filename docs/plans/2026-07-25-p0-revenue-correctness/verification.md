@@ -1,4 +1,9 @@
-# P0-A / P0-B Verification at HEAD
+# P0-A / P0-B Verification — pre-fix baseline
+
+**This document is the audit baseline captured at `2f7b2dc`, before any fix
+landed.** It records the broken behaviour on purpose; do not read it as the
+current state of the code. P0-A has since been fixed on this branch — see
+"Post-fix status" at the end.
 
 Verified 2026-07-25 against `2f7b2dc` (pulled; the 4 new commits were frontend
 dependency bumps only and touched no billing code).
@@ -127,4 +132,27 @@ Exposure at current defaults:
 - **`/enhance` returns identical strings** for `short_prompt` and `long_prompt`
   — `lambda_function.py:964`.
 
-Nothing in the P0-A or P0-B findings has been fixed since the audit.
+At the time of this audit, nothing in the P0-A or P0-B findings had been fixed.
+
+## Post-fix status
+
+P0-A is fixed on `feat/p0-revenue-correctness`:
+
+| Baseline finding | Status |
+|---|---|
+| Cancellations never downgrade | **Fixed** — three-tier resolver + `StripeCustomerIndex` GSI |
+| Checkout sets no `subscription_data` | **Fixed** — stamps `metadata.userId` |
+| Silent return on unresolved user | **Fixed** — logs at ERROR with event type and customer id |
+| No webhook idempotency | **Fixed** — leased claim + explicit completion record |
+| Tests hand-inject `metadata.userId` | **Fixed** — real-shaped fixtures + a guard test |
+| No recovery path for already-churned users | **Fixed** — `backend/scripts/reconcile_subscriptions.py` |
+
+Two further defects were found in review of the fix itself and are also fixed:
+non-atomic revenue counter updates (drove `activeSubscribers` negative on a
+mid-handler failure), and a failed claim release permanently swallowing an
+event.
+
+Post-fix: **backend 528 passed**, coverage **89.50%**, frontend 453 passed.
+
+**P0-B is unchanged** — every economics finding above still stands and is the
+subject of Sprint 1 Track B.

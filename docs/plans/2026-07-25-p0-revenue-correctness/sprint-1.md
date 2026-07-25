@@ -32,7 +32,7 @@ not fix the bug for anyone who has already subscribed.
 ### A2. `stripeCustomerId` reverse lookup (1.5 days)
 
 - Add a GSI on `stripeCustomerId` to the users table in
-  `backend/src/template.yaml` (the existing GSI is for prompt history — this is
+  `backend/template.yaml` (the existing GSI is for prompt history — this is
   a second one).
 - Add `UserRepository.get_user_by_stripe_customer_id(customer_id)` in
   `backend/src/users/repository.py`.
@@ -129,7 +129,12 @@ P0-C is now decided (subscription + hard credit allotment), so this is no longer
 - Atomic debit in `repository.py` with a conditional expression so a balance
   can never go negative under concurrency (the same shape as the existing
   `_atomic_increment`).
-- Monthly period reset, not the current rolling hourly window.
+- Period reset anchored to **Stripe's `current_period_start` /
+  `current_period_end`** for paid tiers, not a fixed 30-day clock. Stripe's
+  monthly cycles run 28–31 days, so a fixed window drifts against the billing
+  period and grants credits early or withholds them after renewal. Persist the
+  period boundaries from the subscription webhook and reset against those.
+  Free accounts have no Stripe period, so they use a defined calendar cycle.
 
 ### B3a. Free tier becomes a budget, not a rate limit (1 day)
 

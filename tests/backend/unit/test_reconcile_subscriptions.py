@@ -211,3 +211,95 @@ def test_unknown_customer_is_treated_as_free(script, table, monkeypatch):
 
     assert rc == 0
     assert table.get_item(Key={"userId": "deleted-customer"})["Item"]["tier"] == "free"
+
+
+def test_no_customer_clears_status_instead_of_writing_placeholder(script, table, monkeypatch):
+    """Display strings must never land in subscriptionStatus.
+
+    The webhook writes real Stripe statuses there (active/canceled/past_due);
+    persisting "no-customer" would put a value in that field that no other
+    consumer knows how to read.
+    """
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_x")
+    table.put_item(
+        Item={"userId": "ghost", "tier": "paid", "subscriptionStatus": "active"}
+    )
+
+    assert script.reconcile(TABLE_NAME, "us-east-1", apply=True) == 0
+    item = table.get_item(Key={"userId": "ghost"})["Item"]
+    assert item["tier"] == "free"
+    assert "subscriptionStatus" not in item
+
+
+def test_no_subscription_persists_canceled_not_placeholder(script, table, monkeypatch):
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_x")
+    _put(table, "sub-less", "paid", "cus_subless")
+
+    with patch.object(script.stripe.Subscription, "list", MagicMock(return_value={"data": []})):
+        assert script.reconcile(TABLE_NAME, "us-east-1", apply=True) == 0
+
+    item = table.get_item(Key={"userId": "sub-less"})["Item"]
+    assert item["tier"] == "free"
+    assert item["subscriptionStatus"] == "canceled"
+
+
+def test_transient_stripe_error_never_downgrades(script, table, monkeypatch, capsys):
+    """A rate limit must not be read as "no subscription".
+
+    Treating a transient failure as absence would revoke paid access from a
+    paying customer — strictly worse than the drift this script repairs.
+    """
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_x")
+    _put(table, "paying-user", "paid", "cus_paying")
+
+    def rate_limited(**kwargs):
+        raise script.stripe.error.RateLimitError("slow down")
+
+    with patch.object(script.stripe.Subscription, "list", rate_limited):
+        rc = script.reconcile(TABLE_NAME, "us-east-1", apply=True)
+
+    assert rc == 1
+    assert table.get_item(Key={"userId": "paying-user"})["Item"]["tier"] == "paid"
+    assert "could not be checked" in capsys.readouterr().out
+
+
+def test_connection_error_is_also_survived(script, table, monkeypatch):
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_x")
+    _put(table, "user-a", "paid", "cus_a")
+    _put(table, "user-b", "paid", "cus_b")
+
+    calls = {"n": 0}
+
+    def flaky(**kwargs):
+        calls["n"] += 1
+        if kwargs.get("customer") == "cus_a":
+            raise script.stripe.error.APIConnectionError("network")
+        return {"data": [_fake_sub("canceled", "sub_b")]}
+
+    with patch.object(script.stripe.Subscription, "list", flaky):
+        rc = script.reconcile(TABLE_NAME, "us-east-1", apply=True)
+
+    # user-a skipped (unknown), user-b corrected — one failure does not abort.
+    assert rc == 1
+    assert table.get_item(Key={"userId": "user-a"})["Item"]["tier"] == "paid"
+    assert table.get_item(Key={"userId": "user-b"})["Item"]["tier"] == "free"
+
+
+def test_scan_projects_only_needed_attributes(script, table, monkeypatch):
+    """Projection must still surface the three fields the diff depends on."""
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_x")
+    table.put_item(
+        Item={
+            "userId": "u-proj",
+            "tier": "paid",
+            "stripeCustomerId": "cus_proj",
+            "generateCount": 99,
+            "refineCount": 42,
+        }
+    )
+    users = script._scan_users(table)
+    assert len(users) == 1
+    assert users[0]["userId"] == "u-proj"
+    assert users[0]["tier"] == "paid"
+    assert users[0]["stripeCustomerId"] == "cus_proj"
+    assert "generateCount" not in users[0]

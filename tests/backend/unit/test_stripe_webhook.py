@@ -509,6 +509,84 @@ def test_unresolved_log_uses_the_real_event_type(wired, monkeypatch):
     assert seen == ["customer.subscription.created", "customer.subscription.updated"]
 
 
+def test_failed_release_does_not_lose_the_event_forever(wired, monkeypatch):
+    """If release-on-failure itself fails, the lease must let a retry through.
+
+    Without a lease the orphaned claim answers every Stripe retry with
+    "duplicate" and the cancellation is lost permanently — the original bug,
+    reintroduced by its own fix.
+    """
+    from billing import webhook as wh
+
+    _seed_subscriber(wired, "u_orphan", "cus_orphan")
+    payload = build_event(
+        "customer.subscription.deleted",
+        subscription(subscription_id="sub_orphan", customer="cus_orphan", status="canceled"),
+        event_id="evt_orphan",
+    )
+
+    real = wh._DISPATCH["customer.subscription.deleted"]
+    state = {"n": 0}
+
+    def fails_once(obj, repo, event_type):
+        state["n"] += 1
+        if state["n"] == 1:
+            raise RuntimeError("handler blew up")
+        return real(obj, repo, event_type)
+
+    monkeypatch.setitem(wh._DISPATCH, "customer.subscription.deleted", fails_once)
+    # Release also fails, orphaning the claim.
+    monkeypatch.setattr(
+        wired._user_repo,
+        "release_webhook_event",
+        lambda event_id: (_ for _ in ()).throw(RuntimeError("delete failed")),
+    )
+
+    assert _send(wired, payload)["statusCode"] == 500
+    assert wired._user_repo.get_user("u_orphan")["tier"] == "paid"
+
+    # Immediately after, the lease is still held: retry is correctly suppressed.
+    assert _body(_send(wired, payload)).get("duplicate") is True
+
+    # Once the lease lapses, Stripe's retry gets through and the user downgrades.
+    import time as _time
+
+    wired._user_repo._table.update_item(
+        Key={"userId": "event#evt_orphan"},
+        UpdateExpression="SET leaseExpiresAt = :past",
+        ExpressionAttributeValues={":past": int(_time.time()) - 1},
+    )
+    assert _send(wired, payload)["statusCode"] == 200
+    assert wired._user_repo.get_user("u_orphan")["tier"] == "free"
+
+
+def test_completed_event_is_never_reclaimed(wired):
+    """A completed record blocks redelivery even past the lease window."""
+    import time as _time
+
+    wired._user_repo.get_or_create_user("u_done")
+    payload = build_event(
+        "checkout.session.completed",
+        checkout_session(user_id="u_done", customer="cus_done"),
+        event_id="evt_done",
+    )
+    assert _send(wired, payload)["statusCode"] == 200
+
+    marker = wired._user_repo.get_user("event#evt_done")
+    assert marker is not None
+    assert "completedAt" in marker
+    assert "leaseExpiresAt" not in marker
+
+    # Even with an expired lease attribute forced back on, completion wins.
+    wired._user_repo._table.update_item(
+        Key={"userId": "event#evt_done"},
+        UpdateExpression="SET leaseExpiresAt = :past",
+        ExpressionAttributeValues={":past": int(_time.time()) - 1},
+    )
+    assert _body(_send(wired, payload)).get("duplicate") is True
+    assert wired._user_repo.get_revenue().get("activeSubscribers", 0) == 1
+
+
 def test_dedup_store_failure_fails_closed(wired, monkeypatch):
     """If the dedup claim cannot be taken, prefer a retry over a double-apply."""
 

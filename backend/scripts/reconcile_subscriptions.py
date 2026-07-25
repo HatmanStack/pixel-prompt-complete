@@ -58,10 +58,26 @@ def _is_real_user(user_id: str) -> bool:
     return not any(user_id.startswith(p) for p in _SYNTHETIC_PREFIXES)
 
 
+class StripeLookupError(RuntimeError):
+    """A transient Stripe failure — the customer's real state is unknown.
+
+    Never conflate this with "no subscription". Treating a rate limit or a
+    connection blip as absence would downgrade a paying customer on --apply,
+    which is a worse outcome than the drift this script exists to repair.
+    """
+
+
 def _scan_users(table: Any) -> list[dict]:
-    """Return every real user record in the table."""
+    """Return every real user record in the table.
+
+    Projects only the attributes this script reads; the table also holds
+    quota counters and prompt history that would otherwise be transferred
+    for every record.
+    """
     users: list[dict] = []
-    kwargs: dict[str, Any] = {}
+    kwargs: dict[str, Any] = {
+        "ProjectionExpression": "userId, tier, stripeCustomerId",
+    }
     while True:
         resp = table.scan(**kwargs)
         for item in resp.get("Items", []):
@@ -82,8 +98,11 @@ def _stripe_status_for_customer(customer_id: str) -> tuple[str | None, str | Non
     try:
         subs = stripe.Subscription.list(customer=customer_id, status="all", limit=10)
     except stripe.error.InvalidRequestError:
-        # Customer deleted or unknown to this Stripe account.
+        # Customer genuinely deleted or unknown to this Stripe account.
         return None, None
+    except stripe.error.StripeError as e:
+        # Rate limit, connection error, 5xx. State unknown — refuse to guess.
+        raise StripeLookupError(f"{type(e).__name__}: {e}") from e
     data = sorted(
         subs.get("data", []),
         key=lambda s: s.get("created", 0),
@@ -106,6 +125,8 @@ def reconcile(table_name: str, region: str, apply: bool) -> int:
         print("ERROR: STRIPE_SECRET_KEY is not set", file=sys.stderr)
         return 2
     stripe.api_key = secret
+    # Ride out transient failures rather than aborting a long audit.
+    stripe.max_network_retries = 3
 
     if secret.startswith("sk_live_"):
         print("!! Running against LIVE Stripe data.\n")
@@ -115,6 +136,7 @@ def reconcile(table_name: str, region: str, apply: bool) -> int:
     print(f"Scanned {len(users)} user records from {table_name}\n")
 
     drift: list[dict] = []
+    failures: list[tuple[str, str]] = []
     no_customer = 0
 
     for user in users:
@@ -130,6 +152,9 @@ def reconcile(table_name: str, region: str, apply: bool) -> int:
                         "userId": user_id,
                         "localTier": local_tier,
                         "stripeStatus": "no-customer",
+                        # No Stripe customer at all: there is no real status to
+                        # store, so clear the attribute rather than inventing one.
+                        "persistStatus": None,
                         "expectedTier": "free",
                         "subscriptionId": "",
                     }
@@ -138,7 +163,14 @@ def reconcile(table_name: str, region: str, apply: bool) -> int:
                 no_customer += 1
             continue
 
-        status, sub_id = _stripe_status_for_customer(str(customer_id))
+        try:
+            status, sub_id = _stripe_status_for_customer(str(customer_id))
+        except StripeLookupError as e:
+            # Unknown state. Skipping leaves existing drift in place, which is
+            # strictly safer than guessing "free" and revoking paid access.
+            failures.append((user_id, str(e)))
+            continue
+
         expected = _expected_tier(status)
         if expected != local_tier:
             drift.append(
@@ -146,15 +178,24 @@ def reconcile(table_name: str, region: str, apply: bool) -> int:
                     "userId": user_id,
                     "localTier": local_tier,
                     "stripeStatus": status or "no-subscription",
+                    # Persist only values the webhook also writes. A customer
+                    # with no subscription is simply not subscribed.
+                    "persistStatus": status or "canceled",
                     "expectedTier": expected,
                     "subscriptionId": sub_id or "",
                 }
             )
 
     print(f"{no_customer} users have never checked out (skipped)")
+    if failures:
+        print(f"\n!! {len(failures)} user(s) could not be checked against Stripe:")
+        for user_id, err in failures:
+            print(f"   {user_id}: {err}", file=sys.stderr)
+        print("   These were SKIPPED, not corrected. Re-run to retry them.")
+
     if not drift:
         print("No drift found — DynamoDB agrees with Stripe.")
-        return 0
+        return 1 if failures else 0
 
     over = [d for d in drift if d["localTier"] == "paid" and d["expectedTier"] == "free"]
     under = [d for d in drift if d["localTier"] == "free" and d["expectedTier"] == "paid"]
@@ -182,21 +223,31 @@ def reconcile(table_name: str, region: str, apply: bool) -> int:
     applied = 0
     for d in drift:
         try:
-            table.update_item(
-                Key={"userId": d["userId"]},
-                UpdateExpression=("SET tier = :t, subscriptionStatus = :s, updatedAt = :now"),
-                ExpressionAttributeValues={
-                    ":t": d["expectedTier"],
-                    ":s": d["stripeStatus"],
-                    ":now": int(time.time()),
-                },
-            )
+            now = int(time.time())
+            if d["persistStatus"] is None:
+                # No Stripe customer: drop the stale status instead of writing
+                # a placeholder the rest of the system would have to parse.
+                table.update_item(
+                    Key={"userId": d["userId"]},
+                    UpdateExpression="SET tier = :t, updatedAt = :now REMOVE subscriptionStatus",
+                    ExpressionAttributeValues={":t": d["expectedTier"], ":now": now},
+                )
+            else:
+                table.update_item(
+                    Key={"userId": d["userId"]},
+                    UpdateExpression="SET tier = :t, subscriptionStatus = :s, updatedAt = :now",
+                    ExpressionAttributeValues={
+                        ":t": d["expectedTier"],
+                        ":s": d["persistStatus"],
+                        ":now": now,
+                    },
+                )
             applied += 1
         except Exception as e:  # noqa: BLE001 - report and continue
             print(f"  FAILED {d['userId']}: {e}", file=sys.stderr)
 
     print(f"Applied {applied}/{len(drift)} correction(s).")
-    if applied != len(drift):
+    if applied != len(drift) or failures:
         return 1
 
     print(

@@ -262,6 +262,9 @@ def handle_stripe_webhook(
             else:
                 obj = raw_obj
             handler(obj, repo, event_type)
+            # Only a completed record suppresses redelivery. Until this lands
+            # the claim is just a lease, so a crash mid-handler is retried.
+            repo.complete_webhook_event(event_id)
         except Exception as e:
             StructuredLogger.error(
                 f"Webhook handler error for {event_type}: {e}",
