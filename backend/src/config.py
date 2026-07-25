@@ -145,6 +145,37 @@ paid_price_usd_cents = _safe_int("PAID_PRICE_USD_CENTS", 1900)  # $19/mo
 overage_usd_cents_per_credit = _safe_int("OVERAGE_USD_CENTS_PER_CREDIT", 50)
 
 
+def _require_positive(name: str, value: int) -> int:
+    """Reject non-positive ledger values.
+
+    ``_safe_int`` happily accepts 0 and negatives. A zero action cost makes
+    that action free, which silently restores the unlimited-generate hole this
+    ledger exists to close; a zero or negative allotment or renewal window
+    makes the debit arithmetic meaningless. Failing at import is loud and
+    immediate — the alternative is a deploy that looks healthy while charging
+    nobody.
+    """
+    if value <= 0:
+        raise RuntimeError(
+            f"{name} must be a positive integer (got {value}). "
+            "A zero or negative value would disable credit enforcement."
+        )
+    return value
+
+
+if credits_enabled:
+    for _name, _value in (
+        ("CREDITS_PER_GENERATE", credits_per_generate),
+        ("CREDITS_PER_REFINE", credits_per_refine),
+        ("CREDITS_PER_OUTPAINT", credits_per_outpaint),
+        ("FREE_MONTHLY_CREDITS", free_monthly_credits),
+        ("PAID_MONTHLY_CREDITS", paid_monthly_credits),
+        ("FREE_CREDIT_PERIOD_SECONDS", free_credit_period_seconds),
+        ("PAID_CREDIT_FALLBACK_PERIOD_SECONDS", paid_credit_fallback_period_seconds),
+    ):
+        _require_positive(_name, _value)
+
+
 CREDIT_COSTS: dict[str, int] = {
     "generate": credits_per_generate,
     "refine": credits_per_refine,

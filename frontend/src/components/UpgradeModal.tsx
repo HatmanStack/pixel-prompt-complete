@@ -104,9 +104,9 @@ export const UpgradeModal: FC<UpgradeModalProps> = ({ onClose }) => {
             </p>
             <p className="text-sm text-text-secondary mb-4">
               {formatCredits(paidTier.monthlyCredits, scale)} credits per month — about{' '}
-              {Math.floor(paidTier.monthlyCredits / (pricing?.creditCosts.generate || 1))}{' '}
-              generations across all four models, or{' '}
-              {Math.floor(paidTier.monthlyCredits / (pricing?.creditCosts.refine || 1))}{' '}
+              {Math.floor(paidTier.monthlyCredits / (pricing?.creditCosts?.generate || 1))}{' '}
+              generations{paidTier.allModels ? ' across all models' : ''}, or{' '}
+              {Math.floor(paidTier.monthlyCredits / (pricing?.creditCosts?.refine || 1))}{' '}
               refinements.
             </p>
           </>

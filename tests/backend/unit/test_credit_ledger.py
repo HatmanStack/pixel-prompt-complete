@@ -407,3 +407,58 @@ def test_advertised_generate_and_refine_costs_match_enforced(credits_on, repo):
     ref = enforce_quota(_ctx("paid", "u_r"), "refine", repo, NOW)
     assert pricing["generate"] == gen.usage["creditsCharged"]
     assert pricing["refine"] == ref.usage["creditsCharged"]
+
+
+# ---- Top-up semantics ----
+
+
+def test_top_up_is_discarded_at_period_rollover(repo):
+    """Documented behaviour, asserted so a silent change is caught.
+
+    Renewal SETs a fresh allotment rather than adding to the balance, so a
+    top-up lives only until the period lapses. That matches allotments not
+    rolling over; the test exists so nobody changes it by accident.
+    """
+    repo.debit_credits("u_top", amount=100, allotment=500, period_end=NOW + 10, now=NOW)
+    repo.grant_credits("u_top", 5000, now=NOW)
+    assert repo.get_credit_balance("u_top")["creditsRemaining"] == 5400
+
+    later = NOW + 11
+    ok, item = repo.debit_credits(
+        "u_top", amount=100, allotment=500, period_end=later + 86400, now=later
+    )
+    assert ok
+    assert int(item["creditsRemaining"]) == 400, "top-up does not survive renewal"
+
+
+def test_top_up_to_a_dormant_user_is_wiped_without_a_period(repo):
+    """The trap: granting to a user with no open period achieves nothing."""
+    repo.get_or_create_user("u_dormant", now=NOW)
+    repo.grant_credits("u_dormant", 5000, now=NOW)
+    assert repo.get_credit_balance("u_dormant")["creditsRemaining"] == 5000
+
+    # Their next request takes the renewal path and overwrites the grant.
+    ok, item = repo.debit_credits(
+        "u_dormant", amount=100, allotment=500, period_end=NOW + 86400, now=NOW
+    )
+    assert ok
+    assert int(item["creditsRemaining"]) == 400
+
+
+def test_top_up_survives_when_it_opens_a_period(repo):
+    """Passing period_end makes a dormant-account top-up actually stick."""
+    repo.get_or_create_user("u_dormant2", now=NOW)
+    repo.grant_credits("u_dormant2", 5000, now=NOW, period_end=NOW + 86400)
+
+    ok, item = repo.debit_credits(
+        "u_dormant2", amount=100, allotment=500, period_end=NOW + 86400, now=NOW
+    )
+    assert ok
+    assert int(item["creditsRemaining"]) == 4900
+
+
+def test_top_up_does_not_extend_an_active_period(repo):
+    """A top-up must not silently postpone renewal."""
+    repo.debit_credits("u_act", amount=100, allotment=500, period_end=NOW + 100, now=NOW)
+    repo.grant_credits("u_act", 200, now=NOW, period_end=NOW + 999999)
+    assert repo.get_credit_balance("u_act")["creditPeriodEnd"] == NOW + 100

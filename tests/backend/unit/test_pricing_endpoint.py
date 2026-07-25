@@ -9,6 +9,7 @@ from __future__ import annotations
 import importlib
 import json
 import os
+from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("S3_BUCKET", "test-bucket")
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
@@ -138,3 +139,98 @@ def test_needs_no_authentication():
         None,
     )
     assert resp["statusCode"] == 200
+
+
+# ---- Displayed price vs the price Stripe actually charges ----
+
+
+def _reset():
+    from api.pricing import reset_price_cache
+
+    reset_price_cache()
+
+
+def test_falls_back_to_config_when_billing_disabled():
+    """A public endpoint must not depend on Stripe being reachable."""
+    import config
+
+    _reset()
+    with patch.object(config, "billing_enabled", False):
+        _, body = _get()
+    paid = next(t for t in body["tiers"] if t["id"] == "paid")
+    assert paid["priceUsdCents"] == config.paid_price_usd_cents
+
+
+def test_uses_the_stripe_amount_when_available():
+    """Stripe is the authority: it is what the customer is charged."""
+    import config
+
+    _reset()
+    fake = MagicMock()
+    fake.Price.retrieve.return_value = {"unit_amount": 2900}
+    with (
+        patch.object(config, "billing_enabled", True),
+        patch.object(config, "stripe_price_id", "price_123"),
+        patch("billing.stripe_client.get_stripe", return_value=fake),
+    ):
+        _, body = _get()
+    paid = next(t for t in body["tiers"] if t["id"] == "paid")
+    assert paid["priceUsdCents"] == 2900
+    _reset()
+
+
+def test_stripe_amount_wins_over_a_mismatched_config():
+    """Config saying $19 while Stripe charges $29 must not show $19."""
+    import config
+
+    _reset()
+    fake = MagicMock()
+    fake.Price.retrieve.return_value = {"unit_amount": 2900}
+    with (
+        patch.object(config, "billing_enabled", True),
+        patch.object(config, "stripe_price_id", "price_123"),
+        patch.object(config, "paid_price_usd_cents", 1900),
+        patch("billing.stripe_client.get_stripe", return_value=fake),
+    ):
+        _, body = _get()
+    paid = next(t for t in body["tiers"] if t["id"] == "paid")
+    assert paid["priceUsdCents"] == 2900, "must never advertise less than Stripe charges"
+    _reset()
+
+
+def test_stripe_failure_degrades_to_config_not_an_error():
+    """Stripe being down must not take the pricing endpoint with it."""
+    import config
+
+    _reset()
+    fake = MagicMock()
+    fake.Price.retrieve.side_effect = RuntimeError("stripe down")
+    with (
+        patch.object(config, "billing_enabled", True),
+        patch.object(config, "stripe_price_id", "price_123"),
+        patch("billing.stripe_client.get_stripe", return_value=fake),
+    ):
+        resp, body = _get()
+    assert resp["statusCode"] == 200
+    paid = next(t for t in body["tiers"] if t["id"] == "paid")
+    assert paid["priceUsdCents"] == config.paid_price_usd_cents
+    _reset()
+
+
+def test_stripe_price_is_cached_across_requests():
+    """/pricing is hit on every page load; do not call Stripe each time."""
+    import config
+
+    _reset()
+    fake = MagicMock()
+    fake.Price.retrieve.return_value = {"unit_amount": 2900}
+    with (
+        patch.object(config, "billing_enabled", True),
+        patch.object(config, "stripe_price_id", "price_123"),
+        patch("billing.stripe_client.get_stripe", return_value=fake),
+    ):
+        _get()
+        _get()
+        _get()
+    assert fake.Price.retrieve.call_count == 1
+    _reset()

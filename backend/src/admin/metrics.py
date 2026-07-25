@@ -104,7 +104,9 @@ def handle_admin_metrics(
         return err
 
     params = event.get("queryStringParameters") or {}
-    days = min(int(params.get("days", "7")), 30)
+    # Clamp low as well as high: days=0 reports a zero-length window, and a
+    # negative value makes windowDays nonsense while still returning today.
+    days = max(1, min(int(params.get("days", "7")), 30))
 
     now = int(time.time())
     today_counts = model_counter_service.get_model_counts(now)
@@ -156,7 +158,7 @@ def handle_admin_revenue(
 
     # Read revenue history from daily snapshots
     params = event.get("queryStringParameters") or {}
-    days = min(int(params.get("days", "30")), 90)
+    days = max(1, min(int(params.get("days", "30")), 90))
 
     today = datetime.now(timezone.utc)
     history = []

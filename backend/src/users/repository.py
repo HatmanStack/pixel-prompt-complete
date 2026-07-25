@@ -501,11 +501,45 @@ class UserRepository:
             "creditPeriodEnd": int(item.get("creditPeriodEnd", 0) or 0),
         }
 
-    def grant_credits(self, user_id: str, amount: int, now: int | None = None) -> None:
-        """Add credits outside the normal period grant (top-ups, goodwill)."""
+    def grant_credits(
+        self,
+        user_id: str,
+        amount: int,
+        now: int | None = None,
+        period_end: int | None = None,
+    ) -> None:
+        """Add credits outside the normal period grant (top-ups, goodwill).
+
+        **Top-ups are period-scoped.** The renewal path SETs the balance to a
+        fresh allotment rather than adding to it, so anything granted here is
+        replaced when the period rolls over — consistent with allotments not
+        rolling over. A top-up meant to outlive the period has to be granted
+        again, or the renewal semantics changed deliberately.
+
+        ``period_end`` opens a period for a user who has none. Without it, a
+        grant to such a user is wiped by their very next request, because that
+        request takes the renewal path and overwrites the balance. Callers
+        topping up a dormant account should pass it.
+        """
         if amount <= 0:
             return
+        if now is None:
+            now = int(time.time())
         self.add_counters(user_id, {"creditsRemaining": amount}, now=now)
+        if period_end is None:
+            return
+        try:
+            self._table.update_item(
+                Key={"userId": user_id},
+                UpdateExpression="SET creditPeriodEnd = :period_end, updatedAt = :now",
+                ConditionExpression=(
+                    "attribute_not_exists(creditPeriodEnd) OR creditPeriodEnd <= :now"
+                ),
+                ExpressionAttributeValues={":period_end": period_end, ":now": now},
+            )
+        except ClientError as e:
+            if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
+                raise
 
     # ---------- webhook idempotency ----------
 

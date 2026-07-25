@@ -15,9 +15,58 @@ upgrade modal must render them before a user has an account.
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 import config
+from utils.logger import StructuredLogger
+
+# Stripe is the authority on what a customer is actually charged. Cached at
+# module level: /pricing is public and hit on every page load, and a price
+# changes far less often than it is read.
+_price_cache: tuple[int, int] | None = None  # (unit_amount_cents, fetched_at)
+_PRICE_CACHE_TTL_SECONDS = 900
+
+
+def reset_price_cache() -> None:
+    """Drop the cached Stripe amount (tests, and after a price change)."""
+    global _price_cache
+    _price_cache = None
+
+
+def _stripe_price_usd_cents() -> int | None:
+    """The amount Stripe will actually charge, or None if unavailable.
+
+    ``PAID_PRICE_USD_CENTS`` and ``STRIPE_PRICE_ID`` are separate settings, so
+    a stack update can advertise one amount and charge another. Reading the
+    real amount from Stripe removes that whole class of mismatch; the config
+    value stays as the fallback for when billing is off or Stripe is
+    unreachable, so a public endpoint never depends on a third party being up.
+    """
+    global _price_cache
+    if not config.billing_enabled or not config.stripe_price_id:
+        return None
+
+    now = int(time.time())
+    if _price_cache and now - _price_cache[1] < _PRICE_CACHE_TTL_SECONDS:
+        return _price_cache[0]
+
+    try:
+        from billing.stripe_client import get_stripe
+
+        stripe_mod = get_stripe()
+        price = stripe_mod.Price.retrieve(config.stripe_price_id)
+        amount = price.get("unit_amount") if hasattr(price, "get") else None
+        if not amount:
+            return None
+        _price_cache = (int(amount), now)
+        return int(amount)
+    except Exception as e:
+        StructuredLogger.warning(
+            f"Could not read price from Stripe, using configured value: {e}",
+            stripePriceId=config.stripe_price_id,
+        )
+        return None
 
 
 def _tiers() -> list[dict[str, Any]]:
@@ -27,6 +76,20 @@ def _tiers() -> list[dict[str, Any]]:
     produces and ``quota`` enforces. Advertising a plan the tier system cannot
     grant would sell something that does not exist.
     """
+    stripe_amount = _stripe_price_usd_cents()
+    paid_price = (
+        stripe_amount if stripe_amount is not None else config.paid_price_usd_cents
+    )
+    if stripe_amount is not None and stripe_amount != config.paid_price_usd_cents:
+        # Stripe wins — it is what the customer is charged — but a mismatch
+        # means the deployed config is lying and should be corrected.
+        StructuredLogger.error(
+            "PAID_PRICE_USD_CENTS disagrees with the Stripe price; "
+            "serving the Stripe amount",
+            configuredCents=config.paid_price_usd_cents,
+            stripeCents=stripe_amount,
+        )
+
     return [
         {
             "id": "free",
@@ -39,7 +102,7 @@ def _tiers() -> list[dict[str, Any]]:
         {
             "id": "paid",
             "name": "Pro",
-            "priceUsdCents": config.paid_price_usd_cents,
+            "priceUsdCents": paid_price,
             "monthlyCredits": config.paid_monthly_credits,
             "allModels": True,
             # Paid allotments renew on Stripe's own billing boundary, which
