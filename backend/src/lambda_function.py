@@ -207,6 +207,12 @@ def _refund_credits(
     Best-effort — a failed refund is logged, never raised, because the caller
     is already on an error path and a second failure there would replace a
     bad result with no result.
+
+    INVARIANT: every path that returns non-2xx after quota enforcement must
+    call this exactly once. The early-exit paths (no models enabled, every
+    model capped, bad session reference, missing source image) are the easiest
+    to miss precisely because they never reach a provider — no cost was
+    incurred, so charging for them is the least defensible case of all.
     """
     if not config.credits_enabled or tier_ctx is None:
         return
@@ -586,6 +592,7 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
         # Get enabled models
         enabled_models = get_enabled_models()
         if not enabled_models:
+            _refund_credits(validated.tier, "generate", correlation_id)
             return response(500, {"error": "No models enabled"})
 
         # Filter models by runtime disable and per-model cost ceiling
@@ -614,6 +621,7 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
             models_to_dispatch = list(enabled_models)
 
         if not models_to_dispatch:
+            _refund_credits(validated.tier, "generate", correlation_id)
             return response(429, error_responses.model_cost_ceiling())
 
         enabled_model_names = [m.name for m in models_to_dispatch]
@@ -915,11 +923,13 @@ def _handle_refinement(
     try:
         refs, err = _validate_refinement_request(validated)
         if err:
+            _refund_credits(validated.tier, refund_kind, correlation_id)
             return err
         session_id, model_name, model_config = refs
 
         loaded, err = _load_source_image(session_id, model_name)
         if err:
+            _refund_credits(validated.tier, refund_kind, correlation_id)
             return err
         source_image, iteration_count = loaded
 
@@ -946,6 +956,7 @@ def _handle_refinement(
         if config.auth_enabled and not _model_counter_service.consume_model_slot(
             model_name, int(time.time())
         ):
+            _refund_credits(validated.tier, refund_kind, correlation_id)
             return response(429, error_responses.model_cost_ceiling())
 
         config_dict = get_model_config_dict(model_config)

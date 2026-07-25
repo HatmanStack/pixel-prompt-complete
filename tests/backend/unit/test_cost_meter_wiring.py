@@ -458,3 +458,112 @@ def test_refine_refunds_when_the_model_fails():
     assert resp["statusCode"] == 500
     mock_refund.assert_called_once()
     assert mock_refund.call_args.args[1] == "refine"
+
+
+# ---- Early exits: charged before dispatch, never reached a provider ----
+
+
+def _generate_expecting_early_exit(models, slot_granted=True):
+    tier, quota = _tier_and_quota()
+    with (
+        patch("config.auth_enabled", True),
+        patch("config.credits_enabled", True),
+        patch("lambda_function._guest_service", MagicMock()),
+        patch("lambda_function._user_repo") as mock_repo,
+        patch("lambda_function.resolve_tier", return_value=tier),
+        patch("lambda_function.enforce_quota", return_value=quota),
+        patch("lambda_function.content_filter") as mock_cf,
+        patch("lambda_function.get_enabled_models", return_value=models),
+        patch("lambda_function._model_counter_service") as mock_counter,
+        patch("lambda_function.session_manager"),
+        patch("lambda_function._executor"),
+        patch("lambda_function._cost_meter"),
+        patch("lambda_function._refund_credits") as mock_refund,
+    ):
+        mock_repo.get_model_runtime_config.return_value = None
+        mock_cf.check_prompt.return_value = False
+        mock_counter.consume_model_slot.return_value = slot_granted
+
+        from lambda_function import handle_generate
+
+        resp = handle_generate(_make_event(), "corr-1")
+        return mock_refund, resp
+
+
+def test_generate_refunds_when_no_models_are_enabled():
+    mock_refund, resp = _generate_expecting_early_exit([])
+    assert resp["statusCode"] == 500
+    mock_refund.assert_called_once()
+
+
+def test_generate_refunds_when_every_model_is_capped():
+    """429 before any provider ran: no cost was incurred, so none may be charged."""
+    mock_refund, resp = _generate_expecting_early_exit(
+        [_model("gemini", "google_gemini")], slot_granted=False
+    )
+    assert resp["statusCode"] == 429
+    assert json.loads(resp["body"])["error"] == "MODEL_COST_CEILING"
+    mock_refund.assert_called_once()
+
+
+def _refinement_early_exit(validate_err=None, load_err=None, slot_granted=True):
+    tier, quota = _tier_and_quota()
+    ctx = _refinement_patches(None)
+    with (
+        patch("config.auth_enabled", True),
+        patch("config.credits_enabled", True),
+        patch("lambda_function._guest_service", MagicMock()),
+        patch("lambda_function._user_repo", MagicMock()),
+        patch("lambda_function._model_counter_service") as mock_counter,
+        patch("lambda_function.resolve_tier", return_value=tier),
+        patch("lambda_function.enforce_quota", return_value=quota),
+        patch("lambda_function.content_filter") as mock_cf,
+        patch("lambda_function._validate_refinement_request") as mock_val,
+        patch("lambda_function._load_source_image") as mock_load,
+        patch("lambda_function.session_manager") as mock_sm,
+        patch("lambda_function.context_manager", MagicMock()),
+        patch("lambda_function.get_iterate_handler", return_value=ctx["handler"]),
+        patch("lambda_function._handle_successful_result", return_value={}),
+        patch("lambda_function._cost_meter"),
+        patch("lambda_function._refund_credits") as mock_refund,
+    ):
+        mock_counter.consume_model_slot.return_value = slot_granted
+        mock_cf.check_prompt.return_value = False
+        mock_val.return_value = (
+            (None, None, None) if validate_err else ("sess-1", "gemini", ctx["model_cfg"]),
+            validate_err,
+        )
+        mock_load.return_value = (
+            (None, None) if load_err else ("img", 1),
+            load_err,
+        )
+        mock_sm.add_iteration.return_value = 1
+
+        import lambda_function
+
+        lambda_function.handle_iterate(
+            {
+                "body": json.dumps(
+                    {"sessionId": "sess-1", "model": "gemini", "prompt": "bluer"}
+                ),
+                "requestContext": {"http": {"sourceIp": "127.0.0.1"}},
+                "headers": {},
+            },
+            "corr-1",
+        )
+        return mock_refund
+
+
+def test_refine_refunds_on_invalid_session_reference():
+    mock_refund = _refinement_early_exit(validate_err={"statusCode": 400, "body": "{}"})
+    mock_refund.assert_called_once()
+
+
+def test_refine_refunds_when_source_image_is_missing():
+    mock_refund = _refinement_early_exit(load_err={"statusCode": 404, "body": "{}"})
+    mock_refund.assert_called_once()
+
+
+def test_refine_refunds_when_the_model_is_capped():
+    mock_refund = _refinement_early_exit(slot_granted=False)
+    mock_refund.assert_called_once()
