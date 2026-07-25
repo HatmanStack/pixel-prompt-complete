@@ -6,6 +6,7 @@
 
 import { useState, useEffect, useRef, useCallback, type FC } from 'react';
 import { startCheckout } from '@/api/billing';
+import { fetchPricing, formatCredits, formatUsdCents, type Pricing } from '@/api/pricing';
 
 interface UpgradeModalProps {
   onClose: () => void;
@@ -14,7 +15,28 @@ interface UpgradeModalProps {
 export const UpgradeModal: FC<UpgradeModalProps> = ({ onClose }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pricing, setPricing] = useState<Pricing | null>(null);
   const modalRef = useRef<HTMLDivElement>(null);
+
+  // Prices come from the backend so the modal cannot advertise a figure the
+  // server does not enforce. A fetch failure degrades to generic copy rather
+  // than blocking the upgrade path.
+  useEffect(() => {
+    let cancelled = false;
+    fetchPricing()
+      .then((p) => {
+        if (!cancelled) setPricing(p);
+      })
+      .catch(() => {
+        /* keep the generic copy below */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const paidTier = pricing?.tiers.find((t) => t.id === 'paid') ?? null;
+  const scale = pricing?.centiCreditsPerCredit ?? 100;
 
   const handleUpgrade = async () => {
     setLoading(true);
@@ -71,10 +93,28 @@ export const UpgradeModal: FC<UpgradeModalProps> = ({ onClose }) => {
         tabIndex={-1}
         className="bg-primary border border-primary/50 rounded-lg p-6 max-w-sm w-full outline-none"
       >
-        <h2 className="text-lg font-semibold mb-2">Upgrade to Pro</h2>
-        <p className="text-sm text-text-secondary mb-4">
-          Unlock higher refinement limits with a subscription.
-        </p>
+        <h2 className="text-lg font-semibold mb-2">
+          {paidTier ? `Upgrade to ${paidTier.name}` : 'Upgrade'}
+        </h2>
+        {paidTier ? (
+          <>
+            <p className="text-2xl font-semibold mb-1">
+              {formatUsdCents(paidTier.priceUsdCents)}
+              <span className="text-sm font-normal text-text-secondary">/month</span>
+            </p>
+            <p className="text-sm text-text-secondary mb-4">
+              {formatCredits(paidTier.monthlyCredits, scale)} credits per month — about{' '}
+              {Math.floor(paidTier.monthlyCredits / (pricing?.creditCosts.generate || 1))}{' '}
+              generations across all four models, or{' '}
+              {Math.floor(paidTier.monthlyCredits / (pricing?.creditCosts.refine || 1))}{' '}
+              refinements.
+            </p>
+          </>
+        ) : (
+          <p className="text-sm text-text-secondary mb-4">
+            Unlock higher refinement limits with a subscription.
+          </p>
+        )}
         {error && <p className="text-sm text-red-500 mb-3">{error}</p>}
         <div className="flex justify-end gap-2">
           <button

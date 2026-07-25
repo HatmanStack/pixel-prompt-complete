@@ -21,6 +21,7 @@ import boto3
 import config
 from api.enhance import PromptEnhancer
 from api.log import handle_log
+from api.pricing import handle_pricing
 from auth.claims import extract_admin_groups
 from auth.guest_token import get_guest_token_service
 from config import (
@@ -484,6 +485,8 @@ def lambda_handler(event: LambdaEvent, context: LambdaContext) -> ApiResponse:
             return handle_enhance(event, correlation_id)
         elif path == "/log" and method == "POST":
             return handle_log_endpoint(event)
+        elif path == "/pricing" and method == "GET":
+            return handle_pricing(event, correlation_id)
         elif path == "/gallery/list" and method == "GET":
             return handle_gallery_list(event, correlation_id)
         elif path.startswith("/gallery/") and method == "GET":

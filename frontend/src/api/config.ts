@@ -132,6 +132,7 @@ export const API_ROUTES = {
 
   // Auth / billing endpoints
   ME: '/me',
+  PRICING: '/pricing',
   BILLING_CHECKOUT: '/billing/checkout',
   BILLING_PORTAL: '/billing/portal',
 

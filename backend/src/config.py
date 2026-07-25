@@ -137,6 +137,14 @@ paid_credit_fallback_period_seconds = _safe_int(
 credits_enabled = os.environ.get("CREDITS_ENABLED", "false").lower() == "true"
 
 
+# Display prices, in whole cents. These drive the pricing UI via GET /pricing
+# rather than VITE_ build vars, so a price experiment is a config change
+# instead of a frontend rebuild — and the UI cannot advertise a number the
+# backend does not enforce, because there is one source.
+paid_price_usd_cents = _safe_int("PAID_PRICE_USD_CENTS", 1900)  # $19/mo
+overage_usd_cents_per_credit = _safe_int("OVERAGE_USD_CENTS_PER_CREDIT", 50)
+
+
 CREDIT_COSTS: dict[str, int] = {
     "generate": credits_per_generate,
     "refine": credits_per_refine,
