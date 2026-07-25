@@ -43,6 +43,7 @@ from models.providers import (
     get_outpaint_handler,
     sanitize_error_message,
 )
+from ops.cost_meter import CostMeter
 from ops.metrics import emit_request_metric
 from ops.model_counters import ModelCounterService
 from prompts.repository import PromptHistoryRepository
@@ -93,6 +94,7 @@ _guest_service = get_guest_token_service() if config.guest_token_secret else Non
 
 # Per-model cost ceiling service
 _model_counter_service = ModelCounterService(_user_repo)
+_cost_meter = CostMeter(_user_repo)
 
 # Prompt history repository
 _prompt_history = PromptHistoryRepository(config.users_table_name)
@@ -607,6 +609,20 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
                         "error": f"Model timed out after {future_timeout}s",
                     }
 
+        # Meter what this request cost in dollars. Every dispatched model is
+        # metered, including ones that errored or timed out: the provider
+        # performed the work and bills for it regardless of whether we managed
+        # to return it to the user (see the as_completed timeout above, which
+        # does not cancel in-flight futures). For a spend ceiling, over-counting
+        # is the safe direction — under-counting means unbounded spend.
+        _cost_meter.record_models(
+            model_names=[m.name for m in models_to_dispatch],
+            operation="generate",
+            tier=validated.tier.tier if validated.tier else "anon",
+            user_id=validated.tier.user_id if validated.tier else None,
+            include_enhance=True,
+        )
+
         # Emit CloudWatch metrics per model (only in auth-enabled mode)
         if config.auth_enabled:
             for mname, mresult in results.items():
@@ -792,6 +808,16 @@ def _handle_refinement(
         target = datetime.now(timezone.utc).strftime("%Y-%m-%d-%H-%M-%S")
         is_error = result["status"] != "success"
 
+        # Meter the provider call. Charged whether or not it succeeded — the
+        # provider ran the model either way. "refine" prices both /iterate and
+        # /outpaint; they are one image on one model in both cases.
+        _cost_meter.record_models(
+            model_names=[model_name],
+            operation="outpaint" if (add_iteration_kwargs or {}).get("is_outpaint") else "refine",
+            tier=validated.tier.tier if validated.tier else "anon",
+            user_id=validated.tier.user_id if validated.tier else None,
+        )
+
         # Emit CloudWatch metrics for refinement (only in auth-enabled mode)
         if config.auth_enabled:
             emit_request_metric(
@@ -959,6 +985,14 @@ def handle_enhance(event: LambdaEvent, correlation_id: str | None = None) -> Api
 
     try:
         enhanced = prompt_enhancer.enhance_safe(validated.prompt)
+        # /enhance is still unauthenticated and unquota'd (that is P0-D), but
+        # it calls gpt-4o and therefore costs money. Metering it first means
+        # the exposure is at least visible before it is gated.
+        _cost_meter.record(
+            costs={"enhance": config.enhance_cost_usd_micros},
+            tier=validated.tier.tier if validated.tier else "anon",
+            user_id=validated.tier.user_id if validated.tier else None,
+        )
 
         return response(
             200, {"original": validated.prompt, "short_prompt": enhanced, "long_prompt": enhanced}

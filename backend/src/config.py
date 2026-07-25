@@ -239,6 +239,48 @@ MODEL_DAILY_CAPS: dict[str, int] = {
     "firefly": model_firefly_daily_cap,
 }
 
+# ---------------------------------------------------------------------------
+# Cost table: what a provider call costs US, in micro-dollars (1e-6 USD).
+#
+# Integers, never floats: these feed DynamoDB atomic counters, and float
+# accumulation would drift. Seeded from public rate cards — replace with
+# measured spend before committing to any public price. Correcting them is a
+# config change, not a code change, which is the whole point of the table.
+# ---------------------------------------------------------------------------
+_DEFAULT_MODEL_COSTS_USD_MICROS: dict[str, int] = {
+    "gemini": 39000,   # $0.039
+    "nova": 40000,     # $0.040
+    "openai": 40000,   # $0.040
+    "firefly": 70000,  # $0.070 (credit-based; least certain of the four)
+}
+
+# An iterate/outpaint call generates one image, same as a generate call, so the
+# per-operation defaults match. They are separate env vars because providers
+# price edits differently (OpenAI iteration uses gpt-image-1, not dall-e-3).
+COST_OPERATIONS: tuple[str, ...] = ("generate", "refine", "outpaint")
+
+MODEL_COSTS_USD_MICROS: dict[str, dict[str, int]] = {
+    model: {
+        op: _safe_int(f"COST_{model.upper()}_{op.upper()}_USD_MICROS", default)
+        for op in COST_OPERATIONS
+    }
+    for model, default in _DEFAULT_MODEL_COSTS_USD_MICROS.items()
+}
+
+# gpt-4o prompt adaptation, charged once per /generate and once per /enhance.
+enhance_cost_usd_micros = _safe_int("COST_ENHANCE_USD_MICROS", 7000)
+
+
+def model_cost_micros(model_name: str, operation: str) -> int:
+    """Cost in micro-dollars of one ``operation`` on ``model_name``.
+
+    Unknown models/operations cost 0 rather than raising: a mispriced meter
+    is a reporting bug, but an exception here would fail a user's request.
+    The zero shows up as an obvious gap in the spend dashboard.
+    """
+    return MODEL_COSTS_USD_MICROS.get(model_name, {}).get(operation, 0)
+
+
 # CAPTCHA (Cloudflare Turnstile)
 turnstile_secret_key = os.environ.get("TURNSTILE_SECRET_KEY", "")
 if captcha_enabled and not turnstile_secret_key:
