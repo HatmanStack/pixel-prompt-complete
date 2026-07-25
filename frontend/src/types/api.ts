@@ -24,13 +24,7 @@ export const MODELS: ModelName[] = ['gemini', 'nova', 'openai', 'firefly'];
 // Status values from backend API (in_progress) are mapped to 'loading' in frontend
 // 'disabled' is used for models that are not enabled
 export type IterationStatus =
-  | 'pending'
-  | 'loading'
-  | 'in_progress'
-  | 'completed'
-  | 'error'
-  | 'disabled'
-  | 'partial';
+  'pending' | 'loading' | 'in_progress' | 'completed' | 'error' | 'disabled' | 'partial';
 
 export interface Iteration {
   index: number;
