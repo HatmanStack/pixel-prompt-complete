@@ -790,3 +790,65 @@ def test_event_ids_are_unique_by_default():
     b = json.loads(build_event("customer.updated", {}))
     assert a["id"] != b["id"]
     assert stripe_events is not None
+
+
+# ---- Billing period extraction (drives credit renewal) ----
+
+
+def test_billing_period_read_from_flat_subscription_fields(wired):
+    """Older Stripe API shape: period lives on the Subscription object."""
+    _seed_subscriber(wired, "u_perflat", "cus_perflat")
+    obj = subscription(subscription_id="sub_pf", customer="cus_perflat")
+    obj["current_period_start"] = 1679609767
+    obj["current_period_end"] = 1682288167
+
+    _send(wired, build_event("customer.subscription.updated", obj))
+
+    user = wired._user_repo.get_user("u_perflat")
+    assert int(user["stripeCurrentPeriodEnd"]) == 1682288167
+    assert int(user["stripeCurrentPeriodStart"]) == 1679609767
+
+
+def test_billing_period_falls_back_to_subscription_items(wired):
+    """Newer Stripe API shape moved the period onto SubscriptionItem.
+
+    Reading only the flat field would fail soft: the attribute is skipped,
+    quota quietly falls back to a fixed window, and Stripe-anchored credit
+    renewal silently never happens for anyone.
+    """
+    _seed_subscriber(wired, "u_peritem", "cus_peritem")
+    obj = subscription(subscription_id="sub_pi", customer="cus_peritem")
+    obj.pop("current_period_start", None)
+    obj.pop("current_period_end", None)
+    obj["items"]["data"][0]["current_period_start"] = 1700000000
+    obj["items"]["data"][0]["current_period_end"] = 1702592000
+
+    _send(wired, build_event("customer.subscription.updated", obj))
+
+    user = wired._user_repo.get_user("u_peritem")
+    assert int(user["stripeCurrentPeriodEnd"]) == 1702592000
+    assert int(user["stripeCurrentPeriodStart"]) == 1700000000
+
+
+def test_missing_billing_period_is_survivable(wired):
+    """No period anywhere must not fail the webhook — quota falls back."""
+    _seed_subscriber(wired, "u_pernone", "cus_pernone")
+    obj = subscription(subscription_id="sub_pn", customer="cus_pernone")
+    obj.pop("current_period_start", None)
+    obj.pop("current_period_end", None)
+
+    resp = _send(wired, build_event("customer.subscription.updated", obj))
+
+    assert resp["statusCode"] == 200
+    user = wired._user_repo.get_user("u_pernone")
+    assert user["tier"] == "paid"
+    assert "stripeCurrentPeriodEnd" not in user
+
+
+def test_billing_period_helper_handles_malformed_items():
+    """A non-dict entry in items.data must not raise."""
+    from billing.webhook import _billing_period
+
+    assert _billing_period({"items": {"data": ["nonsense", None]}}) == (None, None)
+    assert _billing_period({}) == (None, None)
+    assert _billing_period({"items": {}}) == (None, None)

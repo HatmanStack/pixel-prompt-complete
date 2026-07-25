@@ -28,7 +28,7 @@ def _usage(
 
 def enforce_quota(
     ctx: TierContext,
-    endpoint: Literal["generate", "refine"],
+    endpoint: Literal["generate", "refine", "outpaint"],
     repo: UserRepository,
     now: int,
 ) -> QuotaResult:
@@ -47,7 +47,7 @@ def enforce_quota(
         return _enforce_credits(ctx, endpoint, repo, now)
 
     if ctx.tier == "guest":
-        if endpoint == "refine":
+        if endpoint in ("refine", "outpaint"):
             return QuotaResult(allowed=False, reason="guest_per_user", reset_at=0, usage={})
         # Per-guest first so denied guests don't consume the global pool.
         assert ctx.guest_token_id is not None

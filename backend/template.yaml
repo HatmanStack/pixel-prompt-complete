@@ -50,6 +50,8 @@ Metadata:
           - CreditsPerOutpaint
           - FreeMonthlyCredits
           - PaidMonthlyCredits
+          - FreeCreditPeriodSeconds
+          - PaidCreditFallbackPeriodSeconds
           - GlobalDailySpendCeilingUsdMicros
           - EnhanceDailySpendCeilingUsdMicros
           - ModelGeminiDailyCap
@@ -378,6 +380,21 @@ Parameters:
     Default: 6500
     Description: Centi-credits granted per Stripe billing period to paid users (6500 = 65)
 
+  FreeCreditPeriodSeconds:
+    Type: Number
+    Default: 2592000
+    Description: >-
+      Renewal window for free accounts in seconds (2592000 = 30 days). Free
+      accounts have no Stripe period, so they use a fixed cycle.
+
+  PaidCreditFallbackPeriodSeconds:
+    Type: Number
+    Default: 2592000
+    Description: >-
+      Fallback renewal window for a paid user whose Stripe billing period is
+      unknown (webhook missed, or an older API shape). Used only as a floor so
+      a paying customer is never left at zero credits.
+
   GlobalDailySpendCeilingUsdMicros:
     Type: Number
     Default: 100000000
@@ -541,6 +558,8 @@ Resources:
           CREDITS_PER_OUTPAINT: !Ref CreditsPerOutpaint
           FREE_MONTHLY_CREDITS: !Ref FreeMonthlyCredits
           PAID_MONTHLY_CREDITS: !Ref PaidMonthlyCredits
+          FREE_CREDIT_PERIOD_SECONDS: !Ref FreeCreditPeriodSeconds
+          PAID_CREDIT_FALLBACK_PERIOD_SECONDS: !Ref PaidCreditFallbackPeriodSeconds
           GLOBAL_DAILY_SPEND_CEILING_USD_MICROS: !Ref GlobalDailySpendCeilingUsdMicros
           ENHANCE_DAILY_SPEND_CEILING_USD_MICROS: !Ref EnhanceDailySpendCeilingUsdMicros
           MODEL_GEMINI_DAILY_CAP: !Ref ModelGeminiDailyCap

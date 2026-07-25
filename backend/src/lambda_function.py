@@ -213,8 +213,8 @@ def _parse_and_validate_request(
     Performs: body size check, JSON parsing, IP extraction, tier resolution,
     quota enforcement, prompt validation, and content filtering.
 
-    ``endpoint_kind`` is one of ``"generate"``, ``"refine"``, ``"enhance"``
-    or ``"none"``
+    ``endpoint_kind`` is one of ``"generate"``, ``"refine"``, ``"outpaint"``,
+    ``"enhance"`` or ``"none"``
     (skip quota enforcement).
 
     Returns:
@@ -234,7 +234,7 @@ def _parse_and_validate_request(
     # spend bound at all. Placed before tier resolution, CAPTCHA (an external
     # HTTP call) and content filtering because the check depends on none of
     # them, and a ceiling breach is precisely when rejecting cheaply matters.
-    if endpoint_kind in ("generate", "refine", "enhance"):
+    if endpoint_kind in ("generate", "refine", "outpaint", "enhance"):
         exceeded, scope = _spend_ceiling_exceeded(endpoint_kind)
         if exceeded:
             StructuredLogger.error(
@@ -287,9 +287,9 @@ def _parse_and_validate_request(
         return None, response(400, error_responses.inappropriate_content())
 
     # Quota enforcement (after validation so invalid requests don't consume quota)
-    if endpoint_kind in ("generate", "refine") and config.auth_enabled:
+    if endpoint_kind in ("generate", "refine", "outpaint") and config.auth_enabled:
         # Guests blocked from refine immediately (no auth).
-        if tier_ctx.tier == "guest" and endpoint_kind == "refine":
+        if tier_ctx.tier == "guest" and endpoint_kind in ("refine", "outpaint"):
             return None, response(402, error_responses.auth_required())
         result = enforce_quota(tier_ctx, endpoint_kind, _user_repo, int(time.time()))
         if not result.allowed:
@@ -1009,7 +1009,10 @@ def handle_outpaint(event: LambdaEvent, correlation_id: str | None = None) -> Ap
         event,
         require_prompt=False,
         default_prompt="continue the scene naturally",
-        endpoint_kind="refine",
+        # Its own kind, not "refine": CREDITS_PER_OUTPAINT is independently
+        # configurable and advertised on GET /pricing, so charging the refine
+        # rate here would let the advertised price drift from the charged one.
+        endpoint_kind="outpaint",
     )
     if err:
         return err

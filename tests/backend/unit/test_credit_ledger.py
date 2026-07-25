@@ -343,3 +343,67 @@ def test_ledger_is_off_by_default(repo, monkeypatch):
         monkeypatch.delenv("AUTH_ENABLED", raising=False)
         monkeypatch.delenv("GUEST_TOKEN_SECRET", raising=False)
         importlib.reload(config)
+
+
+# ---- Outpaint is charged at its own rate ----
+
+
+def test_outpaint_charges_its_own_configured_cost(credits_on, repo, monkeypatch):
+    """A price advertised on /pricing must be the price actually debited.
+
+    /outpaint used to be enforced as "refine", so CREDITS_PER_OUTPAINT was
+    advertised but never charged. With equal defaults nothing broke, which is
+    exactly what made it a trap: changing one value alone would have made the
+    UI show a price the backend did not take.
+    """
+    monkeypatch.setattr(credits_on, "credits_per_outpaint", 70)
+    monkeypatch.setitem(credits_on.CREDIT_COSTS, "outpaint", 70)
+    from users.quota import enforce_quota
+
+    result = enforce_quota(_ctx("paid", "u_out"), "outpaint", repo, NOW)
+    assert result.allowed
+    assert result.usage["creditsCharged"] == 70
+    assert result.usage["creditsRemaining"] == credits_on.paid_monthly_credits - 70
+
+
+def test_outpaint_and_refine_are_independently_priced(credits_on, repo, monkeypatch):
+    monkeypatch.setattr(credits_on, "credits_per_outpaint", 70)
+    monkeypatch.setitem(credits_on.CREDIT_COSTS, "outpaint", 70)
+    from users.quota import enforce_quota
+
+    out = enforce_quota(_ctx("paid", "u_a"), "outpaint", repo, NOW)
+    ref = enforce_quota(_ctx("paid", "u_b"), "refine", repo, NOW)
+    assert out.usage["creditsCharged"] == 70
+    assert ref.usage["creditsCharged"] == credits_on.credits_per_refine
+    assert out.usage["creditsCharged"] != ref.usage["creditsCharged"]
+
+
+def test_guests_are_blocked_from_outpaint_like_refine(credits_on, repo):
+    from users.quota import enforce_quota
+
+    result = enforce_quota(_ctx("guest", "guest#x"), "outpaint", repo, NOW)
+    assert result.allowed is False
+    assert result.reason == "guest_per_user"
+
+
+def test_advertised_outpaint_cost_matches_enforced_cost(credits_on, repo):
+    """The whole point of backend-served pricing, asserted end to end."""
+    from api.pricing import get_pricing
+    from users.quota import enforce_quota
+
+    advertised = get_pricing()["creditCosts"]["outpaint"]
+    charged = enforce_quota(_ctx("paid", "u_match"), "outpaint", repo, NOW).usage[
+        "creditsCharged"
+    ]
+    assert advertised == charged
+
+
+def test_advertised_generate_and_refine_costs_match_enforced(credits_on, repo):
+    from api.pricing import get_pricing
+    from users.quota import enforce_quota
+
+    pricing = get_pricing()["creditCosts"]
+    gen = enforce_quota(_ctx("paid", "u_g"), "generate", repo, NOW)
+    ref = enforce_quota(_ctx("paid", "u_r"), "refine", repo, NOW)
+    assert pricing["generate"] == gen.usage["creditsCharged"]
+    assert pricing["refine"] == ref.usage["creditsCharged"]
