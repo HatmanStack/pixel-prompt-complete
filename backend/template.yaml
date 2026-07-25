@@ -42,6 +42,12 @@ Metadata:
       - Label:
           default: "Per-Model Daily Caps"
         Parameters:
+          - CreditsEnabled
+          - CreditsPerGenerate
+          - CreditsPerRefine
+          - CreditsPerOutpaint
+          - FreeMonthlyCredits
+          - PaidMonthlyCredits
           - GlobalDailySpendCeilingUsdMicros
           - EnhanceDailySpendCeilingUsdMicros
           - ModelGeminiDailyCap
@@ -319,6 +325,44 @@ Parameters:
     Description: Return URL from Stripe Customer Portal
 
   # Per-Model Daily Caps
+  CreditsEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Enable the credit ledger (P0-C). When false, the legacy call-counting
+      quotas apply, so this can be rolled back without redeploying old code.
+
+  CreditsPerGenerate:
+    Type: Number
+    Default: 100
+    Description: Centi-credits charged per /generate (100 = 1.00 credit)
+
+  CreditsPerRefine:
+    Type: Number
+    Default: 25
+    Description: Centi-credits charged per /iterate (25 = 0.25 credit)
+
+  CreditsPerOutpaint:
+    Type: Number
+    Default: 25
+    Description: Centi-credits charged per /outpaint (25 = 0.25 credit)
+
+  FreeMonthlyCredits:
+    Type: Number
+    Default: 500
+    Description: >-
+      Centi-credits granted per period to free users (500 = 5 credits). This
+      is the free tier's spend bound; it replaces a rate limit that bounded
+      request rate but not monthly cost.
+
+  PaidMonthlyCredits:
+    Type: Number
+    Default: 6500
+    Description: Centi-credits granted per Stripe billing period to paid users (6500 = 65)
+
   GlobalDailySpendCeilingUsdMicros:
     Type: Number
     Default: 100000000
@@ -474,6 +518,12 @@ Resources:
           STRIPE_CANCEL_URL: !Ref StripeCancelUrl
           STRIPE_PORTAL_RETURN_URL: !Ref StripePortalReturnUrl
           # Per-model daily caps
+          CREDITS_ENABLED: !Ref CreditsEnabled
+          CREDITS_PER_GENERATE: !Ref CreditsPerGenerate
+          CREDITS_PER_REFINE: !Ref CreditsPerRefine
+          CREDITS_PER_OUTPAINT: !Ref CreditsPerOutpaint
+          FREE_MONTHLY_CREDITS: !Ref FreeMonthlyCredits
+          PAID_MONTHLY_CREDITS: !Ref PaidMonthlyCredits
           GLOBAL_DAILY_SPEND_CEILING_USD_MICROS: !Ref GlobalDailySpendCeilingUsdMicros
           ENHANCE_DAILY_SPEND_CEILING_USD_MICROS: !Ref EnhanceDailySpendCeilingUsdMicros
           MODEL_GEMINI_DAILY_CAP: !Ref ModelGeminiDailyCap
