@@ -90,8 +90,6 @@ def test_generate_meters_dispatched_models_and_enhance():
         assert kwargs["operation"] == "generate"
         assert kwargs["tier"] == "paid"
         assert kwargs["user_id"] == "u1"
-        # One gpt-4o adaptation call per generate.
-        assert kwargs["include_enhance"] is True
 
 
 def test_generate_does_not_meter_skipped_models():
@@ -304,3 +302,52 @@ def test_outpaint_is_rejected_when_model_at_daily_cap():
     assert resp["statusCode"] == 429
     ctx["handler"].assert_not_called()
     mock_meter.record_models.assert_not_called()
+
+
+def _generate_with_enhancer(is_available):
+    """Run /generate with the prompt enhancer configured or not."""
+    tier, quota = _tier_and_quota()
+    with (
+        patch("config.auth_enabled", True),
+        patch("lambda_function._guest_service", MagicMock()),
+        patch("lambda_function._user_repo") as mock_repo,
+        patch("lambda_function.resolve_tier", return_value=tier),
+        patch("lambda_function.enforce_quota", return_value=quota),
+        patch("lambda_function.content_filter") as mock_cf,
+        patch("lambda_function.get_enabled_models") as mock_models,
+        patch("lambda_function._model_counter_service") as mock_counter,
+        patch("lambda_function.session_manager") as mock_sm,
+        patch("lambda_function._executor") as mock_exec,
+        patch("lambda_function._cost_meter") as mock_meter,
+        patch("lambda_function.prompt_enhancer") as mock_enh,
+    ):
+        mock_repo.get_model_runtime_config.return_value = None
+        mock_cf.check_prompt.return_value = False
+        mock_models.return_value = [_model("gemini", "google_gemini")]
+        mock_counter.consume_model_slot.return_value = True
+        mock_sm.create_session.return_value = "session-1"
+        type(mock_enh).is_available = property(lambda self: is_available)
+        mock_enh.adapt_per_model.return_value = {"gemini": "adapted"}
+
+        future = MagicMock()
+        future.result.return_value = ("gemini", {"status": "completed", "duration": 1.0})
+        mock_exec.submit.return_value = future
+
+        from lambda_function import handle_generate
+
+        with patch("lambda_function.as_completed", return_value=[future]):
+            handle_generate(_make_event(), "corr-1")
+        return mock_meter.record_models.call_args.kwargs
+
+
+def test_enhance_billed_when_enhancer_configured():
+    assert _generate_with_enhancer(True)["include_enhance"] is True
+
+
+def test_enhance_not_billed_when_enhancer_unconfigured():
+    """No PROMPT_MODEL_API_KEY means no LLM call, so no cost to book.
+
+    Open-source mode ships without that key. Billing for a call that never
+    happened would corrupt the cost data the meter exists to gather.
+    """
+    assert _generate_with_enhancer(False)["include_enhance"] is False

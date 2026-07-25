@@ -4,6 +4,7 @@ Standardized Error Response Utilities.
 Provides consistent error response format across all API endpoints.
 """
 
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 
@@ -179,7 +180,17 @@ def model_cost_ceiling(**kwargs) -> Dict[str, Any]:
 
 
 def daily_spend_ceiling(**kwargs) -> Dict[str, Any]:
-    """503 Global daily spend ceiling reached — operator-side cost protection."""
+    """503 Daily spend ceiling reached — operator-side cost protection.
+
+    The budget resets at UTC midnight, which is deterministic, so clients are
+    told exactly how long to back off rather than retrying into a saturated
+    ceiling.
+    """
+    now = datetime.now(timezone.utc)
+    tomorrow = (now + timedelta(days=1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    kwargs.setdefault("retry_after", int((tomorrow - now).total_seconds()))
     return error_response(
         status_code=503,
         error_code="DAILY_SPEND_CEILING",

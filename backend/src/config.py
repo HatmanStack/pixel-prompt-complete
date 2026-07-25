@@ -295,6 +295,19 @@ global_daily_spend_ceiling_usd_micros = _safe_int(
     "GLOBAL_DAILY_SPEND_CEILING_USD_MICROS", 100_000_000
 )
 
+# Sub-ceiling for /enhance specifically, in micro-dollars. Default $5/day.
+#
+# /enhance is unauthenticated, captcha-free and unquota'd (closing that is
+# P0-D). Metering it against the shared global budget alone would let anonymous
+# traffic exhaust the day's spend and 503 /generate for paying users — turning
+# a cost guard into a denial-of-service amplifier. This bounds what the open
+# endpoint can consume, independently of the global ceiling it also respects.
+#
+# Set to 0 to disable this sub-ceiling (the global one still applies).
+enhance_daily_spend_ceiling_usd_micros = _safe_int(
+    "ENHANCE_DAILY_SPEND_CEILING_USD_MICROS", 5_000_000
+)
+
 # CAPTCHA (Cloudflare Turnstile)
 turnstile_secret_key = os.environ.get("TURNSTILE_SECRET_KEY", "")
 if captcha_enabled and not turnstile_secret_key:

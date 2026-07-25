@@ -34,6 +34,11 @@ import config
 from users.repository import UserRepository
 from utils.logger import StructuredLogger
 
+# Daily accumulators are retained long enough to answer "what did last quarter
+# cost?" then expire. Without this the table grows by one item per day forever,
+# which is a poor look for a cost-control feature.
+SPEND_ITEM_TTL_SECONDS = 400 * 86400
+
 
 def _day_key(now: int) -> str:
     """UTC date bucket. UTC, not local, so the ceiling resets predictably."""
@@ -79,7 +84,12 @@ class CostMeter:
         deltas[f"{tier}TierMicros"] = total
 
         try:
-            self._repo.add_counters(spend_item_key(now), deltas, now=now)
+            self._repo.add_counters(
+                spend_item_key(now),
+                deltas,
+                now=now,
+                ttl=now + SPEND_ITEM_TTL_SECONDS,
+            )
         except Exception as e:
             StructuredLogger.error(
                 f"Cost meter failed to record daily spend: {e}",

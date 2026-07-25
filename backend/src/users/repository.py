@@ -501,7 +501,11 @@ class UserRepository:
         self.increment_revenue_counter(field, -delta)
 
     def add_counters(
-        self, item_key: str, deltas: dict[str, int], now: int | None = None
+        self,
+        item_key: str,
+        deltas: dict[str, int],
+        now: int | None = None,
+        ttl: int | None = None,
     ) -> None:
         """Atomically apply several integer deltas to one item.
 
@@ -525,9 +529,18 @@ class UserRepository:
             names[alias] = field
             add_parts.append(f"{alias} {placeholder}")
             values[placeholder] = delta
+        set_parts = ["updatedAt = :now"]
+        if ttl is not None:
+            # if_not_exists so the expiry is anchored to first write and a
+            # long-lived accumulator cannot keep pushing its own deletion out.
+            names["#ttl"] = "ttl"
+            values[":ttl"] = ttl
+            set_parts.append("#ttl = if_not_exists(#ttl, :ttl)")
         self._table.update_item(
             Key={"userId": item_key},
-            UpdateExpression="SET updatedAt = :now ADD " + ", ".join(add_parts),
+            UpdateExpression=(
+                "SET " + ", ".join(set_parts) + " ADD " + ", ".join(add_parts)
+            ),
             ExpressionAttributeNames=names,
             ExpressionAttributeValues=values,
         )

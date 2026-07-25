@@ -136,6 +136,15 @@ def _daily_spend_exceeded(now: int | None = None) -> bool:
     cannot prove the budget is blown, and hard-failing every billable request
     on a transient DynamoDB blip would be a self-inflicted outage. The read
     error is logged so the gap is visible.
+
+    This is check-then-act, not an atomic reservation: the spend write happens
+    after the provider call, so concurrent requests can all read an
+    under-ceiling total and all proceed. The overshoot is bounded by Lambda's
+    reserved concurrency (10), i.e. ~10 requests' worth — single-digit dollars
+    at current cost-table values, against a $100 default ceiling. That is a
+    deliberately weaker guarantee than the per-model cap, which reserves
+    atomically via a conditional UpdateItem. Revisit if concurrency is raised
+    substantially or the ceiling is tightened toward the overshoot size.
     """
     ceiling = config.global_daily_spend_ceiling_usd_micros
     if ceiling <= 0:
@@ -146,6 +155,37 @@ def _daily_spend_exceeded(now: int | None = None) -> bool:
         StructuredLogger.error(f"Spend ceiling check failed, allowing request: {e}")
         return False
     return int(spend.get("totalMicros", 0)) >= ceiling
+
+
+def _enhance_spend_exceeded(now: int | None = None) -> bool:
+    """True when /enhance has used up its own sub-budget.
+
+    /enhance is unauthenticated and unquota'd, so without a dedicated bound it
+    could burn the whole global budget and make /generate return 503 for paying
+    users — a cost guard doubling as a denial-of-service amplifier. Fails open
+    on a read error for the same reason as the global check.
+    """
+    ceiling = config.enhance_daily_spend_ceiling_usd_micros
+    if ceiling <= 0:
+        return False
+    try:
+        spend = _cost_meter.get_daily_spend(now=now)
+    except Exception as e:
+        StructuredLogger.error(f"Enhance ceiling check failed, allowing request: {e}")
+        return False
+    return int(spend.get("enhanceMicros", 0)) >= ceiling
+
+
+def _spend_ceiling_exceeded(endpoint_kind: str) -> tuple[bool, str]:
+    """Evaluate every ceiling that applies to ``endpoint_kind``.
+
+    Returns (exceeded, scope_label_for_logging).
+    """
+    if _daily_spend_exceeded():
+        return True, "Global"
+    if endpoint_kind == "enhance" and _enhance_spend_exceeded():
+        return True, "Enhance"
+    return False, ""
 
 
 def _anon_tier() -> TierContext:
@@ -187,6 +227,20 @@ def _parse_and_validate_request(
         body = json.loads(raw_body or "{}")
     except json.JSONDecodeError:
         return None, response(400, error_responses.invalid_json())
+
+    # Spend ceilings, checked first. Deliberately NOT gated on auth_enabled:
+    # every other cost guard is, which is exactly why a default deploy had no
+    # spend bound at all. Placed before tier resolution, CAPTCHA (an external
+    # HTTP call) and content filtering because the check depends on none of
+    # them, and a ceiling breach is precisely when rejecting cheaply matters.
+    if endpoint_kind in ("generate", "refine", "enhance"):
+        exceeded, scope = _spend_ceiling_exceeded(endpoint_kind)
+        if exceeded:
+            StructuredLogger.error(
+                f"{scope} daily spend ceiling reached — rejecting billable request",
+                endpoint=endpoint_kind,
+            )
+            return None, response(503, error_responses.daily_spend_ceiling())
 
     # Prefer real client IP from API Gateway, fall back to body.ip for local dev
     ip = event.get("requestContext", {}).get("http", {}).get("sourceIp") or body.get(
@@ -230,17 +284,6 @@ def _parse_and_validate_request(
     # Content filter
     if prompt and content_filter.check_prompt(prompt):
         return None, response(400, error_responses.inappropriate_content())
-
-    # Global spend ceiling. Deliberately NOT gated on auth_enabled: every other
-    # cost guard is, which is exactly why a default deploy had no spend bound at
-    # all. This is the backstop and it applies in every configuration.
-    if endpoint_kind in ("generate", "refine", "enhance"):
-        if _daily_spend_exceeded():
-            StructuredLogger.error(
-                "Global daily spend ceiling reached — rejecting billable request",
-                endpoint=endpoint_kind,
-            )
-            return None, response(503, error_responses.daily_spend_ceiling())
 
     # Quota enforcement (after validation so invalid requests don't consume quota)
     if endpoint_kind in ("generate", "refine") and config.auth_enabled:
@@ -651,7 +694,12 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
             operation="generate",
             tier=validated.tier.tier if validated.tier else "anon",
             user_id=validated.tier.user_id if validated.tier else None,
-            include_enhance=True,
+            # Only bill for the adaptation when one actually happened. The
+            # enhancer short-circuits to the raw prompt with no LLM call when
+            # PROMPT_MODEL_API_KEY is unset — a supported open-source setup —
+            # and booking phantom spend there would corrupt the cost data this
+            # meter exists to gather.
+            include_enhance=prompt_enhancer.is_available,
         )
 
         # Emit CloudWatch metrics per model (only in auth-enabled mode)

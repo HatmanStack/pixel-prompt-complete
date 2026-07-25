@@ -222,3 +222,122 @@ def test_ceiling_uses_live_accumulator(monkeypatch):
             assert lambda_function._daily_spend_exceeded(now=now) is False
             meter.record(costs={"nova": 60_000}, tier="paid", now=now)
             assert lambda_function._daily_spend_exceeded(now=now) is True
+
+
+# ---- /enhance sub-ceiling ----
+
+
+def test_enhance_sub_ceiling_defaults_on():
+    import config
+
+    importlib.reload(config)
+    assert config.enhance_daily_spend_ceiling_usd_micros == 5_000_000  # $5/day
+
+
+def test_enhance_blocked_by_its_own_ceiling_while_generate_still_works():
+    """The point: unauthenticated /enhance must not be able to 503 paying users.
+
+    Metering /enhance against the shared budget alone would let anonymous
+    traffic exhaust the day's spend and deny service to /generate — a cost
+    guard doubling as a DoS amplifier.
+    """
+    import lambda_function
+
+    # Enhance has burned its sub-budget; global budget is nowhere near spent.
+    spend = {"totalMicros": 1_000_000, "enhanceMicros": 5_000_000}
+    with (
+        patch("config.global_daily_spend_ceiling_usd_micros", 100_000_000),
+        patch("config.enhance_daily_spend_ceiling_usd_micros", 5_000_000),
+        patch.object(lambda_function._cost_meter, "get_daily_spend", return_value=spend),
+    ):
+        assert lambda_function._spend_ceiling_exceeded("enhance")[0] is True
+        assert lambda_function._spend_ceiling_exceeded("generate")[0] is False
+        assert lambda_function._spend_ceiling_exceeded("refine")[0] is False
+
+
+def test_global_ceiling_still_blocks_enhance():
+    import lambda_function
+
+    spend = {"totalMicros": 100_000_000, "enhanceMicros": 0}
+    with (
+        patch("config.global_daily_spend_ceiling_usd_micros", 100_000_000),
+        patch("config.enhance_daily_spend_ceiling_usd_micros", 5_000_000),
+        patch.object(lambda_function._cost_meter, "get_daily_spend", return_value=spend),
+    ):
+        exceeded, scope = lambda_function._spend_ceiling_exceeded("enhance")
+        assert exceeded is True
+        assert scope == "Global"
+
+
+def test_enhance_sub_ceiling_zero_disables():
+    import lambda_function
+
+    spend = {"totalMicros": 0, "enhanceMicros": 999_000_000}
+    with (
+        patch("config.global_daily_spend_ceiling_usd_micros", 100_000_000),
+        patch("config.enhance_daily_spend_ceiling_usd_micros", 0),
+        patch.object(lambda_function._cost_meter, "get_daily_spend", return_value=spend),
+    ):
+        assert lambda_function._spend_ceiling_exceeded("enhance")[0] is False
+
+
+def test_enhance_sub_ceiling_fails_open():
+    import lambda_function
+
+    with (
+        patch("config.enhance_daily_spend_ceiling_usd_micros", 1_000),
+        patch.object(
+            lambda_function._cost_meter,
+            "get_daily_spend",
+            side_effect=RuntimeError("dynamo down"),
+        ),
+    ):
+        assert lambda_function._enhance_spend_exceeded() is False
+
+
+# ---- Response shape ----
+
+
+def test_ceiling_response_tells_clients_when_to_retry():
+    """The reset is deterministic (UTC midnight), so say so."""
+    from utils import error_responses
+
+    body = error_responses.daily_spend_ceiling()
+    assert body["error"] == "DAILY_SPEND_CEILING"
+    retry = body.get("retryAfter") or body.get("retry_after")
+    assert retry is not None
+    assert 0 < int(retry) <= 86400
+
+
+# ---- Accumulator retention ----
+
+
+def test_spend_items_expire():
+    """A cost-control feature must not itself grow the table forever."""
+    import boto3
+    from moto import mock_aws
+
+    with mock_aws():
+        ddb = boto3.resource("dynamodb", region_name="us-east-1")
+        ddb.create_table(
+            TableName="spend-ttl-test",
+            KeySchema=[{"AttributeName": "userId", "KeyType": "HASH"}],
+            AttributeDefinitions=[{"AttributeName": "userId", "AttributeType": "S"}],
+            BillingMode="PAY_PER_REQUEST",
+        )
+        from ops.cost_meter import SPEND_ITEM_TTL_SECONDS, CostMeter, spend_item_key
+        from users.repository import UserRepository
+
+        repo = UserRepository("spend-ttl-test", dynamodb_resource=ddb)
+        meter = CostMeter(repo)
+        now = 1784980800
+        meter.record(costs={"gemini": 39000}, tier="paid", now=now)
+
+        item = repo.get_user(spend_item_key(now))
+        assert int(item["ttl"]) == now + SPEND_ITEM_TTL_SECONDS
+
+        # A later write must not push the expiry out indefinitely.
+        meter.record(costs={"gemini": 39000}, tier="paid", now=now + 3600)
+        item = repo.get_user(spend_item_key(now))
+        assert int(item["ttl"]) == now + SPEND_ITEM_TTL_SECONDS
+        assert int(item["totalMicros"]) == 78000

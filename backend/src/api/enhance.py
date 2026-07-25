@@ -79,6 +79,20 @@ Enhance the following prompt:"""
             "Return ONLY valid JSON. No markdown, no explanation."
         )
 
+    @property
+    def is_available(self) -> bool:
+        """True when a real LLM call will actually be made.
+
+        Both ``enhance`` and ``adapt_per_model`` short-circuit to the original
+        prompt when no provider or no API key is configured — a supported
+        setup, since open-source mode ships without PROMPT_MODEL_API_KEY.
+        Callers that meter cost must consult this, or they book spend for a
+        call that never happened, corrupting the very numbers the meter
+        exists to produce.
+        """
+        return bool(self.prompt_model and self.prompt_model.get("api_key"))
+
+
     def adapt_per_model(
         self,
         prompt: str,
@@ -102,14 +116,13 @@ Enhance the following prompt:"""
         """
         fallback = {m: prompt for m in enabled_models}
 
-        if not self.prompt_model:
+        if not self.is_available:
             return fallback
 
         try:
+            assert self.prompt_model is not None  # guaranteed by is_available
             provider = self.prompt_model["provider"]
-            api_key = self.prompt_model.get("api_key", "")
-            if not api_key:
-                return fallback
+            api_key = self.prompt_model["api_key"]
 
             model_keys = ", ".join(enabled_models)
             system_prompt = self.adaptation_system_prompt.format(model_keys=model_keys)
