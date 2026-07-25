@@ -814,6 +814,8 @@ Resources:
           AttributeType: S
         - AttributeName: createdAt
           AttributeType: N
+        - AttributeName: stripeCustomerId
+          AttributeType: S
       KeySchema:
         - AttributeName: userId
           KeyType: HASH
@@ -826,6 +828,16 @@ Resources:
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
+        # Reverse lookup: Stripe customer -> userId. Required because real
+        # customer.subscription.* payloads carry neither client_reference_id
+        # nor metadata.userId for subscriptions created before
+        # subscription_data.metadata was set at checkout.
+        - IndexName: StripeCustomerIndex
+          KeySchema:
+            - AttributeName: stripeCustomerId
+              KeyType: HASH
+          Projection:
+            ProjectionType: KEYS_ONLY
       TimeToLiveSpecification:
         AttributeName: ttl
         Enabled: true

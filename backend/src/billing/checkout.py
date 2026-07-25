@@ -69,6 +69,13 @@ def handle_billing_checkout(
             success_url=config.stripe_success_url,
             cancel_url=config.stripe_cancel_url,
             client_reference_id=user_id,
+            # Stamp the Subscription itself, not just the Checkout Session.
+            # ``client_reference_id`` exists only on the session; without this
+            # every downstream customer.subscription.* event arrives with no
+            # way to identify the user. Only tags subscriptions created from
+            # here on — pre-existing ones resolve via the StripeCustomerIndex
+            # fallback in billing.webhook.
+            subscription_data={"metadata": {"userId": user_id}},
             idempotency_key=checkout_key,
         )
         return _response(200, {"url": session["url"]})
