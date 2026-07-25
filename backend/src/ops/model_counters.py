@@ -54,7 +54,16 @@ class ModelCounterService:
                 }
         return result
 
-    def check_model_allowed(self, model_name: str, now: int) -> bool:
-        """Convenience: returns True if model can generate, False if capped."""
+    def consume_model_slot(self, model_name: str, now: int) -> bool:
+        """Consume one slot against the model's daily cap.
+
+        NOT a read-only check: this increments. Named accordingly because the
+        previous name (``check_model_allowed``) read as a predicate while
+        mutating, which is how the refine paths ended up never touching the
+        ceiling — the call looked too cheap to matter and was simply omitted.
+
+        Returns True if the slot was granted, False if the model is at cap.
+        Use :meth:`get_model_counts` for a genuine read-only view.
+        """
         ok, _ = self.increment_model_count(model_name, now)
         return ok

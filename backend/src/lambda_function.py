@@ -129,6 +129,25 @@ class ValidatedRequest:
     tier: TierContext | None = None
 
 
+def _daily_spend_exceeded(now: int | None = None) -> bool:
+    """True when today's metered spend has reached the configured ceiling.
+
+    Fails OPEN on a read error: if the spend accumulator is unreadable we
+    cannot prove the budget is blown, and hard-failing every billable request
+    on a transient DynamoDB blip would be a self-inflicted outage. The read
+    error is logged so the gap is visible.
+    """
+    ceiling = config.global_daily_spend_ceiling_usd_micros
+    if ceiling <= 0:
+        return False
+    try:
+        spend = _cost_meter.get_daily_spend(now=now)
+    except Exception as e:
+        StructuredLogger.error(f"Spend ceiling check failed, allowing request: {e}")
+        return False
+    return int(spend.get("totalMicros", 0)) >= ceiling
+
+
 def _anon_tier() -> TierContext:
     return TierContext(
         tier="paid",
@@ -153,7 +172,8 @@ def _parse_and_validate_request(
     Performs: body size check, JSON parsing, IP extraction, tier resolution,
     quota enforcement, prompt validation, and content filtering.
 
-    ``endpoint_kind`` is one of ``"generate"``, ``"refine"``, or ``"none"``
+    ``endpoint_kind`` is one of ``"generate"``, ``"refine"``, ``"enhance"``
+    or ``"none"``
     (skip quota enforcement).
 
     Returns:
@@ -210,6 +230,17 @@ def _parse_and_validate_request(
     # Content filter
     if prompt and content_filter.check_prompt(prompt):
         return None, response(400, error_responses.inappropriate_content())
+
+    # Global spend ceiling. Deliberately NOT gated on auth_enabled: every other
+    # cost guard is, which is exactly why a default deploy had no spend bound at
+    # all. This is the backstop and it applies in every configuration.
+    if endpoint_kind in ("generate", "refine", "enhance"):
+        if _daily_spend_exceeded():
+            StructuredLogger.error(
+                "Global daily spend ceiling reached — rejecting billable request",
+                endpoint=endpoint_kind,
+            )
+            return None, response(503, error_responses.daily_spend_ceiling())
 
     # Quota enforcement (after validation so invalid requests don't consume quota)
     if endpoint_kind in ("generate", "refine") and config.auth_enabled:
@@ -475,7 +506,7 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
                     }
                     continue
                 # Per-model cost ceiling check
-                if _model_counter_service.check_model_allowed(model.name, now_ts):
+                if _model_counter_service.consume_model_slot(model.name, now_ts):
                     models_to_dispatch.append(model)
                 else:
                     skipped_models[model.name] = {
@@ -793,6 +824,14 @@ def _handle_refinement(
             **iter_kwargs,
         )
 
+        # Per-model daily cap, consumed BEFORE dispatching to the provider.
+        # Previously only /generate consumed slots, so refinement traffic could
+        # run a model far past its ceiling.
+        if config.auth_enabled and not _model_counter_service.consume_model_slot(
+            model_name, int(time.time())
+        ):
+            return response(429, error_responses.model_cost_ceiling())
+
         config_dict = get_model_config_dict(model_config)
         handler = get_handler_fn(model_config.provider)
         handler_args = build_handler_args_fn(
@@ -978,7 +1017,10 @@ def handle_enhance(event: LambdaEvent, correlation_id: str | None = None) -> Api
         event,
         require_prompt=True,
         max_prompt_length=500,
-        endpoint_kind="none",
+        # "enhance" subjects this to the global spend ceiling without pulling
+        # in captcha or quota (both of which gate on generate/refine). It is
+        # still unauthenticated — closing that is P0-D.
+        endpoint_kind="enhance",
     )
     if err:
         return err

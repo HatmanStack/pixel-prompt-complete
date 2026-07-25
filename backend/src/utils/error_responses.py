@@ -178,6 +178,19 @@ def model_cost_ceiling(**kwargs) -> Dict[str, Any]:
     )
 
 
+def daily_spend_ceiling(**kwargs) -> Dict[str, Any]:
+    """503 Global daily spend ceiling reached — operator-side cost protection."""
+    return error_response(
+        status_code=503,
+        error_code="DAILY_SPEND_CEILING",
+        message=(
+            "Service is temporarily unavailable: the daily generation budget "
+            "has been reached. Please try again tomorrow."
+        ),
+        **kwargs,
+    )
+
+
 def captcha_required(**kwargs) -> Dict[str, Any]:
     """403 CAPTCHA verification required."""
     return error_response(

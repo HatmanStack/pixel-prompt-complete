@@ -72,7 +72,7 @@ def test_generate_meters_dispatched_models_and_enhance():
             _model("gemini", "google_gemini"),
             _model("nova", "bedrock_nova"),
         ]
-        mock_counter.check_model_allowed.return_value = True
+        mock_counter.consume_model_slot.return_value = True
         mock_sm.create_session.return_value = "session-1"
 
         future = MagicMock()
@@ -117,7 +117,7 @@ def test_generate_does_not_meter_skipped_models():
             _model("nova", "bedrock_nova"),
         ]
         # gemini capped, nova allowed
-        mock_counter.check_model_allowed.side_effect = lambda name, now: (
+        mock_counter.consume_model_slot.side_effect = lambda name, now: (
             name != "gemini"
         )
         mock_sm.create_session.return_value = "session-1"
@@ -159,7 +159,7 @@ def test_generate_meters_models_that_errored():
         mock_repo.get_model_runtime_config.return_value = None
         mock_cf.check_prompt.return_value = False
         mock_models.return_value = [_model("gemini", "google_gemini")]
-        mock_counter.check_model_allowed.return_value = True
+        mock_counter.consume_model_slot.return_value = True
         mock_sm.create_session.return_value = "session-1"
 
         future = MagicMock()
@@ -211,13 +211,19 @@ def _refinement_patches(meter, preset_result=None):
     }
 
 
-def _run_refinement(endpoint, body, mock_meter_name="lambda_function._cost_meter"):
+def _run_refinement(
+    endpoint,
+    body,
+    mock_meter_name="lambda_function._cost_meter",
+    model_slot_granted=True,
+):
     ctx = _refinement_patches(None)
     tier, quota = ctx["tier"], ctx["quota"]
     with (
         patch("config.auth_enabled", True),
         patch("lambda_function._guest_service", MagicMock()),
         patch("lambda_function._user_repo", MagicMock()),
+        patch("lambda_function._model_counter_service") as mock_counter,
         patch("lambda_function.resolve_tier", return_value=tier),
         patch("lambda_function.enforce_quota", return_value=quota),
         patch("lambda_function.content_filter") as mock_cf,
@@ -230,6 +236,7 @@ def _run_refinement(endpoint, body, mock_meter_name="lambda_function._cost_meter
         patch("lambda_function.get_outpaint_handler", return_value=ctx["handler"]),
         patch(mock_meter_name) as mock_meter,
     ):
+        mock_counter.consume_model_slot.return_value = model_slot_granted
         mock_cf.check_prompt.return_value = False
         mock_val.return_value = (("sess-1", "gemini", ctx["model_cfg"]), None)
         mock_load.return_value = (("base64image", 1), None)
@@ -248,12 +255,12 @@ def _run_refinement(endpoint, body, mock_meter_name="lambda_function._cost_meter
             if endpoint == "iterate"
             else lambda_function.handle_outpaint
         )
-        fn(event, "corr-1")
-        return mock_meter
+        resp = fn(event, "corr-1")
+        return mock_meter, resp, ctx
 
 
 def test_iterate_is_metered_as_refine():
-    mock_meter = _run_refinement(
+    mock_meter, _, _ = _run_refinement(
         "iterate", {"sessionId": "sess-1", "model": "gemini", "prompt": "make it blue"}
     )
     mock_meter.record_models.assert_called_once()
@@ -265,10 +272,35 @@ def test_iterate_is_metered_as_refine():
 
 def test_outpaint_is_metered_as_outpaint():
     """Outpaint is priced separately so providers that charge differently show up."""
-    mock_meter = _run_refinement(
+    mock_meter, _, _ = _run_refinement(
         "outpaint", {"sessionId": "sess-1", "model": "gemini", "preset": "16:9"}
     )
     mock_meter.record_models.assert_called_once()
     kwargs = mock_meter.record_models.call_args.kwargs
     assert kwargs["model_names"] == ["gemini"]
     assert kwargs["operation"] == "outpaint"
+
+
+def test_refine_is_rejected_when_model_at_daily_cap():
+    """B4: the per-model ceiling now covers refinement, not just /generate."""
+    mock_meter, resp, ctx = _run_refinement(
+        "iterate",
+        {"sessionId": "sess-1", "model": "gemini", "prompt": "make it blue"},
+        model_slot_granted=False,
+    )
+    assert resp["statusCode"] == 429
+    assert json.loads(resp["body"])["error"] == "MODEL_COST_CEILING"
+    # Rejected before the provider was called, so nothing was spent.
+    ctx["handler"].assert_not_called()
+    mock_meter.record_models.assert_not_called()
+
+
+def test_outpaint_is_rejected_when_model_at_daily_cap():
+    mock_meter, resp, ctx = _run_refinement(
+        "outpaint",
+        {"sessionId": "sess-1", "model": "gemini", "preset": "16:9"},
+        model_slot_granted=False,
+    )
+    assert resp["statusCode"] == 429
+    ctx["handler"].assert_not_called()
+    mock_meter.record_models.assert_not_called()

@@ -58,7 +58,7 @@ def test_capped_model_skipped_in_response():
         mock_models.return_value = [model1, model2]
 
         # gemini is capped, nova is allowed
-        mock_counter_svc.check_model_allowed.side_effect = lambda name, now: name != "gemini"
+        mock_counter_svc.consume_model_slot.side_effect = lambda name, now: name != "gemini"
 
         mock_sm.create_session.return_value = "session-123"
 
@@ -117,7 +117,7 @@ def test_all_models_capped_returns_429():
         mock_models.return_value = [model1, model2]
 
         # All models capped
-        mock_counter_svc.check_model_allowed.return_value = False
+        mock_counter_svc.consume_model_slot.return_value = False
 
         from lambda_function import handle_generate
         resp = handle_generate(_make_event(), "corr-1")
@@ -161,5 +161,5 @@ def test_auth_disabled_skips_cost_ceiling():
             resp = handle_generate(_make_event(), "corr-1")
 
         assert resp["statusCode"] == 200
-        # check_model_allowed should NOT have been called
-        mock_counter_svc.check_model_allowed.assert_not_called()
+        # consume_model_slot should NOT have been called
+        mock_counter_svc.consume_model_slot.assert_not_called()

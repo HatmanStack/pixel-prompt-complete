@@ -281,6 +281,20 @@ def model_cost_micros(model_name: str, operation: str) -> int:
     return MODEL_COSTS_USD_MICROS.get(model_name, {}).get(operation, 0)
 
 
+# ---------------------------------------------------------------------------
+# Global daily spend ceiling, in micro-dollars.
+#
+# Defaults to $100/day ON, deliberately. Every other guard in this system is
+# conditional on AUTH_ENABLED, which defaults false — so a default deploy had
+# no spend bound of any kind. This one applies unconditionally and is the last
+# thing between a misconfiguration and an unbounded provider bill.
+#
+# Set to 0 to disable, consciously.
+# ---------------------------------------------------------------------------
+global_daily_spend_ceiling_usd_micros = _safe_int(
+    "GLOBAL_DAILY_SPEND_CEILING_USD_MICROS", 100_000_000
+)
+
 # CAPTCHA (Cloudflare Turnstile)
 turnstile_secret_key = os.environ.get("TURNSTILE_SECRET_KEY", "")
 if captcha_enabled and not turnstile_secret_key:
