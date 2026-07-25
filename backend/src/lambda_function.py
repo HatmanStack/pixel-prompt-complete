@@ -43,6 +43,7 @@ from models.providers import (
     get_outpaint_handler,
     sanitize_error_message,
 )
+from ops.cost_meter import CostMeter
 from ops.metrics import emit_request_metric
 from ops.model_counters import ModelCounterService
 from prompts.repository import PromptHistoryRepository
@@ -93,6 +94,7 @@ _guest_service = get_guest_token_service() if config.guest_token_secret else Non
 
 # Per-model cost ceiling service
 _model_counter_service = ModelCounterService(_user_repo)
+_cost_meter = CostMeter(_user_repo)
 
 # Prompt history repository
 _prompt_history = PromptHistoryRepository(config.users_table_name)
@@ -127,6 +129,65 @@ class ValidatedRequest:
     tier: TierContext | None = None
 
 
+def _daily_spend_exceeded(now: int | None = None) -> bool:
+    """True when today's metered spend has reached the configured ceiling.
+
+    Fails OPEN on a read error: if the spend accumulator is unreadable we
+    cannot prove the budget is blown, and hard-failing every billable request
+    on a transient DynamoDB blip would be a self-inflicted outage. The read
+    error is logged so the gap is visible.
+
+    This is check-then-act, not an atomic reservation: the spend write happens
+    after the provider call, so concurrent requests can all read an
+    under-ceiling total and all proceed. The overshoot is bounded by Lambda's
+    reserved concurrency (10), i.e. ~10 requests' worth — single-digit dollars
+    at current cost-table values, against a $100 default ceiling. That is a
+    deliberately weaker guarantee than the per-model cap, which reserves
+    atomically via a conditional UpdateItem. Revisit if concurrency is raised
+    substantially or the ceiling is tightened toward the overshoot size.
+    """
+    ceiling = config.global_daily_spend_ceiling_usd_micros
+    if ceiling <= 0:
+        return False
+    try:
+        spend = _cost_meter.get_daily_spend(now=now)
+    except Exception as e:
+        StructuredLogger.error(f"Spend ceiling check failed, allowing request: {e}")
+        return False
+    return int(spend.get("totalMicros", 0)) >= ceiling
+
+
+def _enhance_spend_exceeded(now: int | None = None) -> bool:
+    """True when /enhance has used up its own sub-budget.
+
+    /enhance is unauthenticated and unquota'd, so without a dedicated bound it
+    could burn the whole global budget and make /generate return 503 for paying
+    users — a cost guard doubling as a denial-of-service amplifier. Fails open
+    on a read error for the same reason as the global check.
+    """
+    ceiling = config.enhance_daily_spend_ceiling_usd_micros
+    if ceiling <= 0:
+        return False
+    try:
+        spend = _cost_meter.get_daily_spend(now=now)
+    except Exception as e:
+        StructuredLogger.error(f"Enhance ceiling check failed, allowing request: {e}")
+        return False
+    return int(spend.get("enhanceMicros", 0)) >= ceiling
+
+
+def _spend_ceiling_exceeded(endpoint_kind: str) -> tuple[bool, str]:
+    """Evaluate every ceiling that applies to ``endpoint_kind``.
+
+    Returns (exceeded, scope_label_for_logging).
+    """
+    if _daily_spend_exceeded():
+        return True, "Global"
+    if endpoint_kind == "enhance" and _enhance_spend_exceeded():
+        return True, "Enhance"
+    return False, ""
+
+
 def _anon_tier() -> TierContext:
     return TierContext(
         tier="paid",
@@ -151,7 +212,8 @@ def _parse_and_validate_request(
     Performs: body size check, JSON parsing, IP extraction, tier resolution,
     quota enforcement, prompt validation, and content filtering.
 
-    ``endpoint_kind`` is one of ``"generate"``, ``"refine"``, or ``"none"``
+    ``endpoint_kind`` is one of ``"generate"``, ``"refine"``, ``"enhance"``
+    or ``"none"``
     (skip quota enforcement).
 
     Returns:
@@ -165,6 +227,20 @@ def _parse_and_validate_request(
         body = json.loads(raw_body or "{}")
     except json.JSONDecodeError:
         return None, response(400, error_responses.invalid_json())
+
+    # Spend ceilings, checked first. Deliberately NOT gated on auth_enabled:
+    # every other cost guard is, which is exactly why a default deploy had no
+    # spend bound at all. Placed before tier resolution, CAPTCHA (an external
+    # HTTP call) and content filtering because the check depends on none of
+    # them, and a ceiling breach is precisely when rejecting cheaply matters.
+    if endpoint_kind in ("generate", "refine", "enhance"):
+        exceeded, scope = _spend_ceiling_exceeded(endpoint_kind)
+        if exceeded:
+            StructuredLogger.error(
+                f"{scope} daily spend ceiling reached — rejecting billable request",
+                endpoint=endpoint_kind,
+            )
+            return None, response(503, error_responses.daily_spend_ceiling())
 
     # Prefer real client IP from API Gateway, fall back to body.ip for local dev
     ip = event.get("requestContext", {}).get("http", {}).get("sourceIp") or body.get(
@@ -473,7 +549,7 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
                     }
                     continue
                 # Per-model cost ceiling check
-                if _model_counter_service.check_model_allowed(model.name, now_ts):
+                if _model_counter_service.consume_model_slot(model.name, now_ts):
                     models_to_dispatch.append(model)
                 else:
                     skipped_models[model.name] = {
@@ -606,6 +682,25 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
                         "status": "error",
                         "error": f"Model timed out after {future_timeout}s",
                     }
+
+        # Meter what this request cost in dollars. Every dispatched model is
+        # metered, including ones that errored or timed out: the provider
+        # performed the work and bills for it regardless of whether we managed
+        # to return it to the user (see the as_completed timeout above, which
+        # does not cancel in-flight futures). For a spend ceiling, over-counting
+        # is the safe direction — under-counting means unbounded spend.
+        _cost_meter.record_models(
+            model_names=[m.name for m in models_to_dispatch],
+            operation="generate",
+            tier=validated.tier.tier if validated.tier else "anon",
+            user_id=validated.tier.user_id if validated.tier else None,
+            # Only bill for the adaptation when one actually happened. The
+            # enhancer short-circuits to the raw prompt with no LLM call when
+            # PROMPT_MODEL_API_KEY is unset — a supported open-source setup —
+            # and booking phantom spend there would corrupt the cost data this
+            # meter exists to gather.
+            include_enhance=prompt_enhancer.is_available,
+        )
 
         # Emit CloudWatch metrics per model (only in auth-enabled mode)
         if config.auth_enabled:
@@ -777,6 +872,14 @@ def _handle_refinement(
             **iter_kwargs,
         )
 
+        # Per-model daily cap, consumed BEFORE dispatching to the provider.
+        # Previously only /generate consumed slots, so refinement traffic could
+        # run a model far past its ceiling.
+        if config.auth_enabled and not _model_counter_service.consume_model_slot(
+            model_name, int(time.time())
+        ):
+            return response(429, error_responses.model_cost_ceiling())
+
         config_dict = get_model_config_dict(model_config)
         handler = get_handler_fn(model_config.provider)
         handler_args = build_handler_args_fn(
@@ -791,6 +894,16 @@ def _handle_refinement(
         duration = time.time() - start_time
         target = datetime.now(timezone.utc).strftime("%Y-%m-%d-%H-%M-%S")
         is_error = result["status"] != "success"
+
+        # Meter the provider call. Charged whether or not it succeeded — the
+        # provider ran the model either way. "refine" prices both /iterate and
+        # /outpaint; they are one image on one model in both cases.
+        _cost_meter.record_models(
+            model_names=[model_name],
+            operation="outpaint" if (add_iteration_kwargs or {}).get("is_outpaint") else "refine",
+            tier=validated.tier.tier if validated.tier else "anon",
+            user_id=validated.tier.user_id if validated.tier else None,
+        )
 
         # Emit CloudWatch metrics for refinement (only in auth-enabled mode)
         if config.auth_enabled:
@@ -952,13 +1065,24 @@ def handle_enhance(event: LambdaEvent, correlation_id: str | None = None) -> Api
         event,
         require_prompt=True,
         max_prompt_length=500,
-        endpoint_kind="none",
+        # "enhance" subjects this to the global spend ceiling without pulling
+        # in captcha or quota (both of which gate on generate/refine). It is
+        # still unauthenticated — closing that is P0-D.
+        endpoint_kind="enhance",
     )
     if err:
         return err
 
     try:
         enhanced = prompt_enhancer.enhance_safe(validated.prompt)
+        # /enhance is still unauthenticated and unquota'd (that is P0-D), but
+        # it calls gpt-4o and therefore costs money. Metering it first means
+        # the exposure is at least visible before it is gated.
+        _cost_meter.record(
+            costs={"enhance": config.enhance_cost_usd_micros},
+            tier=validated.tier.tier if validated.tier else "anon",
+            user_id=validated.tier.user_id if validated.tier else None,
+        )
 
         return response(
             200, {"original": validated.prompt, "short_prompt": enhanced, "long_prompt": enhanced}

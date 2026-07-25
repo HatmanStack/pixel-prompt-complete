@@ -214,6 +214,7 @@ class UserRepository:
         "config#",
         "event#",
         "prompt#",
+        "spend#",
     )
 
     def scan_users(
@@ -499,33 +500,57 @@ class UserRepository:
         """Atomically decrement a counter (increment by negative delta)."""
         self.increment_revenue_counter(field, -delta)
 
-    def apply_revenue_deltas(self, deltas: dict[str, int]) -> None:
-        """Atomically apply several counter deltas in one UpdateItem.
+    def add_counters(
+        self,
+        item_key: str,
+        deltas: dict[str, int],
+        now: int | None = None,
+        ttl: int | None = None,
+    ) -> None:
+        """Atomically apply several integer deltas to one item.
 
-        All revenue counters live on the single ``revenue#current`` item, so
-        one UpdateItem applies every delta or none of them.
-
-        Sequential calls are NOT equivalent: if the first succeeds and the
-        second throws, the webhook releases its idempotency claim and
-        Stripe's retry re-runs the handler, re-applying the delta that
-        already landed. That drives ``activeSubscribers`` negative — the
-        failure mode webhook dedup exists to prevent, reached through a
-        mid-handler window instead of a full redelivery.
+        A single UpdateItem applies every delta or none of them. Sequential
+        calls are NOT equivalent: a failure between them can leave a caller
+        half-applied, and any retry then double-counts whatever already
+        landed. That is exactly how ``activeSubscribers`` went negative.
         """
         if not deltas:
             return
-        now = int(time.time())
+        if now is None:
+            now = int(time.time())
         add_parts: list[str] = []
         values: dict[str, Any] = {":now": now}
+        names: dict[str, str] = {}
         for i, (field, delta) in enumerate(deltas.items()):
             placeholder = f":d{i}"
-            add_parts.append(f"{field} {placeholder}")
+            # Alias every name: cost labels are provider-derived and could
+            # collide with DynamoDB reserved words.
+            alias = f"#f{i}"
+            names[alias] = field
+            add_parts.append(f"{alias} {placeholder}")
             values[placeholder] = delta
+        set_parts = ["updatedAt = :now"]
+        if ttl is not None:
+            # if_not_exists so the expiry is anchored to first write and a
+            # long-lived accumulator cannot keep pushing its own deletion out.
+            names["#ttl"] = "ttl"
+            values[":ttl"] = ttl
+            set_parts.append("#ttl = if_not_exists(#ttl, :ttl)")
         self._table.update_item(
-            Key={"userId": "revenue#current"},
-            UpdateExpression="SET updatedAt = :now ADD " + ", ".join(add_parts),
+            Key={"userId": item_key},
+            UpdateExpression=(
+                "SET " + ", ".join(set_parts) + " ADD " + ", ".join(add_parts)
+            ),
+            ExpressionAttributeNames=names,
             ExpressionAttributeValues=values,
         )
+
+    def apply_revenue_deltas(self, deltas: dict[str, int]) -> None:
+        """Atomically apply several revenue counter deltas in one UpdateItem.
+
+        All revenue counters live on the single ``revenue#current`` item.
+        """
+        self.add_counters("revenue#current", deltas)
 
     def get_revenue(self) -> dict:
         """Return the ``revenue#current`` item, or empty dict if none."""

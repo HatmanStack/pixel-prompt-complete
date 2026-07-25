@@ -42,6 +42,8 @@ Metadata:
       - Label:
           default: "Per-Model Daily Caps"
         Parameters:
+          - GlobalDailySpendCeilingUsdMicros
+          - EnhanceDailySpendCeilingUsdMicros
           - ModelGeminiDailyCap
           - ModelNovaDailyCap
           - ModelOpenaiDailyCap
@@ -317,6 +319,22 @@ Parameters:
     Description: Return URL from Stripe Customer Portal
 
   # Per-Model Daily Caps
+  GlobalDailySpendCeilingUsdMicros:
+    Type: Number
+    Default: 100000000
+    Description: >-
+      Hard daily spend ceiling in micro-dollars (1e-6 USD). Default 100000000
+      = $100/day. Applies in every configuration, including AUTH_ENABLED=false.
+      Set to 0 to disable (not recommended: nothing else bounds provider spend).
+
+  EnhanceDailySpendCeilingUsdMicros:
+    Type: Number
+    Default: 5000000
+    Description: >-
+      Sub-ceiling for /enhance in micro-dollars. Default 5000000 = $5/day.
+      /enhance is unauthenticated, so without its own bound anonymous traffic
+      could exhaust the global budget and 503 paying users. Set 0 to disable.
+
   ModelGeminiDailyCap:
     Type: Number
     Default: 500
@@ -456,6 +474,8 @@ Resources:
           STRIPE_CANCEL_URL: !Ref StripeCancelUrl
           STRIPE_PORTAL_RETURN_URL: !Ref StripePortalReturnUrl
           # Per-model daily caps
+          GLOBAL_DAILY_SPEND_CEILING_USD_MICROS: !Ref GlobalDailySpendCeilingUsdMicros
+          ENHANCE_DAILY_SPEND_CEILING_USD_MICROS: !Ref EnhanceDailySpendCeilingUsdMicros
           MODEL_GEMINI_DAILY_CAP: !Ref ModelGeminiDailyCap
           MODEL_NOVA_DAILY_CAP: !Ref ModelNovaDailyCap
           MODEL_OPENAI_DAILY_CAP: !Ref ModelOpenaiDailyCap

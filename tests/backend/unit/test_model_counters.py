@@ -97,13 +97,13 @@ def test_get_model_counts_with_existing_data(users_table):
     assert counts["nova"]["dailyCount"] == 0
 
 
-def test_check_model_allowed_convenience(users_table):
+def test_consume_model_slot_convenience(users_table):
     from ops.model_counters import ModelCounterService
 
     repo = _repo(users_table)
     svc = ModelCounterService(repo)
     now = 1_000_000
-    assert svc.check_model_allowed("gemini", now) is True
+    assert svc.consume_model_slot("gemini", now) is True
 
 
 def test_model_counter_uses_model_prefix_key(users_table):
