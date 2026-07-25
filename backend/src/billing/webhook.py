@@ -125,7 +125,11 @@ def _billing_period(obj: dict[str, Any]) -> tuple[int | None, int | None]:
     start = obj.get("current_period_start")
     end = obj.get("current_period_end")
     if not end:
-        items = (obj.get("items") or {}).get("data") or []
+        # Normalise before indexing: a webhook payload is untrusted input, and
+        # `items` arriving as a list or string would otherwise raise on .get()
+        # and turn a malformed event into a 500 that Stripe then retries.
+        raw_items = obj.get("items")
+        items = raw_items.get("data") or [] if isinstance(raw_items, dict) else []
         for item in items:
             if not isinstance(item, dict):
                 continue

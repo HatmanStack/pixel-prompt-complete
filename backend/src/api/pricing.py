@@ -24,7 +24,8 @@ from utils.logger import StructuredLogger
 # Stripe is the authority on what a customer is actually charged. Cached at
 # module level: /pricing is public and hit on every page load, and a price
 # changes far less often than it is read.
-_price_cache: tuple[int, int] | None = None  # (unit_amount_cents, fetched_at)
+# (unit_amount_cents_or_None, fetched_at). None is cached too — see below.
+_price_cache: tuple[int | None, int] | None = None
 _PRICE_CACHE_TTL_SECONDS = 900
 
 
@@ -58,6 +59,7 @@ def _stripe_price_usd_cents() -> int | None:
         price = stripe_mod.Price.retrieve(config.stripe_price_id)
         amount = price.get("unit_amount") if hasattr(price, "get") else None
         if not amount:
+            _price_cache = (None, now)
             return None
         _price_cache = (int(amount), now)
         return int(amount)
@@ -66,6 +68,10 @@ def _stripe_price_usd_cents() -> int | None:
             f"Could not read price from Stripe, using configured value: {e}",
             stripePriceId=config.stripe_price_id,
         )
+        # Cache the failure for the same TTL. /pricing is public and hit on
+        # every page load, so without this a Stripe outage means every single
+        # visitor blocks on a failing upstream call.
+        _price_cache = (None, now)
         return None
 
 

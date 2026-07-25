@@ -234,3 +234,43 @@ def test_stripe_price_is_cached_across_requests():
         _get()
     assert fake.Price.retrieve.call_count == 1
     _reset()
+
+
+def test_stripe_outage_is_cached_not_retried_every_request():
+    """A public endpoint must not hammer a failing upstream.
+
+    /pricing is fetched on every page load, so retrying Stripe per request
+    during an outage means every visitor blocks on the same failing call.
+    """
+    import config
+
+    _reset()
+    fake = MagicMock()
+    fake.Price.retrieve.side_effect = RuntimeError("stripe down")
+    with (
+        patch.object(config, "billing_enabled", True),
+        patch.object(config, "stripe_price_id", "price_123"),
+        patch("billing.stripe_client.get_stripe", return_value=fake),
+    ):
+        for _ in range(5):
+            resp, body = _get()
+            assert resp["statusCode"] == 200
+    assert fake.Price.retrieve.call_count == 1, "failure should be cached too"
+    _reset()
+
+
+def test_missing_unit_amount_is_also_cached():
+    import config
+
+    _reset()
+    fake = MagicMock()
+    fake.Price.retrieve.return_value = {"unit_amount": None}
+    with (
+        patch.object(config, "billing_enabled", True),
+        patch.object(config, "stripe_price_id", "price_123"),
+        patch("billing.stripe_client.get_stripe", return_value=fake),
+    ):
+        _get()
+        _get()
+    assert fake.Price.retrieve.call_count == 1
+    _reset()

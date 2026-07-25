@@ -846,9 +846,31 @@ def test_missing_billing_period_is_survivable(wired):
 
 
 def test_billing_period_helper_handles_malformed_items():
-    """A non-dict entry in items.data must not raise."""
+    """Malformed payloads must degrade, not 500.
+
+    A webhook body is untrusted input. An exception here becomes a 500, which
+    Stripe then retries — so a single malformed event would loop rather than
+    being ignored.
+    """
     from billing.webhook import _billing_period
 
-    assert _billing_period({"items": {"data": ["nonsense", None]}}) == (None, None)
     assert _billing_period({}) == (None, None)
     assert _billing_period({"items": {}}) == (None, None)
+    assert _billing_period({"items": {"data": ["nonsense", None]}}) == (None, None)
+    # `items` arriving as the wrong type entirely.
+    assert _billing_period({"items": []}) == (None, None)
+    assert _billing_period({"items": [{"current_period_end": 1}]}) == (None, None)
+    assert _billing_period({"items": "nope"}) == (None, None)
+    assert _billing_period({"items": None}) == (None, None)
+
+
+def test_malformed_items_does_not_500_the_webhook(wired):
+    """End to end: a bad `items` shape must still return 200."""
+    _seed_subscriber(wired, "u_malformed", "cus_malformed")
+    obj = subscription(subscription_id="sub_mf", customer="cus_malformed")
+    obj.pop("current_period_end", None)
+    obj["items"] = "not-a-dict"
+
+    resp = _send(wired, build_event("customer.subscription.updated", obj))
+    assert resp["statusCode"] == 200
+    assert wired._user_repo.get_user("u_malformed")["tier"] == "paid"
