@@ -42,6 +42,16 @@ Metadata:
       - Label:
           default: "Per-Model Daily Caps"
         Parameters:
+          - CreditsEnabled
+          - PaidPriceUsdCents
+          - OverageUsdCentsPerCredit
+          - CreditsPerGenerate
+          - CreditsPerRefine
+          - CreditsPerOutpaint
+          - FreeMonthlyCredits
+          - PaidMonthlyCredits
+          - FreeCreditPeriodSeconds
+          - PaidCreditFallbackPeriodSeconds
           - GlobalDailySpendCeilingUsdMicros
           - EnhanceDailySpendCeilingUsdMicros
           - ModelGeminiDailyCap
@@ -319,6 +329,72 @@ Parameters:
     Description: Return URL from Stripe Customer Portal
 
   # Per-Model Daily Caps
+  CreditsEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Enable the credit ledger (P0-C). When false, the legacy call-counting
+      quotas apply, so this can be rolled back without redeploying old code.
+
+  PaidPriceUsdCents:
+    Type: Number
+    Default: 1900
+    Description: >-
+      Display price for the paid tier in whole cents (1900 = $19/mo). Served
+      to the UI via GET /pricing so a price experiment is a stack update
+      rather than a frontend rebuild. Must match the Stripe price.
+
+  OverageUsdCentsPerCredit:
+    Type: Number
+    Default: 50
+    Description: Price per credit beyond the allotment, in cents
+
+  CreditsPerGenerate:
+    Type: Number
+    Default: 100
+    Description: Centi-credits charged per /generate (100 = 1.00 credit)
+
+  CreditsPerRefine:
+    Type: Number
+    Default: 25
+    Description: Centi-credits charged per /iterate (25 = 0.25 credit)
+
+  CreditsPerOutpaint:
+    Type: Number
+    Default: 25
+    Description: Centi-credits charged per /outpaint (25 = 0.25 credit)
+
+  FreeMonthlyCredits:
+    Type: Number
+    Default: 500
+    Description: >-
+      Centi-credits granted per period to free users (500 = 5 credits). This
+      is the free tier's spend bound; it replaces a rate limit that bounded
+      request rate but not monthly cost.
+
+  PaidMonthlyCredits:
+    Type: Number
+    Default: 6500
+    Description: Centi-credits granted per Stripe billing period to paid users (6500 = 65)
+
+  FreeCreditPeriodSeconds:
+    Type: Number
+    Default: 2592000
+    Description: >-
+      Renewal window for free accounts in seconds (2592000 = 30 days). Free
+      accounts have no Stripe period, so they use a fixed cycle.
+
+  PaidCreditFallbackPeriodSeconds:
+    Type: Number
+    Default: 2592000
+    Description: >-
+      Fallback renewal window for a paid user whose Stripe billing period is
+      unknown (webhook missed, or an older API shape). Used only as a floor so
+      a paying customer is never left at zero credits.
+
   GlobalDailySpendCeilingUsdMicros:
     Type: Number
     Default: 100000000
@@ -474,6 +550,16 @@ Resources:
           STRIPE_CANCEL_URL: !Ref StripeCancelUrl
           STRIPE_PORTAL_RETURN_URL: !Ref StripePortalReturnUrl
           # Per-model daily caps
+          CREDITS_ENABLED: !Ref CreditsEnabled
+          PAID_PRICE_USD_CENTS: !Ref PaidPriceUsdCents
+          OVERAGE_USD_CENTS_PER_CREDIT: !Ref OverageUsdCentsPerCredit
+          CREDITS_PER_GENERATE: !Ref CreditsPerGenerate
+          CREDITS_PER_REFINE: !Ref CreditsPerRefine
+          CREDITS_PER_OUTPAINT: !Ref CreditsPerOutpaint
+          FREE_MONTHLY_CREDITS: !Ref FreeMonthlyCredits
+          PAID_MONTHLY_CREDITS: !Ref PaidMonthlyCredits
+          FREE_CREDIT_PERIOD_SECONDS: !Ref FreeCreditPeriodSeconds
+          PAID_CREDIT_FALLBACK_PERIOD_SECONDS: !Ref PaidCreditFallbackPeriodSeconds
           GLOBAL_DAILY_SPEND_CEILING_USD_MICROS: !Ref GlobalDailySpendCeilingUsdMicros
           ENHANCE_DAILY_SPEND_CEILING_USD_MICROS: !Ref EnhanceDailySpendCeilingUsdMicros
           MODEL_GEMINI_DAILY_CAP: !Ref ModelGeminiDailyCap
@@ -602,6 +688,12 @@ Resources:
           Properties:
             Path: /log
             Method: POST
+            ApiId: !Ref HttpApi
+        PricingApi:
+          Type: HttpApi
+          Properties:
+            Path: /pricing
+            Method: GET
             ApiId: !Ref HttpApi
         GalleryListApi:
           Type: HttpApi

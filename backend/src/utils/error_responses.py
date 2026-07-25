@@ -128,6 +128,30 @@ def tier_quota_exceeded(tier: str, reset_at: int, **kwargs) -> Dict[str, Any]:
     )
 
 
+def insufficient_credits(
+    tier: str, reset_at: int, remaining: int = 0, required: int = 0, **kwargs
+) -> Dict[str, Any]:
+    """402 Not enough credits left in the current allotment.
+
+    402 rather than 429: this is not rate limiting, it is a depleted balance.
+    The distinction matters to a client deciding whether to back off and retry
+    (429) or to prompt the user to upgrade or wait for renewal (402).
+    """
+    return error_response(
+        status_code=402,
+        error_code="INSUFFICIENT_CREDITS",
+        message=(
+            f"Not enough credits remaining on the {tier} plan. "
+            "Credits renew at the start of the next period."
+        ),
+        tier=tier,
+        resetAt=reset_at,
+        creditsRemaining=remaining,
+        creditsRequired=required,
+        **kwargs,
+    )
+
+
 def subscription_required(**kwargs) -> Dict[str, Any]:
     """402 Paid subscription required."""
     return error_response(

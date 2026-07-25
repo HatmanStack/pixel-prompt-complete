@@ -112,6 +112,34 @@ def _unresolved(obj: dict[str, Any], event_type: str) -> None:
     )
 
 
+def _billing_period(obj: dict[str, Any]) -> tuple[int | None, int | None]:
+    """Extract (period_start, period_end) from a Stripe subscription.
+
+    Reads the flat fields first, then falls back to the subscription's items.
+    Recent Stripe API versions moved ``current_period_start``/``end`` off the
+    Subscription object and onto each SubscriptionItem, so which shape arrives
+    depends on the API version the account is pinned to. Reading only one
+    would fail soft — the field is skipped, quota quietly falls back to a
+    fixed window, and Stripe-anchored renewal silently never happens.
+    """
+    start = obj.get("current_period_start")
+    end = obj.get("current_period_end")
+    if not end:
+        # Normalise before indexing: a webhook payload is untrusted input, and
+        # `items` arriving as a list or string would otherwise raise on .get()
+        # and turn a malformed event into a 500 that Stripe then retries.
+        raw_items = obj.get("items")
+        items = raw_items.get("data") or [] if isinstance(raw_items, dict) else []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            start = start or item.get("current_period_start")
+            end = item.get("current_period_end")
+            if end:
+                break
+    return (int(start) if start else None, int(end) if end else None)
+
+
 def _on_checkout_completed(
     obj: dict[str, Any], repo: UserRepository, event_type: str
 ) -> None:
@@ -145,6 +173,23 @@ def _on_subscription_upsert(
     }
     if obj.get("customer"):
         fields["stripeCustomerId"] = obj["customer"]
+    # Credit allotments renew on Stripe's own period boundary, not a fixed
+    # 30-day clock: Stripe's monthly cycles run 28-31 days, so a fixed window
+    # would grant credits before the customer is billed in some months and
+    # leave them short after renewal in others.
+    period_start, period_end = _billing_period(obj)
+    if period_end:
+        fields["stripeCurrentPeriodEnd"] = period_end
+    if period_start:
+        fields["stripeCurrentPeriodStart"] = period_start
+    if not period_end:
+        # Not fatal — quota falls back to a fixed window — but it silently
+        # means paid users never get Stripe-anchored renewal, so say so.
+        StructuredLogger.warning(
+            "Subscription carried no billing period; credit renewal will "
+            "fall back to a fixed window",
+            stripe_subscription_id=obj.get("id"),
+        )
     repo.set_tier(user_id, tier, **fields)
     if status == "active":
         _send_lifecycle_email(repo, user_id, email_templates.subscription_activated_email)

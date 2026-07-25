@@ -13,7 +13,9 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
+import config
 from admin.auth import require_admin_request
+from ops.cost_meter import CostMeter
 from ops.model_counters import ModelCounterService
 from users.repository import UserRepository
 
@@ -34,6 +36,62 @@ def _response(status_code: int, body: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+_MODEL_NAMES = ("gemini", "nova", "openai", "firefly")
+_TIERS = ("free", "paid", "guest")
+
+
+def _spend_summary(repo: UserRepository, now: int, days: int) -> dict[str, Any]:
+    """Dollar spend for today and the trailing window.
+
+    The audit's framing was that neither cost landmine was visible from the
+    admin dashboard. Counts alone cannot show it: a generate costs ~4x a
+    refine and providers differ ~2x between cheapest and dearest, so a flat
+    call count can move the wrong way against actual spend. This reports
+    money.
+    """
+    meter = CostMeter(repo)
+    today = meter.get_daily_spend(now=now)
+
+    per_model = {m: int(today.get(f"{m}Micros", 0)) for m in _MODEL_NAMES}
+    per_tier = {t: int(today.get(f"{t}TierMicros", 0)) for t in _TIERS}
+    today_total = int(today.get("totalMicros", 0))
+
+    window_total = today_total
+    window: list[dict[str, Any]] = [
+        {"date": _date_str(now), "totalMicros": today_total}
+    ]
+    for i in range(1, days):
+        ts = now - (i * 86400)
+        day = meter.get_daily_spend(now=ts)
+        total = int(day.get("totalMicros", 0))
+        window_total += total
+        window.append({"date": _date_str(ts), "totalMicros": total})
+
+    ceiling = config.global_daily_spend_ceiling_usd_micros
+    return {
+        "todayMicros": today_total,
+        "todayUsd": round(today_total / 1_000_000, 4),
+        "byModelMicros": per_model,
+        "byTierMicros": per_tier,
+        # Free-tier spend is pure acquisition cost and the largest single
+        # exposure at 4-model access, so it gets its own line.
+        "freeTierMicros": per_tier.get("free", 0),
+        "enhanceMicros": int(today.get("enhanceMicros", 0)),
+        "windowTotalMicros": window_total,
+        "windowTotalUsd": round(window_total / 1_000_000, 4),
+        "windowDays": days,
+        "daily": window,
+        "dailyCeilingMicros": ceiling,
+        "dailyCeilingUsedPct": (
+            round(today_total / ceiling * 100, 1) if ceiling > 0 else None
+        ),
+    }
+
+
+def _date_str(ts: int) -> str:
+    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
+
+
 def handle_admin_metrics(
     event: dict[str, Any],
     repo: UserRepository,
@@ -46,7 +104,9 @@ def handle_admin_metrics(
         return err
 
     params = event.get("queryStringParameters") or {}
-    days = min(int(params.get("days", "7")), 30)
+    # Clamp low as well as high: days=0 reports a zero-length window, and a
+    # negative value makes windowDays nonsense while still returning today.
+    days = max(1, min(int(params.get("days", "7")), 30))
 
     now = int(time.time())
     today_counts = model_counter_service.get_model_counts(now)
@@ -74,6 +134,7 @@ def handle_admin_metrics(
         200,
         {
             "today": today_counts,
+            "spend": _spend_summary(repo, now, days),
             "history": history,
             "days": days,
         },
@@ -97,7 +158,7 @@ def handle_admin_revenue(
 
     # Read revenue history from daily snapshots
     params = event.get("queryStringParameters") or {}
-    days = min(int(params.get("days", "30")), 90)
+    days = max(1, min(int(params.get("days", "30")), 90))
 
     today = datetime.now(timezone.utc)
     history = []
@@ -113,10 +174,15 @@ def handle_admin_revenue(
                 }
             )
 
+    # Revenue without cost is half the picture: the point of the exercise is
+    # margin, and margin needs both sides.
+    spend = _spend_summary(repo, int(time.time()), min(days, 30))
+
     return _response(
         200,
         {
             "current": current,
+            "spend": spend,
             "history": history,
         },
     )

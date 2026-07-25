@@ -790,3 +790,87 @@ def test_event_ids_are_unique_by_default():
     b = json.loads(build_event("customer.updated", {}))
     assert a["id"] != b["id"]
     assert stripe_events is not None
+
+
+# ---- Billing period extraction (drives credit renewal) ----
+
+
+def test_billing_period_read_from_flat_subscription_fields(wired):
+    """Older Stripe API shape: period lives on the Subscription object."""
+    _seed_subscriber(wired, "u_perflat", "cus_perflat")
+    obj = subscription(subscription_id="sub_pf", customer="cus_perflat")
+    obj["current_period_start"] = 1679609767
+    obj["current_period_end"] = 1682288167
+
+    _send(wired, build_event("customer.subscription.updated", obj))
+
+    user = wired._user_repo.get_user("u_perflat")
+    assert int(user["stripeCurrentPeriodEnd"]) == 1682288167
+    assert int(user["stripeCurrentPeriodStart"]) == 1679609767
+
+
+def test_billing_period_falls_back_to_subscription_items(wired):
+    """Newer Stripe API shape moved the period onto SubscriptionItem.
+
+    Reading only the flat field would fail soft: the attribute is skipped,
+    quota quietly falls back to a fixed window, and Stripe-anchored credit
+    renewal silently never happens for anyone.
+    """
+    _seed_subscriber(wired, "u_peritem", "cus_peritem")
+    obj = subscription(subscription_id="sub_pi", customer="cus_peritem")
+    obj.pop("current_period_start", None)
+    obj.pop("current_period_end", None)
+    obj["items"]["data"][0]["current_period_start"] = 1700000000
+    obj["items"]["data"][0]["current_period_end"] = 1702592000
+
+    _send(wired, build_event("customer.subscription.updated", obj))
+
+    user = wired._user_repo.get_user("u_peritem")
+    assert int(user["stripeCurrentPeriodEnd"]) == 1702592000
+    assert int(user["stripeCurrentPeriodStart"]) == 1700000000
+
+
+def test_missing_billing_period_is_survivable(wired):
+    """No period anywhere must not fail the webhook — quota falls back."""
+    _seed_subscriber(wired, "u_pernone", "cus_pernone")
+    obj = subscription(subscription_id="sub_pn", customer="cus_pernone")
+    obj.pop("current_period_start", None)
+    obj.pop("current_period_end", None)
+
+    resp = _send(wired, build_event("customer.subscription.updated", obj))
+
+    assert resp["statusCode"] == 200
+    user = wired._user_repo.get_user("u_pernone")
+    assert user["tier"] == "paid"
+    assert "stripeCurrentPeriodEnd" not in user
+
+
+def test_billing_period_helper_handles_malformed_items():
+    """Malformed payloads must degrade, not 500.
+
+    A webhook body is untrusted input. An exception here becomes a 500, which
+    Stripe then retries — so a single malformed event would loop rather than
+    being ignored.
+    """
+    from billing.webhook import _billing_period
+
+    assert _billing_period({}) == (None, None)
+    assert _billing_period({"items": {}}) == (None, None)
+    assert _billing_period({"items": {"data": ["nonsense", None]}}) == (None, None)
+    # `items` arriving as the wrong type entirely.
+    assert _billing_period({"items": []}) == (None, None)
+    assert _billing_period({"items": [{"current_period_end": 1}]}) == (None, None)
+    assert _billing_period({"items": "nope"}) == (None, None)
+    assert _billing_period({"items": None}) == (None, None)
+
+
+def test_malformed_items_does_not_500_the_webhook(wired):
+    """End to end: a bad `items` shape must still return 200."""
+    _seed_subscriber(wired, "u_malformed", "cus_malformed")
+    obj = subscription(subscription_id="sub_mf", customer="cus_malformed")
+    obj.pop("current_period_end", None)
+    obj["items"] = "not-a-dict"
+
+    resp = _send(wired, build_event("customer.subscription.updated", obj))
+    assert resp["statusCode"] == 200
+    assert wired._user_repo.get_user("u_malformed")["tier"] == "paid"

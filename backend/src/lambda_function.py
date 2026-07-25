@@ -21,6 +21,7 @@ import boto3
 import config
 from api.enhance import PromptEnhancer
 from api.log import handle_log
+from api.pricing import handle_pricing
 from auth.claims import extract_admin_groups
 from auth.guest_token import get_guest_token_service
 from config import (
@@ -188,6 +189,53 @@ def _spend_ceiling_exceeded(endpoint_kind: str) -> tuple[bool, str]:
     return False, ""
 
 
+def _refund_credits(
+    tier_ctx: TierContext | None, endpoint_kind: str, correlation_id: str | None = None
+) -> None:
+    """Return credits for a request that produced nothing.
+
+    Credits are debited before dispatch, which is required: reserving after
+    the provider call would let concurrent requests overdraw. The consequence
+    is that a request charged up front but yielding no image has taken the
+    user's money for nothing — worst on /generate, the most expensive action
+    in the ledger.
+
+    Refunding only on TOTAL failure is deliberate. A partial result is still a
+    result: the product's premise is comparing models, and pro-rating would
+    need per-model pricing the ledger does not have.
+
+    Best-effort — a failed refund is logged, never raised, because the caller
+    is already on an error path and a second failure there would replace a
+    bad result with no result.
+
+    INVARIANT: every path that returns non-2xx after quota enforcement must
+    call this exactly once. The early-exit paths (no models enabled, every
+    model capped, bad session reference, missing source image) are the easiest
+    to miss precisely because they never reach a provider — no cost was
+    incurred, so charging for them is the least defensible case of all.
+    """
+    if not config.credits_enabled or tier_ctx is None:
+        return
+    if tier_ctx.tier not in ("free", "paid"):
+        return
+    amount = config.credit_cost(endpoint_kind)
+    if amount <= 0:
+        return
+    try:
+        _user_repo.grant_credits(tier_ctx.user_id, amount)
+        StructuredLogger.info(
+            f"Refunded {amount} centi-credits for a failed {endpoint_kind}",
+            correlation_id=correlation_id,
+            userId=tier_ctx.user_id,
+        )
+    except Exception as e:
+        StructuredLogger.error(
+            f"Failed to refund credits for {endpoint_kind}: {e}",
+            correlation_id=correlation_id,
+            userId=tier_ctx.user_id,
+        )
+
+
 def _anon_tier() -> TierContext:
     return TierContext(
         tier="paid",
@@ -212,8 +260,8 @@ def _parse_and_validate_request(
     Performs: body size check, JSON parsing, IP extraction, tier resolution,
     quota enforcement, prompt validation, and content filtering.
 
-    ``endpoint_kind`` is one of ``"generate"``, ``"refine"``, ``"enhance"``
-    or ``"none"``
+    ``endpoint_kind`` is one of ``"generate"``, ``"refine"``, ``"outpaint"``,
+    ``"enhance"`` or ``"none"``
     (skip quota enforcement).
 
     Returns:
@@ -233,7 +281,7 @@ def _parse_and_validate_request(
     # spend bound at all. Placed before tier resolution, CAPTCHA (an external
     # HTTP call) and content filtering because the check depends on none of
     # them, and a ceiling breach is precisely when rejecting cheaply matters.
-    if endpoint_kind in ("generate", "refine", "enhance"):
+    if endpoint_kind in ("generate", "refine", "outpaint", "enhance"):
         exceeded, scope = _spend_ceiling_exceeded(endpoint_kind)
         if exceeded:
             StructuredLogger.error(
@@ -286,9 +334,9 @@ def _parse_and_validate_request(
         return None, response(400, error_responses.inappropriate_content())
 
     # Quota enforcement (after validation so invalid requests don't consume quota)
-    if endpoint_kind in ("generate", "refine") and config.auth_enabled:
+    if endpoint_kind in ("generate", "refine", "outpaint") and config.auth_enabled:
         # Guests blocked from refine immediately (no auth).
-        if tier_ctx.tier == "guest" and endpoint_kind == "refine":
+        if tier_ctx.tier == "guest" and endpoint_kind in ("refine", "outpaint"):
             return None, response(402, error_responses.auth_required())
         result = enforce_quota(tier_ctx, endpoint_kind, _user_repo, int(time.time()))
         if not result.allowed:
@@ -296,6 +344,16 @@ def _parse_and_validate_request(
                 return None, response(403, error_responses.account_suspended())
             if result.reason == "guest_global":
                 return None, response(429, error_responses.guest_global_limit())
+            if result.reason == "insufficient_credits":
+                return None, response(
+                    402,
+                    error_responses.insufficient_credits(
+                        tier_ctx.tier,
+                        result.reset_at,
+                        remaining=result.usage.get("creditsRemaining", 0),
+                        required=config.credit_cost(endpoint_kind),
+                    ),
+                )
             return None, response(
                 429,
                 error_responses.tier_quota_exceeded(tier_ctx.tier, result.reset_at),
@@ -474,6 +532,8 @@ def lambda_handler(event: LambdaEvent, context: LambdaContext) -> ApiResponse:
             return handle_enhance(event, correlation_id)
         elif path == "/log" and method == "POST":
             return handle_log_endpoint(event)
+        elif path == "/pricing" and method == "GET":
+            return handle_pricing(event, correlation_id)
         elif path == "/gallery/list" and method == "GET":
             return handle_gallery_list(event, correlation_id)
         elif path.startswith("/gallery/") and method == "GET":
@@ -532,6 +592,7 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
         # Get enabled models
         enabled_models = get_enabled_models()
         if not enabled_models:
+            _refund_credits(validated.tier, "generate", correlation_id)
             return response(500, {"error": "No models enabled"})
 
         # Filter models by runtime disable and per-model cost ceiling
@@ -560,6 +621,7 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
             models_to_dispatch = list(enabled_models)
 
         if not models_to_dispatch:
+            _refund_credits(validated.tier, "generate", correlation_id)
             return response(429, error_responses.model_cost_ceiling())
 
         enabled_model_names = [m.name for m in models_to_dispatch]
@@ -682,6 +744,17 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
                         "status": "error",
                         "error": f"Model timed out after {future_timeout}s",
                     }
+
+        # Nothing generated at all: the user paid for a result they did not
+        # get. Skipped models do not count as attempts, so an all-skipped
+        # request refunds too.
+        produced = [
+            r
+            for name, r in results.items()
+            if name not in skipped_models and r.get("status") != "error"
+        ]
+        if not produced:
+            _refund_credits(validated.tier, "generate", correlation_id)
 
         # Meter what this request cost in dollars. Every dispatched model is
         # metered, including ones that errored or timed out: the provider
@@ -844,14 +917,19 @@ def _handle_refinement(
     """
     iteration_index = None
     session_id = model_name = None
+    # Same flag that selects the price, so a refund can never differ from the
+    # charge.
+    refund_kind = "outpaint" if (add_iteration_kwargs or {}).get("is_outpaint") else "refine"
     try:
         refs, err = _validate_refinement_request(validated)
         if err:
+            _refund_credits(validated.tier, refund_kind, correlation_id)
             return err
         session_id, model_name, model_config = refs
 
         loaded, err = _load_source_image(session_id, model_name)
         if err:
+            _refund_credits(validated.tier, refund_kind, correlation_id)
             return err
         source_image, iteration_count = loaded
 
@@ -878,6 +956,7 @@ def _handle_refinement(
         if config.auth_enabled and not _model_counter_service.consume_model_slot(
             model_name, int(time.time())
         ):
+            _refund_credits(validated.tier, refund_kind, correlation_id)
             return response(429, error_responses.model_cost_ceiling())
 
         config_dict = get_model_config_dict(model_config)
@@ -943,6 +1022,8 @@ def _handle_refinement(
         else:
             error_msg = sanitize_error_message(result.get("error", "Unknown error"))
             _handle_failed_result(session_id, model_name, iteration_index, error_msg)
+            # One model, and it failed: the whole request produced nothing.
+            _refund_credits(validated.tier, refund_kind, correlation_id)
             return response(
                 500,
                 {
@@ -968,6 +1049,7 @@ def _handle_refinement(
             correlation_id=correlation_id,
             traceback=traceback.format_exc(),
         )
+        _refund_credits(validated.tier, refund_kind, correlation_id)
         return response(500, error_responses.internal_server_error())
 
 
@@ -996,7 +1078,10 @@ def handle_outpaint(event: LambdaEvent, correlation_id: str | None = None) -> Ap
         event,
         require_prompt=False,
         default_prompt="continue the scene naturally",
-        endpoint_kind="refine",
+        # Its own kind, not "refine": CREDITS_PER_OUTPAINT is independently
+        # configurable and advertised on GET /pricing, so charging the refine
+        # rate here would let the advertised price drift from the charged one.
+        endpoint_kind="outpaint",
     )
     if err:
         return err

@@ -403,6 +403,144 @@ class UserRepository:
             create_if_missing=False,
         )
 
+    # ---------- credit ledger ----------
+
+    def debit_credits(
+        self,
+        user_id: str,
+        amount: int,
+        allotment: int,
+        period_end: int,
+        now: int,
+    ) -> tuple[bool, dict]:
+        """Debit ``amount``, granting a fresh allotment first if the period lapsed.
+
+        Returns ``(True, item)`` on success, ``(False, item)`` when the balance
+        is insufficient.
+
+        Both outcomes are produced by a SINGLE conditional UpdateItem, never by
+        a reset followed by a debit. Two atomic writes do not compose into an
+        atomic unit: with a separate reset, a grant landing between another
+        request's check and its write can overwrite a debit (handing out more
+        than one allotment) or restore a balance that was already spent
+        (driving it negative). Both were observed under concurrent load.
+
+        * Renewal path — grants and debits together, conditioned on the period
+          having lapsed. Exactly one caller can win this, because the same
+          write moves ``creditPeriodEnd`` into the future.
+        * Steady-state path — debits, conditioned on the period being current
+          AND the balance sufficing.
+        """
+        if amount <= 0:
+            self.get_or_create_user(user_id, now=now)
+            return True, self.get_user(user_id) or {}
+        if amount > allotment:
+            # Could never be afforded even with a full allotment; denying is
+            # correct and avoids a renewal write that would land negative.
+            return False, self.get_or_create_user(user_id, now=now)
+
+        self.get_or_create_user(user_id, now=now)
+
+        for _ in range(_MAX_RETRIES):
+            # Renewal: grant and charge in one write.
+            try:
+                resp = self._table.update_item(
+                    Key={"userId": user_id},
+                    UpdateExpression=(
+                        "SET creditsRemaining = :granted, "
+                        "creditPeriodEnd = :period_end, updatedAt = :now"
+                    ),
+                    ConditionExpression=(
+                        "attribute_exists(userId) AND "
+                        "(attribute_not_exists(creditPeriodEnd) OR creditPeriodEnd <= :now)"
+                    ),
+                    ExpressionAttributeValues={
+                        ":granted": allotment - amount,
+                        ":period_end": period_end,
+                        ":now": now,
+                    },
+                    ReturnValues="ALL_NEW",
+                )
+                return True, resp.get("Attributes", {})
+            except ClientError as e:
+                if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
+                    raise
+
+            # Steady state: period is current, so charge against the balance.
+            try:
+                resp = self._table.update_item(
+                    Key={"userId": user_id},
+                    UpdateExpression=(
+                        "SET creditsRemaining = creditsRemaining - :amt, updatedAt = :now"
+                    ),
+                    ConditionExpression=(
+                        "attribute_exists(creditsRemaining) AND "
+                        "creditsRemaining >= :amt AND creditPeriodEnd > :now"
+                    ),
+                    ExpressionAttributeValues={":amt": amount, ":now": now},
+                    ReturnValues="ALL_NEW",
+                )
+                return True, resp.get("Attributes", {})
+            except ClientError as e:
+                if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
+                    raise
+                item = self.get_user(user_id) or {}
+                period = int(item.get("creditPeriodEnd", 0) or 0)
+                balance = int(item.get("creditsRemaining", 0) or 0)
+                if period > now and balance < amount:
+                    return False, item
+                # The period lapsed between the two attempts; go round again.
+                continue
+        return False, self.get_user(user_id) or {}
+
+    def get_credit_balance(self, user_id: str) -> dict:
+        """Read-only view of a user's ledger state."""
+        item = self.get_user(user_id) or {}
+        return {
+            "creditsRemaining": int(item.get("creditsRemaining", 0) or 0),
+            "creditPeriodEnd": int(item.get("creditPeriodEnd", 0) or 0),
+        }
+
+    def grant_credits(
+        self,
+        user_id: str,
+        amount: int,
+        now: int | None = None,
+        period_end: int | None = None,
+    ) -> None:
+        """Add credits outside the normal period grant (top-ups, goodwill).
+
+        **Top-ups are period-scoped.** The renewal path SETs the balance to a
+        fresh allotment rather than adding to it, so anything granted here is
+        replaced when the period rolls over — consistent with allotments not
+        rolling over. A top-up meant to outlive the period has to be granted
+        again, or the renewal semantics changed deliberately.
+
+        ``period_end`` opens a period for a user who has none. Without it, a
+        grant to such a user is wiped by their very next request, because that
+        request takes the renewal path and overwrites the balance. Callers
+        topping up a dormant account should pass it.
+        """
+        if amount <= 0:
+            return
+        if now is None:
+            now = int(time.time())
+        self.add_counters(user_id, {"creditsRemaining": amount}, now=now)
+        if period_end is None:
+            return
+        try:
+            self._table.update_item(
+                Key={"userId": user_id},
+                UpdateExpression="SET creditPeriodEnd = :period_end, updatedAt = :now",
+                ConditionExpression=(
+                    "attribute_not_exists(creditPeriodEnd) OR creditPeriodEnd <= :now"
+                ),
+                ExpressionAttributeValues={":period_end": period_end, ":now": now},
+            )
+        except ClientError as e:
+            if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
+                raise
+
     # ---------- webhook idempotency ----------
 
     def claim_webhook_event(self, event_id: str, now: int | None = None) -> bool:
