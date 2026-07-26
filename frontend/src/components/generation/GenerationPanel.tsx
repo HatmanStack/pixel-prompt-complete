@@ -210,8 +210,20 @@ export const GenerationPanel: FC = () => {
       // Call API to start generation
       const response = await generateSession(prompt, captchaToken ?? undefined);
 
-      if (response.sessionId) {
-        // Initialize session structure for polling
+      if (!response.sessionId) {
+        throw new Error('No session ID received');
+      }
+
+      if (response.session) {
+        // /generate awaits every model before responding, so this is the
+        // finished session. Using it directly replaces up to 150 polls of
+        // /status (2s apart for 5 minutes) that only ever re-fetched data
+        // this response already contained.
+        setCurrentSession(response.session);
+        setIsGenerating(false);
+      } else {
+        // Server could not attach the session. The images exist regardless,
+        // so fall back to the placeholder-plus-polling path.
         const initialSession = {
           sessionId: response.sessionId,
           status: 'pending' as const,
@@ -227,8 +239,6 @@ export const GenerationPanel: FC = () => {
           ),
         };
         setCurrentSession(initialSession);
-      } else {
-        throw new Error('No session ID received');
       }
     } catch (err) {
       console.error('Generation error:', err);
