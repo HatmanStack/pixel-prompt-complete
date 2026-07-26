@@ -534,7 +534,7 @@ def _refinement_early_exit(validate_err=None, load_err=None, slot_granted=True):
             validate_err,
         )
         mock_load.return_value = (
-            (None, None) if load_err else ("img", 1),
+            (None, None, None) if load_err else ("img", 1, "public"),
             load_err,
         )
         mock_sm.add_iteration.return_value = 1

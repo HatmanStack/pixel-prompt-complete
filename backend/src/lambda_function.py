@@ -729,8 +729,12 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
                 adapted_prompts[_model_name] = prompt
 
         # Create session
-        visibility = _visibility_for_tier(validated.tier.tier)
-        owner_id = validated.tier.user_id if validated.tier.is_authenticated else None
+        visibility = _visibility_for_tier(validated.tier.tier if validated.tier else None)
+        owner_id = (
+            validated.tier.user_id
+            if validated.tier and validated.tier.is_authenticated
+            else None
+        )
         session_id = session_manager.create_session(
             prompt,
             enabled_model_names,
@@ -1404,7 +1408,9 @@ def handle_status(event: LambdaEvent, correlation_id: str | None = None) -> ApiR
 
         # A private session is readable only by its owner. 404 rather than 403:
         # a 403 confirms the session exists, which is itself a disclosure.
-        if _session_is_private(session) and not _caller_owns_session(session, resolve_tier(event)):
+        if _session_is_private(session) and not _caller_owns_session(
+            session, resolve_tier(event, _user_repo, _guest_service)
+        ):
             return response(404, {"error": f"Session {session_id} not found"})
 
         return response(200, _session_with_urls(session))
@@ -1589,7 +1595,9 @@ def handle_download(event: LambdaEvent, correlation_id: str | None = None) -> Ap
 
         # Same ownership rule as /status. A download URL is a grant of access,
         # so this endpoint needs the check just as much as the viewing one.
-        if _session_is_private(session) and not _caller_owns_session(session, resolve_tier(event)):
+        if _session_is_private(session) and not _caller_owns_session(
+            session, resolve_tier(event, _user_repo, _guest_service)
+        ):
             return response(404, {"error": f"Session {session_id} not found"})
 
         # Find the iteration

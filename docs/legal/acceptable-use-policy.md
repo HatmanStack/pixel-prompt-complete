@@ -8,9 +8,11 @@
 This policy is part of the [Terms of Service](terms-of-service.md). It applies
 to prompts you submit, images you upload, and images you generate.
 
-Everything you generate is **published publicly**. That raises the stakes on
-this policy: a violating prompt is not private, it appears in a public feed we
-serve.
+On free, guest, and signed-out use, everything you generate is **published
+publicly**. That raises the stakes on this policy: a violating prompt is not
+private, it appears in a public feed we serve. Generations on a paid plan are
+private, but this policy applies to them in full — privacy is not permission,
+and we act on private content that violates the rules below.
 
 ## Not permitted
 
@@ -78,8 +80,10 @@ Consequences scale with severity: a refused generation, then suspension, then
 permanent termination. **Child sexual abuse material results in immediate
 permanent termination and a report to NCMEC**, without warning.
 
-We may remove any published content for any reason, including content that
-violates nothing but that we do not want to host.
+We may remove any content for any reason, including content that violates
+nothing but that we do not want to host. For public content that means removing
+it from the gallery and feed; for private content it means removing it from
+storage.
 
 ## Reporting
 

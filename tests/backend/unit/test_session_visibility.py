@@ -63,8 +63,9 @@ def test_private_images_land_outside_the_cdn_prefix(mock_s3):
 
     s3, bucket = mock_s3
     st = ImageStorage(s3, bucket, "cdn.example.com")
+    session_id = str(uuid.uuid4())
     key = st.upload_image(
-        "aGk=", "2026-07-25-12-00-00", "gemini", 0, "sess-1", "private"
+        "aGk=", "2026-07-25-12-00-00", "gemini", 0, session_id, "private"
     )
 
     assert key.startswith("private/")
@@ -77,9 +78,13 @@ def test_public_images_stay_in_the_gallery_prefix(mock_s3):
 
     s3, bucket = mock_s3
     st = ImageStorage(s3, bucket, "cdn.example.com")
+    session_id = str(uuid.uuid4())
     key = st.upload_image(
-        "aGk=", "2026-07-25-12-00-00", "gemini", 0, "sess-1", "public"
+        "aGk=", "2026-07-25-12-00-00", "gemini", 0, session_id, "public"
     )
+
+    # The folder must actually be listable, not merely prefixed correctly.
+    assert st.list_galleries() == [f"2026-07-25-12-00-00-{session_id[:8]}"]
 
     assert key.startswith("sessions/")
     assert not st.is_private_key(key)
@@ -391,3 +396,40 @@ def test_a_public_prompt_still_reaches_the_feed():
     repo.record_prompt(user_id=None, prompt="a cat", session_id="s1")
 
     assert [w["promptOwner"] for w in written] == ["GLOBAL#RECENT"]
+
+
+# --- the ownership check must actually run ----------------------------------
+
+
+def test_status_ownership_check_calls_resolve_tier_correctly(monkeypatch):
+    """Regression: the guard called resolve_tier(event) with one of three args.
+
+    Every test above patches lambda_function.resolve_tier with a MagicMock,
+    which accepts any signature, so the mock absorbed a TypeError that would
+    have made every private /status read a 500 -- including for the owner. This
+    test runs the real resolve_tier. With auth disabled it short-circuits to
+    anon_tier() without touching DynamoDB, which is enough to exercise the call
+    shape.
+    """
+    import config
+    import lambda_function as lf
+
+    monkeypatch.setattr(config, "auth_enabled", False)
+    with patch.object(lf.session_manager, "get_session", return_value=dict(_PRIVATE_SESSION)):
+        resp = lf.handle_status(_event("/status/s1"), "c1")
+
+    # An anonymous caller does not own it, so 404. The point is that it is not
+    # a 500 from a TypeError.
+    assert resp["statusCode"] == 404, resp
+
+
+def test_download_ownership_check_calls_resolve_tier_correctly(monkeypatch):
+    """Same call shape, same bug, second endpoint."""
+    import config
+    import lambda_function as lf
+
+    monkeypatch.setattr(config, "auth_enabled", False)
+    with patch.object(lf.session_manager, "get_session", return_value=dict(_PRIVATE_SESSION)):
+        resp = lf.handle_download(_event("/download/s1/gemini/0"), "c1")
+
+    assert resp["statusCode"] == 404, resp

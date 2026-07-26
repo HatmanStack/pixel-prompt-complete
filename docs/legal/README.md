@@ -14,17 +14,20 @@ Service charges money.
 
 ## What the research found
 
-The business model is sound. All four providers assign output rights to the
-customer and permit commercial use, so charging for generated images is not
-blocked by anyone's terms.
+The business model is sound. All four providers permit commercial use of
+output, so charging for generated images is not blocked by anyone's terms. The
+mechanism differs (assignment, ownership, licence, or simply no ownership
+claim) and the drafts should not flatten that into "they assign it to you".
 
 Three conditions attach, detailed in
 [provider-obligations.md](provider-obligations.md):
 
-1. **Gemini's unpaid tier is a data-sharing tier.** Google uses prompts and
-   generated images to improve its products and states that human reviewers may
-   read them. Paid tier does not. Not visible from the code — it depends on the
-   key's billing status.
+1. **The paid Gemini tier is mandatory.** Google's terms permit only Paid
+   Services when making an API client available to users in the EEA,
+   Switzerland, or the UK, and the app is not geo-restricted. The unpaid tier
+   would also make every prompt and image Google training data readable by a
+   human reviewer. Not visible from the code — it depends on the key's billing
+   status.
 2. **Google requires 18+, and requires that the Service not be "likely to be
    accessed by" under-18s.** Stricter than an affirmation, and currently
    unaddressed: the guest tier needs no account and asks nothing.

@@ -12,7 +12,8 @@
 - Your prompts and images are sent to Google, Amazon, OpenAI, and Adobe.
 - {{GEMINI_TIER_STATEMENT}} — see "Third-party AI providers" below.
 - We do not sell your personal information.
-- Everything is deleted after 30 days.
+- Generated images, prompts, and logs are deleted after 30 days. Account and
+  billing records are kept while you have an account.
 
 ## What we collect
 
@@ -55,10 +56,12 @@ is published. Please do not.
 
 ### Paid generations are private
 
-Images generated on a paid plan are stored under a separate location that is
-not reachable from the public internet at all, and are served to you through
-short-lived signed links issued only after we verify the session belongs to
-you. Their prompts are not written to the public feed.
+Images generated on a paid plan are stored with no public address: they are not
+served by our public content network and cannot be read anonymously. They are
+served to you through short-lived signed links issued only after we verify the
+session belongs to you. Anyone holding such a link can open it until it
+expires, so treat a signed link as you would the image itself. Their prompts
+are not written to the public feed.
 
 Visibility is fixed when the session is created. A session generated on the
 free tier stays public even if you subscribe afterwards.
@@ -89,6 +92,10 @@ use. On the **unpaid** tier, Google states that it uses submitted content and
 generated responses to improve Google products, and that human reviewers may
 read them. On the **paid** tier, Google states that it does not use prompts or
 responses to improve its products.
+
+Google's terms also permit only Paid Services where an API client is made
+available to users in the European Economic Area, Switzerland, or the United
+Kingdom. If you are in one of those regions, the paid tier applies to you.
 
 {{GEMINI_TIER_STATEMENT}}
 
