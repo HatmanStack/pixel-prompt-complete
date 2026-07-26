@@ -20,13 +20,15 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
-import { buildParameterOverrides } from '../../../../backend/scripts/deploy.js';
+import { buildParameterOverrides, validateConfig } from '../../../../backend/scripts/deploy.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TEMPLATE = path.join(__dirname, '..', '..', '..', '..', 'backend', 'template.yaml');
 
 function config(overrides = {}) {
   return {
+    region: 'us-west-2',
+    stackName: 'pixel-prompt-v2',
     authEnabled: 'false',
     alarmEmail: '',
     spend: { monthlyCeilingUsdMicros: '', dailyCeilingUsdMicros: '' },
@@ -152,5 +154,72 @@ describe('buildParameterOverrides', () => {
 
     const unknown = keysOf(buildParameterOverrides(c)).filter((k) => !declared.has(k));
     expect(unknown).toEqual([]);
+  });
+});
+
+describe('validateConfig', () => {
+  function withCreds(overrides = {}) {
+    const c = config(overrides);
+    c.promptModel.apiKey = 'k';
+    c.models.gemini.apiKey = 'k';
+    c.models.openai.apiKey = 'k';
+    c.models.firefly.clientId = 'i';
+    c.models.firefly.clientSecret = 's';
+    return c;
+  }
+
+  it('accepts a fully configured deployment', () => {
+    expect(validateConfig(withCreds()).valid).toBe(true);
+  });
+
+  it('does not demand an API key for Nova', () => {
+    // Nova authenticates with the Lambda execution role. A blanket apiKey
+    // check rejected every default deployment with a spurious
+    // NOVA_API_KEY error, including an unedited .env.deploy.example.
+    const result = validateConfig(withCreds());
+    expect(result.errors.join(' ')).not.toMatch(/NOVA_API_KEY/);
+  });
+
+  it('names the real Firefly variables rather than FIREFLY_API_KEY', () => {
+    const c = withCreds();
+    c.models.firefly.clientSecret = '';
+    const result = validateConfig(c);
+    expect(result.valid).toBe(false);
+    expect(result.errors.join(' ')).toMatch(/FIREFLY_CLIENT_SECRET/);
+    expect(result.errors.join(' ')).not.toMatch(/FIREFLY_API_KEY/);
+  });
+
+  it('still requires keys for providers that use them', () => {
+    const c = withCreds();
+    c.models.gemini.apiKey = '';
+    expect(validateConfig(c).errors.join(' ')).toMatch(/GEMINI_API_KEY/);
+  });
+
+  it('skips credential checks for disabled models', () => {
+    const c = withCreds();
+    c.models.gemini.enabled = false;
+    c.models.gemini.apiKey = '';
+    expect(validateConfig(c).valid).toBe(true);
+  });
+
+  it('rejects a deployment with no models enabled', () => {
+    const c = withCreds();
+    for (const m of Object.values(c.models)) m.enabled = false;
+    expect(validateConfig(c).errors.join(' ')).toMatch(/At least one/);
+  });
+
+  it('requires AUTH_ENABLED to be stated', () => {
+    expect(validateConfig(withCreds({ authEnabled: undefined })).valid).toBe(false);
+    expect(validateConfig(withCreds({ authEnabled: 'yes' })).valid).toBe(false);
+    expect(validateConfig(withCreds({ authEnabled: 'true' })).valid).toBe(true);
+  });
+
+  it('accepts a Nova-only deployment with no credentials at all', () => {
+    // The cheapest possible working config: Bedrock via the execution role.
+    const c = config();
+    c.models.gemini.enabled = false;
+    c.models.openai.enabled = false;
+    c.models.firefly.enabled = false;
+    expect(validateConfig(c).valid).toBe(true);
   });
 });

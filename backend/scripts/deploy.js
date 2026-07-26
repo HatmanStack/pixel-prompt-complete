@@ -127,12 +127,29 @@ export function validateConfig(config) {
     errors.push('At least one image generation model must be enabled');
   }
 
-  // Check API keys for enabled models
+  // Credentials differ per provider, so a blanket apiKey check is wrong:
+  // Nova authenticates with the Lambda execution role and has no key at all,
+  // and Firefly uses OAuth2 client credentials rather than a single key.
+  // Checking `model.apiKey` for every model rejected a fresh, unedited
+  // .env.deploy.example with a spurious NOVA_API_KEY error.
   enabledModels.forEach(([name, model]) => {
+    if (name === 'nova') {
+      return; // Lambda execution role, no credentials to supply
+    }
+    if (name === 'firefly') {
+      if (!model.clientId || !model.clientSecret) {
+        errors.push('FIREFLY_CLIENT_ID and FIREFLY_CLIENT_SECRET are required when FIREFLY_ENABLED=true');
+      }
+      return;
+    }
     if (!model.apiKey) {
       errors.push(`${name.toUpperCase()}_API_KEY is required when ${name.toUpperCase()}_ENABLED=true`);
     }
   });
+
+  if (config.authEnabled !== 'true' && config.authEnabled !== 'false') {
+    errors.push('AUTH_ENABLED must be set explicitly to "true" or "false"');
+  }
 
   return {
     valid: errors.length === 0,
