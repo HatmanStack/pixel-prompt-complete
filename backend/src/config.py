@@ -489,6 +489,13 @@ if auth_enabled and cors_allowed_origin == "*":
 
 # Operational Timeouts (seconds) - configurable via environment
 api_client_timeout = _safe_float("API_CLIENT_TIMEOUT", 60.0)
+
+# Every provider must bound its own call below this, because the dispatch
+# timeout in handle_generate cannot cancel a future that has already started:
+# the call is blocking I/O inside a worker thread. If a provider outlives the
+# budget the request is abandoned, the user is told the model failed, and the
+# provider generates and bills for the image anyway.
+generate_dispatch_budget_seconds = api_client_timeout + 10
 image_download_timeout = _safe_int("IMAGE_DOWNLOAD_TIMEOUT", 30)
 enhance_timeout = _safe_float("ENHANCE_TIMEOUT", 30.0)
 generate_thread_workers = _safe_int("GENERATE_THREAD_WORKERS", 4)

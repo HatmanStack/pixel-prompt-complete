@@ -213,9 +213,7 @@ def _spend_ceiling_exceeded(endpoint_kind: str) -> tuple[bool, str]:
     return False, ""
 
 
-def _enforce_quota_safe(
-    tier_ctx: TierContext, endpoint_kind: str, now: int
-) -> "QuotaResult":
+def _enforce_quota_safe(tier_ctx: TierContext, endpoint_kind: str, now: int) -> "QuotaResult":
     """Enforce quota, failing OPEN if the quota store is unreachable.
 
     Applied to every tier, not just anon. The anon path had its own
@@ -395,9 +393,7 @@ def _parse_and_validate_request(
             # A user hitting a wall and an attacker probing one used to look
             # identical from outside, and a limit set wrongly low produced
             # silent churn instead of a signal.
-            emit_quota_rejection(
-                tier_ctx.tier, endpoint_kind, result.reason or "unknown"
-            )
+            emit_quota_rejection(tier_ctx.tier, endpoint_kind, result.reason or "unknown")
             if result.reason == "suspended":
                 return None, response(403, error_responses.account_suspended())
             if result.reason == "guest_ip":
@@ -718,8 +714,7 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
         for _model_name, _adapted in list(adapted_prompts.items()):
             if _adapted != prompt and content_filter.check_prompt(_adapted):
                 StructuredLogger.warning(
-                    "Adapted prompt failed the content filter; "
-                    "falling back to the original",
+                    "Adapted prompt failed the content filter; falling back to the original",
                     correlation_id=correlation_id,
                     model=_model_name,
                 )
@@ -811,7 +806,7 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
         futures = {
             _executor.submit(generate_for_model, model): model for model in models_to_dispatch
         }
-        future_timeout = config.api_client_timeout + 10
+        future_timeout = config.generate_dispatch_budget_seconds
         try:
             for future in as_completed(futures, timeout=future_timeout):
                 try:
@@ -826,6 +821,30 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
                     )
                     results[model_name] = {"status": "error", "error": sanitized}
         except TimeoutError:
+            # Cancel what can still be cancelled. A future that has already
+            # started cannot be stopped -- the provider call is blocking I/O
+            # inside a worker thread -- so this only helps when there are more
+            # models than workers. The real defence is that every provider
+            # bounds its own call below this budget, so nothing should still
+            # be running by the time we get here. Nova was unbounded until
+            # this change, which is exactly how work outlived the budget,
+            # completed, and was billed after the user was told it failed.
+            # Counted from the futures themselves, not from len(results):
+            # `results` already holds the skipped models, which were never
+            # dispatched, so subtracting it undercounts by that many and can
+            # go negative -- silencing the log in exactly the case it exists
+            # for (models capped, one real call still burning money).
+            cancelled = sum(1 for f in futures if f.cancel())
+            still_running = sum(1 for f in futures if not f.cancelled() and not f.done())
+            if still_running > 0:
+                StructuredLogger.error(
+                    "Dispatch budget expired with provider calls still running; "
+                    "they will complete and be billed",
+                    correlation_id=correlation_id,
+                    stillRunning=still_running,
+                    cancelled=cancelled,
+                )
+
             # Mark any models that didn't complete in time
             for future, model_cfg in futures.items():
                 model_name = model_cfg.name
@@ -1091,9 +1110,7 @@ def _handle_refinement(
         # Previously only /generate consumed slots, so refinement traffic could
         # run a model far past its ceiling.
         try:
-            slot_ok = _model_counter_service.consume_model_slot(
-                model_name, int(time.time())
-            )
+            slot_ok = _model_counter_service.consume_model_slot(model_name, int(time.time()))
         except Exception as e:
             StructuredLogger.error(
                 f"Per-model cap check failed, allowing refinement: {e}",
@@ -1138,6 +1155,19 @@ def _handle_refinement(
         )
 
         if result["status"] == "success":
+            # Refining is the first moment a user picks between four models,
+            # and it costs them something, which makes it a stronger signal
+            # than a click. Best-effort: product data must never fail a
+            # refinement the user has already paid for.
+            try:
+                if validated.tier:
+                    _user_repo.record_model_choice(validated.tier.user_id, model_name)
+            except Exception as e:
+                StructuredLogger.warning(
+                    f"Could not record model choice: {e}",
+                    correlation_id=correlation_id,
+                )
+
             store_prompt = result_prompt_fn(prompt) if result_prompt_fn else prompt
             ctx_prompt = context_prompt_fn(prompt) if context_prompt_fn else None
             info = _handle_successful_result(
@@ -1268,9 +1298,7 @@ def _session_with_urls(session: dict[str, Any]) -> dict[str, Any]:
     for _model_name, model_data in session.get("models", {}).items():
         for iteration in model_data.get("iterations", []):
             if iteration.get("status") == "completed" and iteration.get("imageKey"):
-                iteration["imageUrl"] = image_storage.get_cloudfront_url(
-                    iteration["imageKey"]
-                )
+                iteration["imageUrl"] = image_storage.get_cloudfront_url(iteration["imageKey"])
     return session
 
 
@@ -1687,6 +1715,12 @@ def handle_me(event: LambdaEvent, correlation_id: str | None = None) -> ApiRespo
         "portalAvailable": bool(item.get("stripeCustomerId")),
     }
 
+    # Which models this user actually refines, highest first. Generating
+    # produces four images they did not choose between; refining one is the
+    # preference, and it is the only per-user signal of its kind the product
+    # collects.
+    model_choices = _user_repo.get_model_choices(ctx.user_id)
+
     return response(
         200,
         {
@@ -1696,6 +1730,8 @@ def handle_me(event: LambdaEvent, correlation_id: str | None = None) -> ApiRespo
             "quota": quota,
             "billing": billing,
             "groups": extract_admin_groups(event),
+            "modelChoices": model_choices,
+            "preferredModel": next(iter(model_choices), None),
         },
     )
 
