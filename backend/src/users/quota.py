@@ -8,6 +8,7 @@ from typing import Literal
 import config
 from users.repository import UserRepository
 from users.tier import TierContext
+from utils.logger import StructuredLogger
 
 
 @dataclass(frozen=True)
@@ -32,8 +33,11 @@ def enforce_quota(
     repo: UserRepository,
     now: int,
 ) -> QuotaResult:
-    if not config.auth_enabled:
-        return QuotaResult(allowed=True, reason=None, reset_at=0, usage={})
+    # NOTE: deliberately not gated on config.auth_enabled. Auth answers "who
+    # is this"; quota answers "how much may they have". Conflating them is why
+    # an open deployment was also an unlimited one.
+    if ctx.tier == "anon":
+        return _enforce_anon(ctx, endpoint, repo, now)
 
     # Suspension check: non-guest users with isSuspended=true are blocked.
     if ctx.tier != "guest" and repo.is_suspended(ctx.user_id):
@@ -239,5 +243,51 @@ def _enforce_credits(
         allowed=ok,
         reason=None if ok else "insufficient_credits",
         reset_at=reset_at,
+        usage=usage,
+    )
+
+
+def _enforce_anon(
+    ctx: TierContext,
+    endpoint: str,
+    repo: UserRepository,
+    now: int,
+) -> QuotaResult:
+    """Meter an unauthenticated caller against their source IP.
+
+    With auth off there is no account to bind to, so the IP is the only
+    identifier available. Same caveat as the guest IP bucket: an IP is not a
+    person, so these limits are abuse ceilings rather than fair-use quotas.
+    """
+    if not ctx.ip_hash:
+        # No source IP to meter against. Allowing is the lesser evil: the
+        # global spend ceiling still bounds the blast radius, whereas denying
+        # would break every caller behind a proxy that strips the address.
+        return QuotaResult(allowed=True, reason=None, reset_at=0, usage={})
+
+    is_generate = endpoint == "generate"
+    limit = config.anon_generate_limit if is_generate else config.anon_refine_limit
+    counter = "generateCount" if is_generate else "refineCount"
+    key = f"anon#{ctx.ip_hash}"
+
+    try:
+        ok, item = repo.increment_anon(
+            key, counter, limit, config.anon_window_seconds, now
+        )
+    except Exception as e:
+        # Fail OPEN on a store error, matching the spend ceiling. An
+        # unreachable counter is not evidence the caller is over limit, and
+        # 500ing every request because the quota store hiccuped is a
+        # self-inflicted outage. The global spend ceiling still bounds the
+        # blast radius, and this logs at ERROR so a persistent failure — which
+        # would mean silently unmetered traffic — is alarmable rather than
+        # invisible.
+        StructuredLogger.error(f"Anon quota check failed, allowing request: {e}")
+        return QuotaResult(allowed=True, reason=None, reset_at=0, usage={})
+    usage, reset = _usage(item, counter, limit, "windowStart", config.anon_window_seconds)
+    return QuotaResult(
+        allowed=ok,
+        reason=None if ok else f"anon_{endpoint}",
+        reset_at=reset,
         usage=usage,
     )

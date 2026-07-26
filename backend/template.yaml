@@ -260,6 +260,23 @@ Parameters:
     Default: 3600
     Description: Guest rolling window length in seconds
 
+  AnonGenerateLimit:
+    Type: Number
+    Default: 5
+    Description: >-
+      /generate calls per source IP per window when AUTH_ENABLED=false.
+      AUTH_ENABLED gates identity only; an open deployment is still metered.
+
+  AnonRefineLimit:
+    Type: Number
+    Default: 10
+    Description: /iterate + /outpaint calls per source IP when AUTH_ENABLED=false
+
+  AnonWindowSeconds:
+    Type: Number
+    Default: 3600
+    Description: Rolling window for anonymous limits, in seconds
+
   GuestIpGenerateLimit:
     Type: Number
     Default: 3
@@ -546,6 +563,9 @@ Resources:
           # Guest limits
           GUEST_GENERATE_LIMIT: !Ref GuestGenerateLimit
           GUEST_WINDOW_SECONDS: !Ref GuestWindowSeconds
+          ANON_GENERATE_LIMIT: !Ref AnonGenerateLimit
+          ANON_REFINE_LIMIT: !Ref AnonRefineLimit
+          ANON_WINDOW_SECONDS: !Ref AnonWindowSeconds
           GUEST_IP_GENERATE_LIMIT: !Ref GuestIpGenerateLimit
           GUEST_IP_WINDOW_SECONDS: !Ref GuestIpWindowSeconds
           GUEST_GLOBAL_LIMIT: !Ref GuestGlobalLimit

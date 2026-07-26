@@ -109,6 +109,17 @@ guest_ip_window_seconds = _safe_int("GUEST_IP_WINDOW_SECONDS", 3600)
 guest_global_limit = _safe_int("GUEST_GLOBAL_LIMIT", 5)
 guest_global_window_seconds = _safe_int("GUEST_GLOBAL_WINDOW_SECONDS", 3600)
 
+# Anonymous tier: what an unauthenticated caller gets when AUTH_ENABLED=false.
+#
+# "I have no Cognito" and "I want no spend limits" are unrelated statements,
+# but one flag used to assert both: auth off meant every caller resolved to
+# tier="paid" and quota short-circuited to allow-everything. A deployment can
+# be open without being unmetered. Metered against the source IP, since with
+# auth off there is no account to bind to.
+anon_generate_limit = _safe_int("ANON_GENERATE_LIMIT", 5)
+anon_refine_limit = _safe_int("ANON_REFINE_LIMIT", 10)
+anon_window_seconds = _safe_int("ANON_WINDOW_SECONDS", 3600)
+
 # Free tier
 free_generate_limit = _safe_int("FREE_GENERATE_LIMIT", 1)
 free_refine_limit = _safe_int("FREE_REFINE_LIMIT", 2)

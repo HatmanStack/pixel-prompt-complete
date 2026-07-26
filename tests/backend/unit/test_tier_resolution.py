@@ -47,16 +47,27 @@ def _event(headers=None, claims=None, ip="1.2.3.4"):
     return e
 
 
-def test_flags_off_returns_anon_paid(monkeypatch):
+def test_flags_off_returns_a_bounded_anon_tier(monkeypatch):
+    """Auth off must not hand every caller the paid tier.
+
+    It previously returned tier="paid" with user_id="anon", which combined
+    with quota's short-circuit meant an unauthenticated deployment was also
+    an unlimited one.
+    """
     monkeypatch.delenv("AUTH_ENABLED", raising=False)
     import config
+
     importlib.reload(config)
     from users.tier import resolve_tier
+
     svc = GuestTokenService("x")
     ctx = resolve_tier(_event(), repo=None, guest_service=svc)
-    assert ctx.tier == "paid"
-    assert ctx.user_id == "anon"
+    assert ctx.tier == "anon", "anonymous callers must not be granted paid"
+    assert ctx.tier != "paid"
     assert ctx.is_authenticated is False
+    # Metered against the source IP, the only identifier available with no account.
+    assert ctx.ip_hash
+    assert ctx.user_id == f"anon#{ctx.ip_hash}"
 
 
 def test_jwt_claims_return_free_by_default(repo):

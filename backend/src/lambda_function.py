@@ -50,7 +50,7 @@ from ops.model_counters import ModelCounterService
 from prompts.repository import PromptHistoryRepository
 from users.quota import enforce_quota
 from users.repository import UserRepository
-from users.tier import TierContext, persist_guest, resolve_tier
+from users.tier import TierContext, anon_tier, persist_guest, resolve_tier
 from utils import error_responses
 from utils.content_filter import ContentFilter
 from utils.logger import StructuredLogger
@@ -236,17 +236,6 @@ def _refund_credits(
         )
 
 
-def _anon_tier() -> TierContext:
-    return TierContext(
-        tier="paid",
-        user_id="anon",
-        email=None,
-        is_authenticated=False,
-        guest_token_id=None,
-        issue_guest_cookie=False,
-    )
-
-
 def _parse_and_validate_request(
     event: LambdaEvent,
     require_prompt: bool = True,
@@ -306,7 +295,7 @@ def _parse_and_validate_request(
             )
         tier_ctx = resolve_tier(event, _user_repo, _guest_service)
     else:
-        tier_ctx = _anon_tier()
+        tier_ctx = anon_tier(event)
 
     # CAPTCHA verification for guest /generate requests
     if config.captcha_enabled and tier_ctx.tier == "guest" and endpoint_kind == "generate":
@@ -340,7 +329,7 @@ def _parse_and_validate_request(
         return None, response(400, error_responses.inappropriate_content())
 
     # Quota enforcement (after validation so invalid requests don't consume quota)
-    if endpoint_kind in ("generate", "refine", "outpaint") and config.auth_enabled:
+    if endpoint_kind in ("generate", "refine", "outpaint"):
         # Guests blocked from refine immediately (no auth).
         if tier_ctx.tier == "guest" and endpoint_kind in ("refine", "outpaint"):
             return None, response(402, error_responses.auth_required())
@@ -606,8 +595,11 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
         # Filter models by runtime disable and per-model cost ceiling
         models_to_dispatch = []
         skipped_models = {}
-        if config.auth_enabled:
-            now_ts = int(time.time())
+        # Cost caps are deliberately unconditional: an unauthenticated
+        # deployment still pays the provider, so gating this on auth was the
+        # same conflation that made "open" mean "unlimited".
+        now_ts = int(time.time())
+        try:
             for model in enabled_models:
                 # Runtime disable check (admin-toggled via DynamoDB)
                 runtime_cfg = _user_repo.get_model_runtime_config(model.name)
@@ -625,8 +617,18 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
                         "status": "skipped",
                         "reason": "daily_cap_reached",
                     }
-        else:
+        except Exception as e:
+            # Fail OPEN, consistent with the quota and spend-ceiling checks: an
+            # unreachable counter store is not evidence a model is over its
+            # cap, and refusing every generation because DynamoDB hiccuped
+            # would be a self-inflicted outage. Logged at ERROR so a persistent
+            # failure — which means silently uncapped models — is alarmable.
+            StructuredLogger.error(
+                f"Per-model cap check failed, dispatching all models: {e}",
+                correlation_id=correlation_id,
+            )
             models_to_dispatch = list(enabled_models)
+            skipped_models = {}
 
         if not models_to_dispatch:
             _refund_credits(validated.tier, "generate", correlation_id)
@@ -961,9 +963,17 @@ def _handle_refinement(
         # Per-model daily cap, consumed BEFORE dispatching to the provider.
         # Previously only /generate consumed slots, so refinement traffic could
         # run a model far past its ceiling.
-        if config.auth_enabled and not _model_counter_service.consume_model_slot(
-            model_name, int(time.time())
-        ):
+        try:
+            slot_ok = _model_counter_service.consume_model_slot(
+                model_name, int(time.time())
+            )
+        except Exception as e:
+            StructuredLogger.error(
+                f"Per-model cap check failed, allowing refinement: {e}",
+                correlation_id=correlation_id,
+            )
+            slot_ok = True
+        if not slot_ok:
             _refund_credits(validated.tier, refund_kind, correlation_id)
             return response(429, error_responses.model_cost_ceiling())
 

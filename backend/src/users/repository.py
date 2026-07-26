@@ -215,6 +215,7 @@ class UserRepository:
         "event#",
         "prompt#",
         "spend#",
+        "anon#",
     )
 
     def scan_users(
@@ -388,6 +389,20 @@ class UserRepository:
                 raise
             return self.get_user(key) or item
         return item
+
+    def increment_anon(
+        self, key: str, counter: str, limit: int, window_seconds: int, now: int
+    ) -> tuple[bool, dict]:
+        """Count unauthenticated requests per source-IP bucket."""
+        return self._atomic_increment(
+            key,
+            counter,
+            "windowStart",
+            window_seconds,
+            limit,
+            now,
+            create_if_missing=True,
+        )
 
     def increment_guest_ip(
         self, ip_hash: str, limit: int, window_seconds: int, now: int

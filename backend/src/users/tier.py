@@ -19,7 +19,7 @@ from users.repository import UserRepository
 
 @dataclass(frozen=True)
 class TierContext:
-    tier: Literal["guest", "free", "paid"]
+    tier: Literal["anon", "guest", "free", "paid"]
     user_id: str
     email: str | None
     is_authenticated: bool
@@ -32,6 +32,26 @@ class TierContext:
     # True when a guest record has been identified but deliberately NOT yet
     # written. Writing before CAPTCHA lets an unsolved challenge create rows.
     guest_row_pending: bool = False
+
+
+def anon_tier(event: dict[str, Any]) -> TierContext:
+    """Identity for an unauthenticated deployment (``AUTH_ENABLED=false``).
+
+    Returns tier ``"anon"``, NOT ``"paid"``. The previous behaviour granted
+    every anonymous caller the paid tier, which combined with quota's
+    short-circuit meant an open deployment was also an unlimited one. Those
+    are separable: this tier is metered against the source IP, the only
+    identifier available when there is no account.
+    """
+    return TierContext(
+        tier="anon",
+        user_id=f"anon#{_ip_hash(event)}",
+        email=None,
+        is_authenticated=False,
+        guest_token_id=None,
+        issue_guest_cookie=False,
+        ip_hash=_ip_hash(event),
+    )
 
 
 def extract_claims(event: dict[str, Any]) -> dict[str, Any] | None:
@@ -69,14 +89,7 @@ def resolve_tier(
 ) -> TierContext:
     """Return the :class:`TierContext` for the given request."""
     if not config.auth_enabled:
-        return TierContext(
-            tier="paid",
-            user_id="anon",
-            email=None,
-            is_authenticated=False,
-            guest_token_id=None,
-            issue_guest_cookie=False,
-        )
+        return anon_tier(event)
 
     claims = extract_claims(event)
     if claims:

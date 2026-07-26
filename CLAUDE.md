@@ -193,7 +193,12 @@ Prompt enhancement uses separate config: `PROMPT_MODEL_PROVIDER`, `PROMPT_MODEL_
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `AUTH_ENABLED` | No | `false` | Enable Cognito auth + tier resolution |
+| `AUTH_ENABLED` | No | `false` | Enable Cognito auth + tier resolution. Gates **identity only** -- quota and cost caps apply regardless |
+| `ANON_GENERATE_LIMIT` | No | `5` | `/generate` calls per source IP per window when `AUTH_ENABLED=false` |
+| `ANON_REFINE_LIMIT` | No | `10` | `/iterate` + `/outpaint` calls per source IP per window when `AUTH_ENABLED=false` |
+| `ANON_WINDOW_SECONDS` | No | `3600` | Rolling window for anonymous limits |
+| `GUEST_IP_GENERATE_LIMIT` | No | `3` | Guest generates per source IP. Must be below `GUEST_GLOBAL_LIMIT` or it never binds |
+| `GUEST_IP_WINDOW_SECONDS` | No | `3600` | Rolling window for the per-IP guest limit |
 | `BILLING_ENABLED` | No | `false` | Enable Stripe billing (requires `AUTH_ENABLED=true`) |
 | `COGNITO_USER_POOL_ID` | Yes* | `""` | Cognito User Pool ID |
 | `COGNITO_USER_POOL_CLIENT_ID` | Yes* | `""` | Cognito App Client ID |
@@ -255,7 +260,11 @@ Cost ceiling checks run only when `AUTH_ENABLED=true`. Models at their daily cap
 |----------|----------|---------|-------------|
 | `ADMIN_ENABLED` | No | `false` | Enable admin API endpoints (requires `AUTH_ENABLED=true`) |
 
-**Open-Source Mode**: the default `AUTH_ENABLED=false, BILLING_ENABLED=false` disables auth, quotas, billing, cost ceiling, CAPTCHA, email notifications, and admin features entirely. The app behaves exactly like the pre-tier version: no Cognito, no DynamoDB reads, no Stripe. Contributors can run the full stack without any paid-tier setup.
+**Open-Source Mode**: the default `AUTH_ENABLED=false, BILLING_ENABLED=false` disables auth, billing, CAPTCHA, email notifications, and admin features. Contributors can still run the full stack without any paid-tier setup -- no Cognito, no Stripe.
+
+**Open does not mean unlimited.** `AUTH_ENABLED` gates *identity only*. Quota, per-model cost caps, and spend metering apply in every configuration, because "I have no Cognito" and "I want no spend limits" are unrelated statements and one flag should not assert both. With auth off, callers resolve to the `anon` tier and are metered against a hash of their source IP (`ANON_GENERATE_LIMIT`, `ANON_REFINE_LIMIT`).
+
+This means open-source mode *does* read and write DynamoDB -- metering requires persistence. The users table is created by SAM regardless of the flags. All three checks fail **open** if that store is unreachable, so a missing table degrades to unmetered rather than to a 500, and logs at ERROR so the gap is alarmable.
 
 **CORS**:
 

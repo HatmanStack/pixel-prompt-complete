@@ -127,16 +127,31 @@ def test_all_models_capped_returns_429():
         assert body["error"] == "MODEL_COST_CEILING"
 
 
-def test_auth_disabled_skips_cost_ceiling():
-    """When auth_enabled=false, no cap checks should happen."""
+def test_auth_disabled_still_enforces_cost_ceiling():
+    """Cost caps are not an auth concern.
+
+    An unauthenticated deployment still pays the provider, so gating the
+    per-model cap on AUTH_ENABLED was the same conflation that made "open"
+    mean "unlimited".
+    """
     with (
         patch("config.auth_enabled", False),
         patch("lambda_function.content_filter") as mock_cf,
         patch("lambda_function.get_enabled_models") as mock_models,
         patch("lambda_function._model_counter_service") as mock_counter_svc,
+        # Needed now that the cap block runs with auth off: without it the
+        # real repo raises and the fail-open path skips the cap entirely.
+        patch("lambda_function._user_repo") as mock_user_repo,
+        patch("lambda_function.enforce_quota") as mock_quota,
         patch("lambda_function.session_manager") as mock_sm,
         patch("lambda_function._executor") as mock_exec,
     ):
+        from users.quota import QuotaResult
+
+        mock_user_repo.get_model_runtime_config.return_value = None
+        mock_quota.return_value = QuotaResult(
+            allowed=True, reason=None, reset_at=0, usage={}
+        )
         mock_cf.check_prompt.return_value = False
 
         model1 = MagicMock()
@@ -161,5 +176,5 @@ def test_auth_disabled_skips_cost_ceiling():
             resp = handle_generate(_make_event(), "corr-1")
 
         assert resp["statusCode"] == 200
-        # consume_model_slot should NOT have been called
-        mock_counter_svc.consume_model_slot.assert_not_called()
+        # The cap is consulted regardless of whether auth is enabled.
+        mock_counter_svc.consume_model_slot.assert_called()
