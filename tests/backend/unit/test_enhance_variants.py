@@ -55,25 +55,56 @@ def test_uses_a_single_llm_call():
     assert mock_complete.call_args.kwargs["json_mode"] is True
 
 
-def test_falls_back_when_the_model_returns_junk():
-    """A degraded toggle beats a broken button."""
+def test_junk_response_falls_back_without_a_second_call():
+    """The failure path must not cost more than the success path.
+
+    A retry would make /enhance cost twice what COST_ENHANCE_USD_MICROS
+    records, so spend would be under-counted precisely on the path an
+    attacker can force -- and the endpoint is still unauthenticated.
+    """
     e = _enhancer()
-    with (
-        patch.object(e, "_complete", return_value="not json at all"),
-        patch.object(e, "enhance_safe", return_value="fallback text"),
-    ):
+    with patch.object(e, "_complete", return_value="not json at all") as mock_complete:
         short, long_ = e.enhance_variants("a cat")
-    assert short == long_ == "fallback text"
+
+    assert short == long_ == "a cat"
+    mock_complete.assert_called_once()
 
 
-def test_falls_back_when_a_field_is_missing():
+def test_missing_field_falls_back_without_a_second_call():
     e = _enhancer()
-    with (
-        patch.object(e, "_complete", return_value=json.dumps({"short": SHORT})),
-        patch.object(e, "enhance_safe", return_value="fallback text"),
-    ):
+    with patch.object(
+        e, "_complete", return_value=json.dumps({"short": SHORT})
+    ) as mock_complete:
         short, long_ = e.enhance_variants("a cat")
-    assert short == long_ == "fallback text"
+
+    assert short == long_ == "a cat"
+    mock_complete.assert_called_once()
+
+
+def test_identical_variants_are_rejected():
+    """The original bug arriving by a different route.
+
+    If the model returns the same text twice, accepting it would restore a
+    toggle over one string, which is what this change exists to remove.
+    """
+    e = _enhancer()
+    same = json.dumps({"short": SHORT, "long": SHORT})
+    with patch.object(e, "_complete", return_value=same) as mock_complete:
+        short, long_ = e.enhance_variants("a cat")
+
+    assert short == long_ == "a cat"
+    mock_complete.assert_called_once()
+
+
+def test_exception_falls_back_without_a_second_call():
+    e = _enhancer()
+    with patch.object(
+        e, "_complete", side_effect=RuntimeError("provider down")
+    ) as mock_complete:
+        short, long_ = e.enhance_variants("a cat")
+
+    assert short == long_ == "a cat"
+    mock_complete.assert_called_once()
 
 
 def test_unconfigured_enhancer_returns_the_original():

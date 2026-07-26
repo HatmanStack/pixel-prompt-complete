@@ -301,16 +301,22 @@ lengths of the same sentence."""
             data = json.loads(raw)
             short = (data.get("short") or "").strip()
             long_ = (data.get("long") or "").strip()
-            if short and long_:
+            # Identical variants are rejected too: that is the original bug
+            # (a toggle over one string) arriving by a different route.
+            if short and long_ and short != long_:
                 return short, long_
             StructuredLogger.warning(
-                "Enhance variants response missing a field; falling back"
+                "Enhance variants unusable (missing or identical); "
+                "returning the original prompt"
             )
         except Exception as e:
-            StructuredLogger.warning(f"Enhance variants failed, falling back: {e}")
+            StructuredLogger.warning(f"Enhance variants failed: {e}")
 
-        single = self.enhance_safe(prompt)
-        return single, single
+        # Return the original rather than retrying. A second call would make
+        # this endpoint cost twice what COST_ENHANCE_USD_MICROS records, so
+        # the failure path would silently under-count spend -- and /enhance is
+        # still unauthenticated, so that is the path an attacker can force.
+        return prompt, prompt
 
     def enhance_safe(self, prompt: str) -> str:
         """
