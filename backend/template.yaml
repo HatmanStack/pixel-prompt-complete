@@ -229,11 +229,16 @@ Parameters:
   # Feature Flags
   AuthEnabled:
     Type: String
-    Default: "false"
     AllowedValues:
       - "true"
       - "false"
-    Description: Enable Cognito auth and tier-based quotas
+    Description: >-
+      REQUIRED, no default. Enable Cognito auth and tier resolution. Gates
+      identity only -- quota, cost caps and spend metering apply either way.
+      There is no safe default to assume: "false" serves unauthenticated
+      traffic, "true" requires Cognito and GUEST_TOKEN_SECRET. Deliberately
+      left unset so the choice is made in the deploy parameters rather than
+      inherited silently.
 
   BillingEnabled:
     Type: String

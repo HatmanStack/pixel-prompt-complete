@@ -65,6 +65,9 @@ jobs:
       AWS_DEFAULT_REGION: us-east-1
       S3_BUCKET: test-bucket
       PYTHONPATH: ${{ github.workspace }}/backend/src
+      # No default in config.py -- there is no safe value to guess, so it must
+      # be chosen explicitly. CI runs the unauthenticated path.
+      AUTH_ENABLED: "false"
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
@@ -90,6 +93,9 @@ jobs:
       AWS_DEFAULT_REGION: us-east-1
       S3_BUCKET: test-bucket
       PYTHONPATH: ${{ github.workspace }}/backend/src
+      # No default in config.py -- there is no safe value to guess, so it must
+      # be chosen explicitly. CI runs the unauthenticated path.
+      AUTH_ENABLED: "false"
       MINISTACK_ENDPOINT: http://localhost:4566
     services:
       ministack:

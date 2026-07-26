@@ -18,7 +18,7 @@ def env(monkeypatch):
     import config
     importlib.reload(config)
     yield
-    monkeypatch.delenv("AUTH_ENABLED", raising=False)
+    monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.delenv("GUEST_TOKEN_SECRET", raising=False)
     importlib.reload(config)
 
@@ -54,7 +54,7 @@ def test_flags_off_returns_a_bounded_anon_tier(monkeypatch):
     with quota's short-circuit meant an unauthenticated deployment was also
     an unlimited one.
     """
-    monkeypatch.delenv("AUTH_ENABLED", raising=False)
+    monkeypatch.setenv("AUTH_ENABLED", "false")
     import config
 
     importlib.reload(config)

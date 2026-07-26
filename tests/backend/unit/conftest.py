@@ -2,6 +2,13 @@
 Pytest configuration and fixtures for backend unit tests
 """
 
+import os
+
+# AUTH_ENABLED has no default in config.py -- there is no safe value to guess,
+# so it must be chosen explicitly. Set it here before anything imports config,
+# or collection fails. Individual tests override it via monkeypatch.
+os.environ.setdefault("AUTH_ENABLED", "false")
+
 import pytest
 from moto import mock_aws
 import boto3

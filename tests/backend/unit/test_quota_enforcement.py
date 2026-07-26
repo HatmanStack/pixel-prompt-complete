@@ -24,7 +24,6 @@ def env(monkeypatch):
     importlib.reload(config)
     yield
     for v in (
-        "AUTH_ENABLED",
         "GUEST_TOKEN_SECRET",
         "FREE_GENERATE_LIMIT",
         "FREE_REFINE_LIMIT",
@@ -33,6 +32,9 @@ def env(monkeypatch):
         "PAID_DAILY_LIMIT",
     ):
         monkeypatch.delenv(v, raising=False)
+    # AUTH_ENABLED is set, not cleared: it has no default, so reloading
+    # without it raises.
+    monkeypatch.setenv("AUTH_ENABLED", "false")
     importlib.reload(config)
 
 
@@ -79,7 +81,7 @@ def test_flags_off_still_meters_anonymous_callers(monkeypatch, repo):
     Conflating them made an open deployment an unlimited one. An
     unauthenticated caller is now metered against their source IP.
     """
-    monkeypatch.delenv("AUTH_ENABLED", raising=False)
+    monkeypatch.setenv("AUTH_ENABLED", "false")
     import config
 
     importlib.reload(config)
@@ -113,7 +115,7 @@ def test_anon_quota_fails_open_if_the_store_is_unreachable(monkeypatch):
     Same reasoning as the spend ceiling: an unreachable counter is not
     evidence the caller is over limit.
     """
-    monkeypatch.delenv("AUTH_ENABLED", raising=False)
+    monkeypatch.setenv("AUTH_ENABLED", "false")
     import config
 
     importlib.reload(config)

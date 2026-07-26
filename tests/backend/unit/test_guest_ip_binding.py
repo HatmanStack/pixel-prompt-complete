@@ -31,7 +31,7 @@ def auth_on(monkeypatch):
 
     importlib.reload(config)
     yield config
-    monkeypatch.delenv("AUTH_ENABLED", raising=False)
+    monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.delenv("GUEST_TOKEN_SECRET", raising=False)
     importlib.reload(config)
 

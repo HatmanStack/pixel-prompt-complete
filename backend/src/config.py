@@ -60,7 +60,29 @@ if cloudfront_domain is None:
     warnings.warn("CLOUDFRONT_DOMAIN not set — CDN URLs will be malformed", stacklevel=1)
 
 # Feature flags (tier system)
-auth_enabled = os.environ.get("AUTH_ENABLED", "false").lower() == "true"
+# AUTH_ENABLED has NO default, deliberately.
+#
+# There is no safe value to guess. "false" serves unauthenticated traffic;
+# "true" requires Cognito and a guest secret. Defaulting to either quietly
+# picks a security posture on the operator's behalf, and the audit that
+# prompted this found exactly that: a stack deployed open because nobody
+# decided it should be.
+#
+# Failing at import is the point — the choice has to appear in the deploy
+# parameters, where it is reviewable.
+_auth_raw = os.environ.get("AUTH_ENABLED")
+if _auth_raw is None:
+    raise RuntimeError(
+        "AUTH_ENABLED must be set explicitly to 'true' or 'false'. "
+        "There is no safe default: 'false' serves unauthenticated traffic, "
+        "'true' requires Cognito. Set it in the deploy parameters."
+    )
+if _auth_raw.lower() not in ("true", "false"):
+    raise RuntimeError(
+        f"AUTH_ENABLED must be 'true' or 'false', got {_auth_raw!r}. "
+        "Anything else silently reads as 'false', i.e. unauthenticated."
+    )
+auth_enabled = _auth_raw.lower() == "true"
 billing_enabled = os.environ.get("BILLING_ENABLED", "false").lower() == "true"
 if billing_enabled and not auth_enabled:
     raise RuntimeError("BILLING_ENABLED=true requires AUTH_ENABLED=true")

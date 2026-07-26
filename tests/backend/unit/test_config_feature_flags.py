@@ -15,20 +15,48 @@ def _reload_config():
 
 @pytest.fixture(autouse=True)
 def _reset_auth_billing_env(monkeypatch):
-    """Ensure auth/billing flags are cleared before each test for hermetic runs."""
-    for var in ("AUTH_ENABLED", "BILLING_ENABLED", "GUEST_TOKEN_SECRET",
+    """Reset auth/billing flags before each test for hermetic runs.
+
+    AUTH_ENABLED is set rather than cleared: it has no default, so clearing
+    it makes config raise at import.
+    """
+    for var in ("BILLING_ENABLED", "GUEST_TOKEN_SECRET",
                 "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET",
                 "CAPTCHA_ENABLED", "TURNSTILE_SECRET_KEY",
                 "SES_ENABLED", "SES_FROM_EMAIL",
                 "ADMIN_ENABLED"):
         monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("AUTH_ENABLED", "false")
     yield
     _reload_config()
 
 
-def test_default_flags_false(monkeypatch):
-    for var in ("AUTH_ENABLED", "BILLING_ENABLED"):
-        monkeypatch.delenv(var, raising=False)
+def test_auth_enabled_has_no_default(monkeypatch):
+    """There is no safe value to guess, so config refuses to assume one.
+
+    "false" serves unauthenticated traffic and "true" requires Cognito.
+    Defaulting to either silently picks a security posture for the operator,
+    which is how a stack ends up open because nobody decided it should be.
+    """
+    monkeypatch.delenv("AUTH_ENABLED", raising=False)
+    with pytest.raises(RuntimeError, match="AUTH_ENABLED must be set explicitly"):
+        _reload_config()
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    _reload_config()
+
+
+def test_auth_enabled_rejects_junk_values(monkeypatch):
+    """A typo must not silently read as "unauthenticated"."""
+    monkeypatch.setenv("AUTH_ENABLED", "yes")
+    with pytest.raises(RuntimeError, match="must be 'true' or 'false'"):
+        _reload_config()
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    _reload_config()
+
+
+def test_explicit_flags_false(monkeypatch):
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.delenv("BILLING_ENABLED", raising=False)
     config = _reload_config()
     assert config.auth_enabled is False
     assert config.billing_enabled is False
@@ -48,7 +76,7 @@ def test_auth_without_guest_secret_raises(monkeypatch):
     monkeypatch.setenv("GUEST_TOKEN_SECRET", "")
     with pytest.raises(RuntimeError, match="GUEST_TOKEN_SECRET"):
         _reload_config()
-    monkeypatch.delenv("AUTH_ENABLED", raising=False)
+    monkeypatch.setenv("AUTH_ENABLED", "false")
     _reload_config()
 
 
