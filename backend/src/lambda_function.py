@@ -240,9 +240,17 @@ def _enforce_age_gate(tier_ctx: TierContext, body: dict[str, Any]) -> ApiRespons
         return response(403, error_responses.age_verification_required())
 
     now = int(time.time())
-    ttl = now + config.guest_window_seconds * 24 if tier_ctx.tier in ("guest", "anon") else None
+    # Guest and anonymous identities are ephemeral counter buckets, so their
+    # record carries a TTL matching the quota window the same identity is
+    # metered against. Real accounts get None: a TTL there deletes a customer.
+    if tier_ctx.tier == "guest":
+        window = config.guest_window_seconds
+    elif tier_ctx.tier == "anon":
+        window = config.anon_window_seconds
+    else:
+        window = None
     try:
-        _user_repo.record_age_affirmation(identity, now, ttl)
+        _user_repo.record_age_affirmation(identity, now, window)
     except Exception as e:
         # The caller answered; failing to persist it costs a repeat prompt on
         # their next generation, not access now.

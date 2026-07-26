@@ -417,29 +417,43 @@ class UserRepository:
         item = self.get_user(identity_key)
         return bool(item and item.get("ageAffirmedAt"))
 
-    def record_age_affirmation(self, identity_key: str, now: int, ttl: int | None = None) -> None:
+    def record_age_affirmation(
+        self, identity_key: str, now: int, ephemeral_window_seconds: int | None = None
+    ) -> None:
         """Record that this identity affirmed being 18+.
 
-        Written only if absent, so the timestamp is the first affirmation
-        rather than the most recent request. ``ttl`` is applied only when the
-        item is being created, so this cannot extend or shorten the expiry of
-        an existing guest record.
+        The record is initialised first rather than being conjured by this
+        write. A bare item created here would satisfy ``get_or_create_user``'s
+        existence check on a later call, so the quota path would skip
+        initialisation and the row would keep whatever TTL this method chose
+        instead of the one its counter bucket expects. For an anonymous caller
+        that meant an abuse counter living 24x longer than its own window.
+
+        ``ephemeral_window_seconds`` is the caller's quota window for guest and
+        anonymous identities, so the TTL matches what ``increment_anon`` and
+        friends would have set. Pass None for real accounts: a TTL on one of
+        those would delete a customer.
+
+        The affirmation itself is written only if absent, so the timestamp is
+        the first affirmation rather than the most recent request, and an
+        existing record's TTL is never touched.
         """
-        expr = "SET ageAffirmedAt = :now, updatedAt = :now"
-        values = {":now": now}
-        if ttl is not None:
-            expr += ", #ttl = if_not_exists(#ttl, :ttl)"
-            values[":ttl"] = ttl
-        kwargs = {
-            "Key": {"userId": identity_key},
-            "UpdateExpression": expr,
-            "ConditionExpression": "attribute_not_exists(ageAffirmedAt)",
-            "ExpressionAttributeValues": values,
-        }
-        if ttl is not None:
-            kwargs["ExpressionAttributeNames"] = {"#ttl": "ttl"}
+        if ephemeral_window_seconds is not None:
+            self.get_or_create_user(
+                identity_key,
+                now=now,
+                ttl=now + ephemeral_window_seconds + _IP_BUCKET_TTL_GRACE_SECONDS,
+            )
+        else:
+            self.get_or_create_user(identity_key, now=now)
+
         try:
-            self._table.update_item(**kwargs)
+            self._table.update_item(
+                Key={"userId": identity_key},
+                UpdateExpression="SET ageAffirmedAt = :now, updatedAt = :now",
+                ConditionExpression="attribute_not_exists(ageAffirmedAt)",
+                ExpressionAttributeValues={":now": now},
+            )
         except ClientError as e:
             # Already affirmed. Two concurrent first requests race here and the
             # loser is not an error: the fact we wanted recorded is recorded.

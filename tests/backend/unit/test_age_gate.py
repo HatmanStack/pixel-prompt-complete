@@ -22,6 +22,7 @@ from moto import mock_aws
 os.environ.setdefault("S3_BUCKET", "test-bucket")
 os.environ.setdefault("CLOUDFRONT_DOMAIN", "test.cloudfront.net")
 
+from users import repository
 from users.tier import TierContext
 
 
@@ -76,8 +77,42 @@ def test_a_repeat_affirmation_is_not_an_error(repo):
 def test_affirming_does_not_extend_an_existing_guest_ttl(repo):
     """The gate must not become a way to keep a guest record alive forever."""
     repo.upsert_guest("tok1", "iphash", 4242)
-    repo.record_age_affirmation("guest#tok1", 1000, ttl=999999)
+    repo.record_age_affirmation("guest#tok1", 1000, ephemeral_window_seconds=3600)
     assert repo.get_user("guest#tok1")["ttl"] == 4242
+
+
+def test_affirming_first_leaves_a_usable_quota_record(repo):
+    """Regression: the affirmation used to conjure a bare item.
+
+    get_or_create_user returns early when the item exists, so a bare row
+    written here would make the quota path skip initialisation entirely. The
+    row kept the TTL this method chose rather than the one its counter bucket
+    expects, and for an anonymous caller that was an abuse counter living 24x
+    longer than its own window -- the exact litter increment_anon's docstring
+    warns about.
+    """
+    repo.record_age_affirmation("anon#hash", 1000, ephemeral_window_seconds=3600)
+    item = repo.get_user("anon#hash")
+
+    # Initialised, not bare.
+    assert item["generateCount"] == 0
+    assert item["windowStart"] == 1000
+    # TTL matches the quota window, not an invented one.
+    assert item["ttl"] == 1000 + 3600 + repository._IP_BUCKET_TTL_GRACE_SECONDS
+
+
+def test_the_quota_counter_still_works_after_an_affirmation(repo):
+    """The end the regression was really about: metering must survive it."""
+    repo.record_age_affirmation("anon#hash", 1000, ephemeral_window_seconds=3600)
+    allowed, _ = repo.increment_anon("anon#hash", "generateCount", 5, 3600, 1001)
+    assert allowed is True
+    assert repo.get_user("anon#hash")["generateCount"] == 1
+
+
+def test_a_real_account_affirmation_carries_no_ttl(repo):
+    """A TTL on a customer record would delete the customer."""
+    repo.record_age_affirmation("cognito-sub-1", 1000)
+    assert "ttl" not in repo.get_user("cognito-sub-1")
 
 
 def test_tiers_do_not_share_an_affirmation(repo):
@@ -166,17 +201,23 @@ def test_a_failed_write_does_not_deny_a_caller_who_answered():
         assert lf._enforce_age_gate(_ctx(), {"ageAffirmed": True}) is None
 
 
-def test_guest_affirmations_carry_a_ttl_but_account_ones_do_not():
-    """Guest rows expire; an account's affirmation should outlive a window."""
+def test_each_tier_passes_its_own_quota_window():
+    """The TTL must track the window that tier is actually metered against."""
+    import config
     import lambda_function as lf
 
-    for tier, expect_ttl in (("guest", True), ("anon", True), ("paid", False)):
+    expected = {
+        "guest": config.guest_window_seconds,
+        "anon": config.anon_window_seconds,
+        "paid": None,
+        "free": None,
+    }
+    for tier, want in expected.items():
         mock_repo = MagicMock()
         mock_repo.has_affirmed_age.return_value = False
         with patch.object(lf, "_user_repo", mock_repo):
             lf._enforce_age_gate(_ctx(tier), {"ageAffirmed": True})
-        ttl = mock_repo.record_age_affirmation.call_args.args[2]
-        assert (ttl is not None) is expect_ttl, tier
+        assert mock_repo.record_age_affirmation.call_args.args[2] == want, tier
 
 
 def test_the_gate_is_skipped_when_there_is_no_repo():
