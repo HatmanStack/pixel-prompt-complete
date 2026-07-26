@@ -90,9 +90,12 @@ OVERAGE_USD_CENTS_PER_CREDIT=50
 STRIPE_PRICE_ID_PRO=price_xxx
 STRIPE_PRICE_ID_STUDIO=price_xxx
 
-# --- Spend ceilings (dollars, the backstop) ---
-GLOBAL_DAILY_SPEND_CEILING_USD_CENTS=...
-FREE_TIER_DAILY_SPEND_CEILING_USD_CENTS=...
+# --- Spend ceilings (micro-dollars, the backstop) ---
+# The monthly figure is what caps the invoice. A daily ceiling alone does not:
+# even $25/day permits about $750 over 30 days.
+MONTHLY_SPEND_CEILING_USD_MICROS=500000000        # $500/month, hard stop
+GLOBAL_DAILY_SPEND_CEILING_USD_MICROS=25000000    # $25/day, burst headroom
+ENHANCE_DAILY_SPEND_CEILING_USD_MICROS=2000000    # $2/day, unauthenticated
 ```
 
 ### Paid credits reset on Stripe's period, not a fixed 30 days
@@ -119,6 +122,35 @@ UI display together, with no rebuild.
 
 This also removes a whole class of bug: the UI cannot advertise a price that
 disagrees with what the backend enforces, because there is one source.
+
+## What a $500/month ceiling actually buys
+
+Set 2026-07-26 while the product is still being figured out. The intent is
+that a mistake costs a known amount, not that the business scales inside it.
+
+At the estimated ~$0.196 per generate, $500/month is about **2,550 generates
+total**, across every user and tier.
+
+| Free users at 5 credits each | Monthly COGS | Share of budget |
+|---|---|---|
+| 100 | $98 | 20% |
+| 500 | $490 | 98% |
+| 1,000 | $980 | 196% |
+
+**Free-tier growth trips the ceiling before paid usage does.** Roughly 500
+free users consume the entire budget on their own, before a single
+subscriber generates anything. The free allotment is therefore the lever
+that matters most, and 5 credits is the number to revisit first if the
+ceiling starts stopping service.
+
+For comparison, a Pro subscriber at full 65-credit redemption costs $12.74,
+so the budget covers about **39 fully-active subscribers**. Typical
+redemption is lower, so the real figure is higher, but it is the right order
+of magnitude: this is a pathfinding budget, not a growth budget.
+
+Both outcomes are acceptable while pathfinding. Neither is acceptable at
+launch, and the signal to raise the ceiling is the monthly warning alarm at
+$350 rather than users reporting a dead service.
 
 ## Before any price goes public
 

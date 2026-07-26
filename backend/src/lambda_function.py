@@ -158,6 +158,26 @@ def _daily_spend_exceeded(now: int | None = None) -> bool:
     return int(spend.get("totalMicros", 0)) >= ceiling
 
 
+def _monthly_spend_exceeded(now: int | None = None) -> bool:
+    """True when this calendar month's spend has reached the ceiling.
+
+    The daily ceiling bounds a bad day; this bounds a bad month. Without it,
+    sustained traffic at just under the daily limit runs to roughly 30x it.
+
+    Fails open on a read error for the same reason as the daily check: an
+    unreadable counter is not evidence the budget is blown.
+    """
+    ceiling = config.monthly_spend_ceiling_usd_micros
+    if ceiling <= 0:
+        return False
+    try:
+        spend = _cost_meter.get_monthly_spend(now=now)
+    except Exception as e:
+        StructuredLogger.error(f"Monthly ceiling check failed, allowing request: {e}")
+        return False
+    return int(spend.get("totalMicros", 0)) >= ceiling
+
+
 def _enhance_spend_exceeded(now: int | None = None) -> bool:
     """True when /enhance has used up its own sub-budget.
 
@@ -182,6 +202,10 @@ def _spend_ceiling_exceeded(endpoint_kind: str) -> tuple[bool, str]:
 
     Returns (exceeded, scope_label_for_logging).
     """
+    # Monthly first: it is the bound that actually caps the invoice, and a
+    # breach of it should not be reported as a daily problem.
+    if _monthly_spend_exceeded():
+        return True, "Monthly"
     if _daily_spend_exceeded():
         return True, "Global"
     if endpoint_kind == "enhance" and _enhance_spend_exceeded():
@@ -303,7 +327,7 @@ def _parse_and_validate_request(
         exceeded, scope = _spend_ceiling_exceeded(endpoint_kind)
         if exceeded:
             StructuredLogger.error(
-                f"{scope} daily spend ceiling reached — rejecting billable request",
+                f"{scope} spend ceiling reached, rejecting billable request",
                 endpoint=endpoint_kind,
             )
             return None, response(503, error_responses.daily_spend_ceiling())

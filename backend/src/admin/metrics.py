@@ -68,8 +68,22 @@ def _spend_summary(repo: UserRepository, now: int, days: int) -> dict[str, Any]:
         window.append({"date": _date_str(ts), "totalMicros": total})
 
     ceiling = config.global_daily_spend_ceiling_usd_micros
+    monthly = meter.get_monthly_spend(now=now)
+    monthly_total = int(monthly.get("totalMicros", 0))
+    monthly_ceiling = config.monthly_spend_ceiling_usd_micros
     return {
         "todayMicros": today_total,
+        # The monthly figure is the one that caps the invoice, so it belongs
+        # on the dashboard next to the daily number rather than being
+        # inferred from the window.
+        "monthToDateMicros": monthly_total,
+        "monthToDateUsd": round(monthly_total / 1_000_000, 4),
+        "monthlyCeilingMicros": monthly_ceiling,
+        "monthlyCeilingUsedPct": (
+            round(monthly_total / monthly_ceiling * 100, 1)
+            if monthly_ceiling > 0
+            else None
+        ),
         "todayUsd": round(today_total / 1_000_000, 4),
         "byModelMicros": per_model,
         "byTierMicros": per_tier,

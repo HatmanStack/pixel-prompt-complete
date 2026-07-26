@@ -49,6 +49,20 @@ def spend_item_key(now: int) -> str:
     return f"spend#{_day_key(now)}"
 
 
+def _month_key(now: int) -> str:
+    return datetime.fromtimestamp(now, tz=timezone.utc).strftime("%Y-%m")
+
+
+def monthly_spend_item_key(now: int) -> str:
+    """Accumulator for the calendar month.
+
+    A daily ceiling alone does not bound a month: even the current $25/day
+    permits roughly $750 across 30 days. This is the item the monthly
+    ceiling reads.
+    """
+    return f"spend#{_month_key(now)}"
+
+
 class CostMeter:
     """Records what each request actually cost, in dollars."""
 
@@ -83,6 +97,15 @@ class CostMeter:
         # the free tier, which is the largest single exposure at 4-model access.
         deltas[f"{tier}TierMicros"] = total
 
+        # Daily items are authoritative. The monthly item is a fast-path cache
+        # so a ceiling check on the request path costs one read instead of
+        # summing 31 days.
+        #
+        # These are two writes, so one can fail while the other lands. That is
+        # tolerated rather than made transactional: the daily snapshot job
+        # recomputes the monthly total from the daily items, so any divergence
+        # is repaired within a day and the authoritative record is the one
+        # written first.
         try:
             self._repo.add_counters(
                 spend_item_key(now),
@@ -95,6 +118,19 @@ class CostMeter:
                 f"Cost meter failed to record daily spend: {e}",
                 totalMicros=total,
                 tier=tier,
+            )
+
+        try:
+            self._repo.add_counters(
+                monthly_spend_item_key(now),
+                deltas,
+                now=now,
+                ttl=now + SPEND_ITEM_TTL_SECONDS,
+            )
+        except Exception as e:
+            StructuredLogger.error(
+                f"Cost meter failed to record monthly spend: {e}",
+                totalMicros=total,
             )
 
         # Mirror to CloudWatch so spend can be alarmed on. DynamoDB holds the
@@ -138,7 +174,64 @@ class CostMeter:
         """Read today's accumulator. Missing item means nothing spent yet."""
         if now is None:
             now = int(time.time())
-        item = self._repo.get_user(spend_item_key(now))
+        return self._read_spend(spend_item_key(now))
+
+    def get_monthly_spend(self, now: int | None = None) -> dict[str, Any]:
+        """Read this calendar month's accumulator."""
+        if now is None:
+            now = int(time.time())
+        return self._read_spend(monthly_spend_item_key(now))
+
+    def _read_spend(self, key: str) -> dict[str, Any]:
+        item = self._repo.get_user(key)
         if not item:
             return {"totalMicros": 0}
-        return {k: int(v) for k, v in item.items() if k not in ("userId", "updatedAt")}
+        return {
+            k: int(v)
+            for k, v in item.items()
+            if k not in ("userId", "updatedAt", "ttl")
+        }
+
+
+def reconcile_monthly_spend(repo: Any, now: int) -> dict[str, int]:
+    """Recompute the month's accumulator from the authoritative daily items.
+
+    The monthly item is a cache written alongside each daily write, so a
+    partial failure can leave it under-counting, and an under-counting
+    monthly total means the ceiling that caps the invoice trips later than
+    it should.
+
+    Rather than make the two writes transactional, this recomputes the month
+    from its days and corrects the difference. Called from the daily snapshot,
+    so divergence is bounded by one day.
+
+    Returns {"expected", "recorded", "corrected"} in micro-dollars.
+    """
+    meter = CostMeter(repo)
+    month = _month_key(now)
+    expected = 0
+    day = now
+    # Walk back to the start of the month.
+    for _ in range(31):
+        if _month_key(day) != month:
+            break
+        expected += int(meter.get_daily_spend(now=day).get("totalMicros", 0))
+        day -= 86400
+
+    recorded = int(meter.get_monthly_spend(now=now).get("totalMicros", 0))
+    drift = expected - recorded
+    if drift:
+        StructuredLogger.warning(
+            "Monthly spend accumulator drifted from the daily totals; correcting",
+            month=month,
+            expectedMicros=expected,
+            recordedMicros=recorded,
+            driftMicros=drift,
+        )
+        repo.add_counters(
+            monthly_spend_item_key(now),
+            {"totalMicros": drift},
+            now=now,
+            ttl=now + SPEND_ITEM_TTL_SECONDS,
+        )
+    return {"expected": expected, "recorded": recorded, "corrected": drift}

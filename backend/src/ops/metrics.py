@@ -278,7 +278,18 @@ def handle_daily_snapshot(
         else:
             raise
 
-    # 5. Reset monthly churn on first of month
+    # 5. Repair the monthly spend accumulator from the daily items.
+    #    It is a cache written alongside each daily write, so a partial
+    #    failure leaves it under-counting, and under-counting means the
+    #    ceiling that caps the invoice trips later than it should.
+    try:
+        from ops.cost_meter import reconcile_monthly_spend
+
+        reconcile_monthly_spend(repo, now)
+    except Exception as e:
+        StructuredLogger.error(f"Monthly spend reconciliation failed: {e}")
+
+    # 6. Reset monthly churn on first of month
     if _is_first_of_month():
         try:
             table.update_item(

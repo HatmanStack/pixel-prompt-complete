@@ -209,3 +209,42 @@ def test_empty_day_reports_zero_not_error(repo):
 
     assert resp["statusCode"] == 200
     assert json.loads(resp["body"])["spend"]["todayMicros"] == 0
+
+
+def test_admin_reports_month_to_date_and_ceiling_use(repo):
+    """The monthly figure is the one that caps the invoice."""
+    import time as _t
+
+    from admin.metrics import handle_admin_metrics
+    from ops.model_counters import ModelCounterService
+
+    now = int(_t.time())
+    _seed(repo, now)
+
+    with (
+        patch("config.admin_enabled", True),
+        patch("config.auth_enabled", True),
+        patch("config.monthly_spend_ceiling_usd_micros", 500_000_000),
+    ):
+        resp = handle_admin_metrics(_admin_event(), repo, ModelCounterService(repo))
+
+    spend = json.loads(resp["body"])["spend"]
+    assert spend["monthToDateMicros"] == 156000
+    assert spend["monthlyCeilingMicros"] == 500_000_000
+    assert spend["monthlyCeilingUsedPct"] == 0.0
+
+
+def test_monthly_ceiling_pct_is_none_when_disabled(repo):
+    import time as _t
+
+    from admin.metrics import handle_admin_metrics
+    from ops.model_counters import ModelCounterService
+
+    _seed(repo, int(_t.time()))
+    with (
+        patch("config.admin_enabled", True),
+        patch("config.auth_enabled", True),
+        patch("config.monthly_spend_ceiling_usd_micros", 0),
+    ):
+        resp = handle_admin_metrics(_admin_event(), repo, ModelCounterService(repo))
+    assert json.loads(resp["body"])["spend"]["monthlyCeilingUsedPct"] is None
