@@ -811,7 +811,7 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
         futures = {
             _executor.submit(generate_for_model, model): model for model in models_to_dispatch
         }
-        future_timeout = config.api_client_timeout + 10
+        future_timeout = config.generate_dispatch_budget_seconds
         try:
             for future in as_completed(futures, timeout=future_timeout):
                 try:
@@ -826,6 +826,25 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
                     )
                     results[model_name] = {"status": "error", "error": sanitized}
         except TimeoutError:
+            # Cancel what can still be cancelled. A future that has already
+            # started cannot be stopped -- the provider call is blocking I/O
+            # inside a worker thread -- so this only helps when there are more
+            # models than workers. The real defence is that every provider
+            # bounds its own call below this budget, so nothing should still
+            # be running by the time we get here. Nova was unbounded until
+            # this change, which is exactly how work outlived the budget,
+            # completed, and was billed after the user was told it failed.
+            cancelled = sum(1 for f in futures if f.cancel())
+            still_running = len(futures) - cancelled - len(results)
+            if still_running > 0:
+                StructuredLogger.error(
+                    "Dispatch budget expired with provider calls still running; "
+                    "they will complete and be billed",
+                    correlation_id=correlation_id,
+                    stillRunning=still_running,
+                    cancelled=cancelled,
+                )
+
             # Mark any models that didn't complete in time
             for future, model_cfg in futures.items():
                 model_name = model_cfg.name
@@ -1138,6 +1157,19 @@ def _handle_refinement(
         )
 
         if result["status"] == "success":
+            # Refining is the first moment a user picks between four models,
+            # and it costs them something, which makes it a stronger signal
+            # than a click. Best-effort: product data must never fail a
+            # refinement the user has already paid for.
+            try:
+                if validated.tier:
+                    _user_repo.record_model_choice(validated.tier.user_id, model_name)
+            except Exception as e:
+                StructuredLogger.warning(
+                    f"Could not record model choice: {e}",
+                    correlation_id=correlation_id,
+                )
+
             store_prompt = result_prompt_fn(prompt) if result_prompt_fn else prompt
             ctx_prompt = context_prompt_fn(prompt) if context_prompt_fn else None
             info = _handle_successful_result(
@@ -1687,6 +1719,12 @@ def handle_me(event: LambdaEvent, correlation_id: str | None = None) -> ApiRespo
         "portalAvailable": bool(item.get("stripeCustomerId")),
     }
 
+    # Which models this user actually refines, highest first. Generating
+    # produces four images they did not choose between; refining one is the
+    # preference, and it is the only per-user signal of its kind the product
+    # collects.
+    model_choices = _user_repo.get_model_choices(ctx.user_id)
+
     return response(
         200,
         {
@@ -1696,6 +1734,8 @@ def handle_me(event: LambdaEvent, correlation_id: str | None = None) -> ApiRespo
             "quota": quota,
             "billing": billing,
             "groups": extract_admin_groups(event),
+            "modelChoices": model_choices,
+            "preferredModel": next(iter(model_choices), None),
         },
     )
 

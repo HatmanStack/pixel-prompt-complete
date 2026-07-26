@@ -465,6 +465,36 @@ class UserRepository:
             create_if_missing=False,
         )
 
+    # ---------- model preference ----------
+
+    def record_model_choice(self, user_id: str, model_name: str, now: int | None = None) -> None:
+        """Count that this user chose ``model_name`` to refine.
+
+        Generating produces four images the user did not choose between.
+        Refining one is the first moment they express a preference, and it is
+        a stronger signal than a click or a download because it costs them
+        something.
+
+        Stored per user as ``modelChoice<Model>`` counters so the answer to
+        "which model wins for this person" is a single item read rather than
+        a scan over session history. Best-effort at the call site: this is
+        product data, not billing, and it must never fail a refinement.
+        """
+        if not user_id or user_id == "anon" or not model_name:
+            return
+        field = f"modelChoice{model_name.capitalize()}"
+        self.add_counters(user_id, {field: 1}, now=now)
+
+    def get_model_choices(self, user_id: str) -> dict[str, int]:
+        """Per-model refinement counts for a user, highest first."""
+        item = self.get_user(user_id) or {}
+        choices = {
+            k[len("modelChoice") :].lower(): int(v)
+            for k, v in item.items()
+            if k.startswith("modelChoice")
+        }
+        return dict(sorted(choices.items(), key=lambda kv: kv[1], reverse=True))
+
     # ---------- credit ledger ----------
 
     def debit_credits(

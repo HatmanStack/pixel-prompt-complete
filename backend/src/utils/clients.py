@@ -9,6 +9,7 @@ the same HTTP connection pool.
 from typing import Any, Dict
 
 import boto3
+from botocore.config import Config as BotoConfig
 from google import genai
 from openai import OpenAI
 
@@ -54,8 +55,27 @@ def get_bedrock_client(region: str | None = None) -> Any:
     """Get or create a cached Bedrock runtime client keyed by region.
 
     Auth is via the Lambda execution role; no API key is required.
+
+    Timeouts are bounded so a Nova call cannot outlive the dispatch budget.
+    This client previously used botocore's defaults (60s connect, 60s read,
+    legacy retries), which can exceed that budget several times over: the
+    request is abandoned, the user is told the model failed, and Bedrock
+    generates and bills for the image anyway.
+
+    The read timeout is halved so one retry still fits inside the budget.
+    Gemini, OpenAI and Firefly already bound their calls; Nova was the one
+    provider left unbounded.
     """
     region_key = region or aws_region
     if region_key not in _bedrock_clients:
-        _bedrock_clients[region_key] = boto3.client("bedrock-runtime", region_name=region_key)
+        per_attempt = max(1, int(api_client_timeout // 2))
+        _bedrock_clients[region_key] = boto3.client(
+            "bedrock-runtime",
+            region_name=region_key,
+            config=BotoConfig(
+                connect_timeout=per_attempt,
+                read_timeout=per_attempt,
+                retries={"mode": "standard", "total_max_attempts": 2},
+            ),
+        )
     return _bedrock_clients[region_key]

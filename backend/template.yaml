@@ -1136,7 +1136,10 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub '/aws/lambda/${PixelPromptFunction}'
-      RetentionInDays: 7
+      # 30 days, not 7. Investigating a spend anomaly against a monthly
+      # budget means looking back across the month that produced it, and a
+      # 7-day window cannot cover a bill you notice at month end.
+      RetentionInDays: 30
 
   AlarmTopic:
     Type: AWS::SNS::Topic

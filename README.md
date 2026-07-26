@@ -7,7 +7,7 @@
 <a href="https://aws.amazon.com/lambda/"><img src="https://img.shields.io/badge/AWS-Lambda-FF9900" alt="AWS Lambda" /></a>
 <a href="https://docs.aws.amazon.com/serverless-application-model/"><img src="https://img.shields.io/badge/AWS-SAM-FF9900" alt="AWS SAM" /></a>
 
-<p><b>Serverless text-to-image generation with parallel AI model execution</b></p>
+<p><b>Keep refining an image across four AI models, in one conversation</b></p>
 <p><a href="https://production.d2iujulgl0aoba.amplifyapp.com/">Live Demo</a></p>
 
 ** THIS REPO IS IN ACTIVE DEVELOPMENT AND WILL CHANGE OFTEN **
@@ -15,7 +15,31 @@
 
 ## What is this?
 
-Pixel Prompt is a serverless platform that generates images from text prompts using four AI models simultaneously. Submit a prompt, get results from Gemini, Nova Canvas, DALL-E 3, and Firefly side-by-side, then iterate on any model's output with follow-up prompts or expand images to different aspect ratios. Deployed on AWS with Lambda, S3, and CloudFront — no servers to manage.
+Most tools that run several image models give you a grid and stop there. Pixel
+Prompt keeps going: every model gets its own conversation thread with a
+maintained context window, so you can refine one model's output over several
+turns while comparing it against the others, and outpaint any of them to a new
+aspect ratio through the same interface.
+
+The four-way comparison is the entry point. The part that is hard to build, and
+hard to copy, is what happens after it:
+
+- **Per-model conversation threads.** Refine Gemini's output five times while
+  Firefly's stays where it was. Each thread keeps a rolling context window, so
+  turn five still knows what turn one asked for.
+- **One refinement interface, four different provider APIs.** Each model
+  reaches image editing by a different route, and DALL-E 3 cannot edit at all,
+  so iteration silently uses `gpt-image-1` instead. That is four separate edit
+  paths behind one control.
+- **Cross-model outpaint.** Expand any model's image to a new aspect ratio
+  without leaving the thread.
+- **It learns which model suits you.** Generating gives you four images you did
+  not choose between. Refining one is a choice, and a costly one, so the app
+  records it. Over time that answers a question a single-model tool cannot
+  ask: which model is actually best for *your* prompts.
+
+Submit a prompt and you get Gemini, Nova Canvas, DALL-E 3 and Firefly side by
+side. Deployed on AWS with Lambda, S3 and CloudFront, no servers to manage.
 
 ## Architecture
 
