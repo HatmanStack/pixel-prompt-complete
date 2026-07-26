@@ -50,7 +50,7 @@ from ops.model_counters import ModelCounterService
 from prompts.repository import PromptHistoryRepository
 from users.quota import enforce_quota
 from users.repository import UserRepository
-from users.tier import TierContext, resolve_tier
+from users.tier import TierContext, persist_guest, resolve_tier
 from utils import error_responses
 from utils.content_filter import ContentFilter
 from utils.logger import StructuredLogger
@@ -318,6 +318,12 @@ def _parse_and_validate_request(
         if not verify_turnstile(captcha_token, ip):
             return None, response(403, error_responses.captcha_failed())
 
+    # Guest record is written only now: identify -> verify -> persist. Writing
+    # in resolve_tier let a caller who cannot solve the CAPTCHA still create a
+    # DynamoDB item on every request.
+    if tier_ctx.guest_row_pending:
+        persist_guest(tier_ctx, _user_repo)
+
     # Extract prompt
     prompt = body.get("prompt", default_prompt)
 
@@ -342,6 +348,8 @@ def _parse_and_validate_request(
         if not result.allowed:
             if result.reason == "suspended":
                 return None, response(403, error_responses.account_suspended())
+            if result.reason == "guest_ip":
+                return None, response(429, error_responses.guest_ip_limit())
             if result.reason == "guest_global":
                 return None, response(429, error_responses.guest_global_limit())
             if result.reason == "insufficient_credits":

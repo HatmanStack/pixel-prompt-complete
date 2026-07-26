@@ -260,6 +260,19 @@ Parameters:
     Default: 3600
     Description: Guest rolling window length in seconds
 
+  GuestIpGenerateLimit:
+    Type: Number
+    Default: 3
+    Description: >-
+      Guest generations per source-IP hash per window. Must be BELOW
+      GuestGlobalLimit or it can never bind first. Stops one caller cycling
+      cookies from draining the shared guest pool.
+
+  GuestIpWindowSeconds:
+    Type: Number
+    Default: 3600
+    Description: Rolling window for the per-IP guest limit, in seconds
+
   GuestGlobalLimit:
     Type: Number
     Default: 5
@@ -533,6 +546,8 @@ Resources:
           # Guest limits
           GUEST_GENERATE_LIMIT: !Ref GuestGenerateLimit
           GUEST_WINDOW_SECONDS: !Ref GuestWindowSeconds
+          GUEST_IP_GENERATE_LIMIT: !Ref GuestIpGenerateLimit
+          GUEST_IP_WINDOW_SECONDS: !Ref GuestIpWindowSeconds
           GUEST_GLOBAL_LIMIT: !Ref GuestGlobalLimit
           GUEST_GLOBAL_WINDOW_SECONDS: !Ref GuestGlobalWindowSeconds
           # Free tier limits

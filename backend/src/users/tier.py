@@ -26,6 +26,12 @@ class TierContext:
     guest_token_id: str | None
     issue_guest_cookie: bool
     new_guest_token: str | None = None
+    # Hash of the source IP. Quota enforces against this for guests, because
+    # the token is caller-chosen and a fresh one is a cookie delete away.
+    ip_hash: str | None = None
+    # True when a guest record has been identified but deliberately NOT yet
+    # written. Writing before CAPTCHA lets an unsolved challenge create rows.
+    guest_row_pending: bool = False
 
 
 def extract_claims(event: dict[str, Any]) -> dict[str, Any] | None:
@@ -45,6 +51,11 @@ def _cookie_header(event: dict[str, Any]) -> str | None:
         if k.lower() == "cookie":
             return v
     return None
+
+
+def _ip_hash(event: dict[str, Any]) -> str:
+    """Stable, non-reversible bucket for a source IP."""
+    return hashlib.sha256(_source_ip(event).encode()).hexdigest()[:16]
 
 
 def _source_ip(event: dict[str, Any]) -> str:
@@ -90,6 +101,7 @@ def resolve_tier(
     token_id = guest_service.verify(existing) if existing else None
     if token_id is not None:
         return TierContext(
+            ip_hash=_ip_hash(event),
             tier="guest",
             user_id=f"guest#{token_id}",
             email=None,
@@ -105,9 +117,9 @@ def resolve_tier(
             "Failed to verify newly issued guest token. "
             "GUEST_TOKEN_SECRET may have changed between issue and verify."
         )
-    ip_hash = hashlib.sha256(_source_ip(event).encode()).hexdigest()[:16]
-    now = int(time.time())
-    repo.upsert_guest(new_token_id, ip_hash, now + config.guest_window_seconds + 300)
+    # Deliberately NOT persisted here. The row is written by persist_guest()
+    # once CAPTCHA has passed; creating it first lets anyone who cannot solve
+    # the challenge still write a DynamoDB item per request.
     return TierContext(
         tier="guest",
         user_id=f"guest#{new_token_id}",
@@ -116,4 +128,22 @@ def resolve_tier(
         guest_token_id=new_token_id,
         issue_guest_cookie=True,
         new_guest_token=new_token,
+        ip_hash=_ip_hash(event),
+        guest_row_pending=True,
+    )
+
+
+def persist_guest(ctx: TierContext, repo: UserRepository) -> None:
+    """Write a pending guest record. Call only after CAPTCHA has passed.
+
+    Separated from :func:`resolve_tier` so identification and persistence can
+    be ordered around the challenge: identify, verify, then write.
+    """
+    if not ctx.guest_row_pending or ctx.guest_token_id is None:
+        return
+    now = int(time.time())
+    repo.upsert_guest(
+        ctx.guest_token_id,
+        ctx.ip_hash or "unknown",
+        now + config.guest_window_seconds + 300,
     )

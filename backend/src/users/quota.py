@@ -49,7 +49,29 @@ def enforce_quota(
     if ctx.tier == "guest":
         if endpoint in ("refine", "outpaint"):
             return QuotaResult(allowed=False, reason="guest_per_user", reset_at=0, usage={})
-        # Per-guest first so denied guests don't consume the global pool.
+        # Per-IP first: it is the only guest bucket a caller cannot reset.
+        # Dropping the cookie mints a new token with a fresh per-token
+        # counter, so checking that alone bounds nothing.
+        if ctx.ip_hash:
+            ip_ok, ip_item = repo.increment_guest_ip(
+                ctx.ip_hash,
+                config.guest_ip_generate_limit,
+                config.guest_ip_window_seconds,
+                now,
+            )
+            if not ip_ok:
+                usage, reset = _usage(
+                    ip_item,
+                    "generateCount",
+                    config.guest_ip_generate_limit,
+                    "windowStart",
+                    config.guest_ip_window_seconds,
+                )
+                return QuotaResult(
+                    allowed=False, reason="guest_ip", reset_at=reset, usage=usage
+                )
+
+        # Per-guest next so denied guests don't consume the global pool.
         assert ctx.guest_token_id is not None
         ok, item = repo.increment_guest_generate(
             ctx.guest_token_id,

@@ -389,6 +389,29 @@ class UserRepository:
             return self.get_user(key) or item
         return item
 
+    def increment_guest_ip(
+        self, ip_hash: str, limit: int, window_seconds: int, now: int
+    ) -> tuple[bool, dict]:
+        """Count guest generates per source-IP hash.
+
+        The per-token counter is trivially reset by discarding a cookie, so it
+        bounds nothing. This one is keyed on something the caller does not
+        choose, which is what makes it an actual limit.
+
+        The ``ipHash`` this reads was already being computed and stored on
+        every guest record — it was simply never used for anything.
+        """
+        key = f"guest#ip#{ip_hash}"
+        return self._atomic_increment(
+            key,
+            "generateCount",
+            "windowStart",
+            window_seconds,
+            limit,
+            now,
+            create_if_missing=True,
+        )
+
     def increment_guest_generate(
         self, token_id: str, limit: int, window_seconds: int, now: int
     ) -> tuple[bool, dict]:

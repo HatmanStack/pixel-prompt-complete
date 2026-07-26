@@ -91,6 +91,21 @@ if auth_enabled and not guest_token_secret:
     )
 guest_generate_limit = _safe_int("GUEST_GENERATE_LIMIT", 1)
 guest_window_seconds = _safe_int("GUEST_WINDOW_SECONDS", 3600)
+# Per-IP guest limit. The per-token limit below bounds nothing on its own:
+# a guest identity is a cookie, and dropping it mints a fresh one with a fresh
+# counter. This is the bucket a cookie drop cannot escape.
+#
+# What it actually protects is FAIRNESS, not total spend — GUEST_GLOBAL_LIMIT
+# already caps aggregate guest cost. Without a per-IP bucket, one caller
+# cycling cookies can drain the entire global pool and lock out every other
+# guest. Keep this BELOW the global limit or it can never bind first.
+#
+# More generous than the per-token limit on purpose: an IP is not a person,
+# since offices and mobile carriers NAT many users behind one address. It is
+# an abuse ceiling, not a fair-use quota.
+guest_ip_generate_limit = _safe_int("GUEST_IP_GENERATE_LIMIT", 3)
+guest_ip_window_seconds = _safe_int("GUEST_IP_WINDOW_SECONDS", 3600)
+
 guest_global_limit = _safe_int("GUEST_GLOBAL_LIMIT", 5)
 guest_global_window_seconds = _safe_int("GUEST_GLOBAL_WINDOW_SECONDS", 3600)
 
