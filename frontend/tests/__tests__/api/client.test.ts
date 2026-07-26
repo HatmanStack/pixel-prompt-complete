@@ -474,3 +474,41 @@ describe('API Client', () => {
     });
   });
 });
+
+describe('error code contract', () => {
+  /**
+   * The backend puts its machine-readable code in `error` and never emits a
+   * `code` field. Callers match on `code`, so apiFetch has to fall back to
+   * `error` -- without it, every such match is permanently false. That is
+   * exactly how the age gate shipped broken: the panel checked for
+   * AGE_VERIFICATION_REQUIRED against a field nothing ever populated, so the
+   * modal never opened and the user saw a raw error string instead.
+   */
+  it('exposes the backend error code as .code', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+      statusText: 'Forbidden',
+      json: async () => ({
+        error: 'AGE_VERIFICATION_REQUIRED',
+        message: 'You must confirm you are 18 or older to use this service.',
+      }),
+    }) as unknown as typeof fetch;
+
+    await expect(generateSession('a cat')).rejects.toMatchObject({
+      status: 403,
+      code: 'AGE_VERIFICATION_REQUIRED',
+    });
+  });
+
+  it('prefers an explicit code field when the backend sends one', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      statusText: 'Bad Request',
+      json: async () => ({ error: 'OUTER', code: 'INNER', message: 'x' }),
+    }) as unknown as typeof fetch;
+
+    await expect(generateSession('a cat')).rejects.toMatchObject({ code: 'INNER' });
+  });
+});

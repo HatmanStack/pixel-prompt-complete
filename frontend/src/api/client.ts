@@ -98,7 +98,10 @@ async function apiFetch<T>(
         errorData.error || errorData.message || `HTTP ${response.status}: ${response.statusText}`,
       );
       error.status = response.status;
-      error.code = errorData.code;
+      // The backend puts its machine-readable code in `error`; `code` is a
+      // field it never emits. Without this fallback, every caller matching on
+      // a specific failure has to string-match the human-readable message.
+      error.code = errorData.code ?? errorData.error;
 
       // Auth/billing response interceptors
       if (response.status === 401) {
@@ -196,10 +199,16 @@ async function apiFetch<T>(
 export async function generateSession(
   prompt: string,
   captchaToken?: string,
+  ageAffirmed?: boolean,
 ): Promise<SessionGenerateResponse> {
-  const body: Record<string, string> = { prompt };
+  const body: Record<string, string | boolean> = { prompt };
   if (captchaToken) {
     body.captchaToken = captchaToken;
+  }
+  // Sent only on the request that follows the user actually confirming. The
+  // backend records it against their identity, so it is not sent again.
+  if (ageAffirmed) {
+    body.ageAffirmed = true;
   }
   return apiFetch<SessionGenerateResponse>(API_ROUTES.GENERATE, {
     method: 'POST',

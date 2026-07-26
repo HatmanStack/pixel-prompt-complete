@@ -10,6 +10,7 @@ import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { useSessionPolling } from '@/hooks/useSessionPolling';
 import { generateSession } from '@/api/client';
 import { CAPTCHA_ENABLED } from '@/api/config';
+import { AgeGateModal } from '@/components/features/AgeGateModal';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useToast } from '@/stores/useToastStore';
 import { useSound } from '@/hooks/useSound';
@@ -30,6 +31,10 @@ import { MODELS } from '@/types';
 
 interface ApiError extends Error {
   status?: number;
+  // The backend's machine-readable code, e.g. AGE_VERIFICATION_REQUIRED.
+  // Matching on this beats substring-matching the human-readable message,
+  // which changes whenever the copy does.
+  code?: string;
 }
 
 /**
@@ -175,6 +180,11 @@ export const GenerationPanel: FC = () => {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated());
   const needsCaptcha = CAPTCHA_ENABLED && !isAuthenticated;
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  // Set only after the user confirms, and cleared once a generation
+  // succeeds: the server remembers the affirmation, so re-sending it on
+  // every later request would be noise.
+  const [ageAffirmed, setAgeAffirmed] = useState(false);
+  const [showAgeGate, setShowAgeGate] = useState(false);
   const captchaResetRef = useRef<(() => void) | null>(null);
 
   // Poll session status when we have a session ID
@@ -215,7 +225,7 @@ export const GenerationPanel: FC = () => {
       playSound('click');
 
       // Call API to start generation
-      const response = await generateSession(prompt, captchaToken ?? undefined);
+      const response = await generateSession(prompt, captchaToken ?? undefined, ageAffirmed);
 
       if (!response.sessionId) {
         throw new Error('No session ID received');
@@ -260,7 +270,12 @@ export const GenerationPanel: FC = () => {
       const error = err as ApiError;
 
       // Handle specific error codes
-      if (error.status === 429) {
+      if (error.status === 403 && error.code === 'AGE_VERIFICATION_REQUIRED') {
+        // Not a failure the user should read as one: they have not been asked
+        // yet. Open the gate instead of showing an error, and leave the prompt
+        // intact so confirming and pressing generate resumes where they were.
+        setShowAgeGate(true);
+      } else if (error.status === 429) {
         const msg = 'Rate limit exceeded. Please try again later.';
         setErrorMessage(msg);
         showError(msg);
@@ -283,6 +298,7 @@ export const GenerationPanel: FC = () => {
   }, [
     prompt,
     captchaToken,
+    ageAffirmed,
     needsCaptcha,
     resetSession,
     setIsGenerating,
@@ -358,6 +374,20 @@ export const GenerationPanel: FC = () => {
             <PromptEnhancer disabled={isGenerating} />
           </div>
         </div>
+
+        <AgeGateModal
+          open={showAgeGate}
+          onConfirm={() => {
+            setAgeAffirmed(true);
+            setShowAgeGate(false);
+          }}
+          onDecline={() => {
+            setShowAgeGate(false);
+            const msg = 'This service is only available to people aged 18 or over.';
+            setErrorMessage(msg);
+            showError(msg);
+          }}
+        />
 
         {needsCaptcha && (
           <CaptchaWidget

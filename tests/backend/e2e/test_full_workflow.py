@@ -18,12 +18,22 @@ pytestmark = [pytest.mark.e2e, skip_no_ministack]
 
 
 def _make_event(method="POST", path="/generate", body=None, source_ip="10.0.0.1"):
+    """Build a Lambda event.
+
+    /generate bodies carry ageAffirmed by default because that is what a real
+    client sends once the user has passed the 18+ gate, so E2E exercises the
+    post-affirmation path rather than switching the gate off. The gate's own
+    behaviour is covered in tests/backend/unit/test_age_gate.py. Pass
+    ageAffirmed explicitly to override.
+    """
     event = {
         "rawPath": path,
         "requestContext": {"http": {"method": method, "sourceIp": source_ip}},
         "headers": {},
     }
     if body is not None:
+        if path == "/generate" and "ageAffirmed" not in body:
+            body = {**body, "ageAffirmed": True}
         event["body"] = json.dumps(body)
     return event
 

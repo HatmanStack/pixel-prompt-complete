@@ -407,6 +407,59 @@ class UserRepository:
             return self.get_user(key) or item
         return item
 
+    def has_affirmed_age(self, identity_key: str) -> bool:
+        """Return True if this identity has previously affirmed being 18+.
+
+        ``identity_key`` is ``TierContext.user_id``, which already namespaces
+        guests (``guest#...``) and anonymous callers (``anon#...``) apart from
+        Cognito subs, so one method covers every tier.
+        """
+        item = self.get_user(identity_key)
+        return bool(item and item.get("ageAffirmedAt"))
+
+    def record_age_affirmation(
+        self, identity_key: str, now: int, ephemeral_window_seconds: int | None = None
+    ) -> None:
+        """Record that this identity affirmed being 18+.
+
+        The record is initialised first rather than being conjured by this
+        write. A bare item created here would satisfy ``get_or_create_user``'s
+        existence check on a later call, so the quota path would skip
+        initialisation and the row would keep whatever TTL this method chose
+        instead of the one its counter bucket expects. For an anonymous caller
+        that meant an abuse counter living 24x longer than its own window.
+
+        ``ephemeral_window_seconds`` is the caller's quota window for guest and
+        anonymous identities, so the TTL matches what ``increment_anon`` and
+        friends would have set. Pass None for real accounts: a TTL on one of
+        those would delete a customer.
+
+        The affirmation itself is written only if absent, so the timestamp is
+        the first affirmation rather than the most recent request, and an
+        existing record's TTL is never touched.
+        """
+        if ephemeral_window_seconds is not None:
+            self.get_or_create_user(
+                identity_key,
+                now=now,
+                ttl=now + ephemeral_window_seconds + _IP_BUCKET_TTL_GRACE_SECONDS,
+            )
+        else:
+            self.get_or_create_user(identity_key, now=now)
+
+        try:
+            self._table.update_item(
+                Key={"userId": identity_key},
+                UpdateExpression="SET ageAffirmedAt = :now, updatedAt = :now",
+                ConditionExpression="attribute_not_exists(ageAffirmedAt)",
+                ExpressionAttributeValues={":now": now},
+            )
+        except ClientError as e:
+            # Already affirmed. Two concurrent first requests race here and the
+            # loser is not an error: the fact we wanted recorded is recorded.
+            if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
+                raise
+
     def increment_anon(
         self, key: str, counter: str, limit: int, window_seconds: int, now: int
     ) -> tuple[bool, dict]:

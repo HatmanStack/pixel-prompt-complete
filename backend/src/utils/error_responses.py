@@ -236,6 +236,21 @@ def daily_spend_ceiling(**kwargs) -> Dict[str, Any]:
     )
 
 
+def age_verification_required(**kwargs) -> Dict[str, Any]:
+    """Caller has not affirmed they are 18 or older.
+
+    Also returned when the affirmation store is unreachable. Being unable to
+    recall that someone answered is a reason to ask again, not a reason to
+    refuse them or to wave them through.
+    """
+    return error_response(
+        status_code=403,
+        error_code="AGE_VERIFICATION_REQUIRED",
+        message="You must confirm you are 18 or older to use this service.",
+        **kwargs,
+    )
+
+
 def captcha_required(**kwargs) -> Dict[str, Any]:
     """403 CAPTCHA verification required."""
     return error_response(

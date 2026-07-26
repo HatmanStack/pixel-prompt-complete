@@ -242,6 +242,7 @@ Cost ceiling checks apply regardless of `AUTH_ENABLED` -- the provider bills for
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `CAPTCHA_ENABLED` | No | `false` | Enable Turnstile CAPTCHA for guest `/generate` |
+| `AGE_GATE_ENABLED` | No | **`true`** | Require an 18+ affirmation before a first `/generate`. Defaults **on**, unlike every other flag here: Google's API terms allow use only where the service is not "likely to be accessed by" under-18s, so the compliant behaviour is what an operator gets by doing nothing |
 | `TURNSTILE_SECRET_KEY` | Yes*** | `""` | Cloudflare Turnstile secret key |
 
 ***Required when `CAPTCHA_ENABLED=true`.

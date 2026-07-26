@@ -213,6 +213,51 @@ def _spend_ceiling_exceeded(endpoint_kind: str) -> tuple[bool, str]:
     return False, ""
 
 
+def _enforce_age_gate(tier_ctx: TierContext, body: dict[str, Any]) -> ApiResponse | None:
+    """Require an 18+ affirmation before a first generation.
+
+    Returns an error response to send, or None to proceed.
+
+    A prior affirmation is remembered against the caller's identity so the
+    prompt appears once rather than on every generation. If the store is
+    unreachable we ask again rather than either blocking the request or waving
+    it through: being unable to recall that someone answered is a reason to
+    repeat the question, and the degraded state is a re-prompt rather than an
+    outage. The subsequent write is best effort for the same reason.
+    """
+    if _user_repo is None:
+        return None
+
+    identity = tier_ctx.user_id
+    affirmed_now = body.get("ageAffirmed") is True
+
+    if not affirmed_now:
+        try:
+            if _user_repo.has_affirmed_age(identity):
+                return None
+        except Exception as e:
+            StructuredLogger.error(f"Age affirmation lookup failed, re-prompting: {e}")
+        return response(403, error_responses.age_verification_required())
+
+    now = int(time.time())
+    # Guest and anonymous identities are ephemeral counter buckets, so their
+    # record carries a TTL matching the quota window the same identity is
+    # metered against. Real accounts get None: a TTL there deletes a customer.
+    if tier_ctx.tier == "guest":
+        window = config.guest_window_seconds
+    elif tier_ctx.tier == "anon":
+        window = config.anon_window_seconds
+    else:
+        window = None
+    try:
+        _user_repo.record_age_affirmation(identity, now, window)
+    except Exception as e:
+        # The caller answered; failing to persist it costs a repeat prompt on
+        # their next generation, not access now.
+        StructuredLogger.error(f"Failed to record age affirmation: {e}")
+    return None
+
+
 def _enforce_quota_safe(tier_ctx: TierContext, endpoint_kind: str, now: int) -> "QuotaResult":
     """Enforce quota, failing OPEN if the quota store is unreachable.
 
@@ -384,6 +429,21 @@ def _parse_and_validate_request(
     # Content filter
     if prompt and content_filter.check_prompt(prompt):
         return None, response(400, error_responses.inappropriate_content())
+
+    # Age gate. Google's API terms allow use only where the calling service is
+    # not "likely to be accessed by" individuals under 18, which is a stricter
+    # test than a checkbox and is not satisfied by a public URL that asks
+    # nothing. Enforced on /generate only: refinement requires an existing
+    # session, which required a generate, which required this.
+    #
+    # Placed here for the same reason quota is: a malformed request should fail
+    # local validation cheaply rather than costing a DynamoDB read and coming
+    # back as 403 when the real problem was a missing prompt. Before quota, so
+    # a request we are about to refuse does not consume any.
+    if config.age_gate_enabled and endpoint_kind == "generate":
+        err = _enforce_age_gate(tier_ctx, body)
+        if err:
+            return None, err
 
     # Quota enforcement (after validation so invalid requests don't consume quota)
     if endpoint_kind in ("generate", "refine", "outpaint"):

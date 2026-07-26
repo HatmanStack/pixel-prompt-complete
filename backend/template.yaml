@@ -70,6 +70,7 @@ Metadata:
         Parameters:
           - CaptchaEnabled
           - TurnstileSecretKey
+          - AgeGateEnabled
       - Label:
           default: "Email Notifications (SES)"
         Parameters:
@@ -529,6 +530,20 @@ Parameters:
       - "false"
     Description: Enable Cloudflare Turnstile CAPTCHA for guest /generate
 
+  AgeGateEnabled:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    # Defaults to true, unlike every other feature flag here. Google's API
+    # terms permit use only where the calling service is not "likely to be
+    # accessed by" individuals under 18, so the compliant posture is what an
+    # operator gets by changing nothing. Turning it off is the explicit act.
+    Description: >-
+      Require an 18+ confirmation before a first /generate. Leave enabled
+      unless you have another way to meet the provider age requirements.
+
   TurnstileSecretKey:
     Type: String
     NoEcho: true
@@ -664,6 +679,7 @@ Resources:
           MODEL_FIREFLY_DAILY_CAP: !Ref ModelFireflyDailyCap
           # CAPTCHA
           CAPTCHA_ENABLED: !Ref CaptchaEnabled
+          AGE_GATE_ENABLED: !Ref AgeGateEnabled
           TURNSTILE_SECRET_KEY: !Ref TurnstileSecretKey
           # SES
           SES_ENABLED: !Ref SesEnabled
