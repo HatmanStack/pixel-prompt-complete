@@ -45,7 +45,7 @@ from models.providers import (
     sanitize_error_message,
 )
 from ops.cost_meter import CostMeter
-from ops.metrics import emit_request_metric
+from ops.metrics import emit_quota_rejection, emit_request_metric
 from ops.model_counters import ModelCounterService
 from prompts.repository import PromptHistoryRepository
 from users.quota import QuotaResult, enforce_quota
@@ -368,6 +368,12 @@ def _parse_and_validate_request(
         # (Guest refine/outpaint was already refused above, before any write.)
         result = _enforce_quota_safe(tier_ctx, endpoint_kind, int(time.time()))
         if not result.allowed:
+            # A user hitting a wall and an attacker probing one used to look
+            # identical from outside, and a limit set wrongly low produced
+            # silent churn instead of a signal.
+            emit_quota_rejection(
+                tier_ctx.tier, endpoint_kind, result.reason or "unknown"
+            )
             if result.reason == "suspended":
                 return None, response(403, error_responses.account_suspended())
             if result.reason == "guest_ip":
@@ -839,14 +845,14 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
             include_enhance=prompt_enhancer.is_available,
         )
 
-        # Emit CloudWatch metrics per model (only in auth-enabled mode)
-        if config.auth_enabled:
-            for mname, mresult in results.items():
-                if mname in skipped_models:
-                    continue
-                dur = mresult.get("duration", 0) * 1000  # seconds to ms
-                is_err = mresult.get("status") == "error"
-                emit_request_metric("/generate", mname, dur, is_err)
+        # Emitted regardless of auth: knowing which provider is slow or
+        # failing has nothing to do with whether the caller logged in.
+        for mname, mresult in results.items():
+            if mname in skipped_models:
+                continue
+            dur = mresult.get("duration", 0) * 1000  # seconds to ms
+            is_err = mresult.get("status") == "error"
+            emit_request_metric("/generate", mname, dur, is_err)
 
         set_cookie = None
         if (
@@ -1099,14 +1105,13 @@ def _handle_refinement(
             user_id=validated.tier.user_id if validated.tier else None,
         )
 
-        # Emit CloudWatch metrics for refinement (only in auth-enabled mode)
-        if config.auth_enabled:
-            emit_request_metric(
-                f"/{handler_name.replace('handle_', '')}",
-                model_name,
-                duration * 1000,
-                is_error,
-            )
+        # Emitted regardless of auth, as above.
+        emit_request_metric(
+            f"/{handler_name.replace('handle_', '')}",
+            model_name,
+            duration * 1000,
+            is_error,
+        )
 
         if result["status"] == "success":
             store_prompt = result_prompt_fn(prompt) if result_prompt_fn else prompt

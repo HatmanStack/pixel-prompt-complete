@@ -78,6 +78,74 @@ def emit_request_metric(
         StructuredLogger.error(f"Failed to emit CloudWatch metric: {e}")
 
 
+def emit_spend_metric(usd_micros: int, tier: str) -> None:
+    """Emit request spend to CloudWatch, in dollars. Fire-and-forget.
+
+    The ledger records micro-dollars because DynamoDB counters must be
+    integers, but this emits dollars: an alarm threshold a human sets should
+    read "50", not "50000000". CloudWatch metrics are not accumulators, so
+    the float carries no drift risk here.
+
+    Spend lives in DynamoDB and is visible on the admin dashboard, but
+    neither of those can page anyone. This is what makes a runaway bill
+    something that wakes an operator rather than something discovered on the
+    next invoice.
+    """
+    if usd_micros <= 0:
+        return
+    try:
+        client = _get_cw_client()
+        client.put_metric_data(
+            Namespace=_CW_NAMESPACE,
+            MetricData=[
+                {
+                    "MetricName": "SpendUsd",
+                    "Value": usd_micros / 1_000_000,
+                    "Unit": "None",
+                    "Dimensions": [{"Name": "Tier", "Value": tier}],
+                },
+                # Undimensioned copy: an alarm on total spend cannot sum
+                # across dimension values, so it needs its own series.
+                {
+                    "MetricName": "TotalSpendUsd",
+                    "Value": usd_micros / 1_000_000,
+                    "Unit": "None",
+                },
+            ],
+        )
+    except Exception as e:
+        StructuredLogger.error(f"Failed to emit spend metric: {e}")
+
+
+def emit_quota_rejection(tier: str, endpoint: str, reason: str) -> None:
+    """Emit a quota/limit rejection. Fire-and-forget.
+
+    Rejections were invisible: a user hitting a wall and an attacker probing
+    one looked identical from outside, and a limit set wrongly low produced
+    silent churn rather than a signal.
+    """
+    try:
+        client = _get_cw_client()
+        client.put_metric_data(
+            Namespace=_CW_NAMESPACE,
+            MetricData=[
+                {
+                    "MetricName": "QuotaRejection",
+                    "Value": 1,
+                    "Unit": "Count",
+                    "Dimensions": [
+                        {"Name": "Tier", "Value": tier},
+                        {"Name": "Endpoint", "Value": endpoint},
+                        {"Name": "Reason", "Value": reason},
+                    ],
+                },
+                {"MetricName": "TotalQuotaRejections", "Value": 1, "Unit": "Count"},
+            ],
+        )
+    except Exception as e:
+        StructuredLogger.error(f"Failed to emit quota rejection metric: {e}")
+
+
 # ---------- Daily Snapshot ----------
 
 _MODEL_NAMES = ("gemini", "nova", "openai", "firefly")
