@@ -206,69 +206,122 @@ Enhance the following prompt:"""
             return prompt
 
         try:
-            provider = prompt_model["provider"]
-
-            # Branch based on provider type
-            if provider == "google_gemini":
-                # Use Google genai client for Gemini
-                api_key = prompt_model.get("api_key", "")
-                if not api_key:
-                    return prompt
-
-                client = get_genai_client(api_key, timeout=enhance_timeout)
-
-                response = client.models.generate_content(
-                    model=prompt_model["id"],
-                    contents=f"{self.system_prompt}\n\n{prompt}",
-                )
-
-                # Extract text from Gemini response
-                if not response.candidates or len(response.candidates) == 0:
-                    raise ValueError("Gemini returned empty candidates")
-
-                enhanced = response.candidates[0].content.parts[0].text.strip()
-
-            else:
-                # Use OpenAI client for OpenAI and OpenAI-compatible providers
-                api_key = prompt_model.get("api_key", "")
-                if not api_key:
-                    return prompt
-
-                client_kwargs = {"timeout": enhance_timeout}
-
-                # Support custom base_url for OpenAI-compatible providers
-                if "base_url" in prompt_model:
-                    client_kwargs["base_url"] = prompt_model["base_url"]
-
-                client = get_openai_client(api_key, **client_kwargs)
-
-                # Determine model identifier from prompt_model
-                model_id = prompt_model["id"]
-
-                completion_params: dict[str, Any] = {
-                    "model": model_id,
-                    "messages": [
-                        {"role": "system", "content": self.system_prompt},
-                        {"role": "user", "content": prompt},
-                    ],
-                    **_get_model_params(model_id),
-                }
-
-                response = client.chat.completions.create(**completion_params)
-
-                # Extract enhanced prompt
-                enhanced = response.choices[0].message.content
-                if enhanced:
-                    enhanced = enhanced.strip()
-                else:
-                    enhanced = ""
-
-            return enhanced
-
+            return self._complete(self.system_prompt, prompt)
         except Exception as e:
             # Return original prompt on error, but warn about failure
             StructuredLogger.warning(f"Prompt enhancement failed: {e}")
             return prompt
+
+    def _complete(self, system_prompt: str, user_prompt: str, json_mode: bool = False) -> str:
+        """Run one completion against the configured prompt model.
+
+        Shared by enhance() and enhance_variants() so the provider branching
+        cannot drift between them.
+        """
+        prompt_model = self.prompt_model
+        if not prompt_model:
+            return user_prompt
+        api_key = prompt_model.get("api_key", "")
+        if not api_key:
+            return user_prompt
+
+        if prompt_model["provider"] == "google_gemini":
+            client = get_genai_client(api_key, timeout=enhance_timeout)
+            gen_config: dict[str, Any] | None = (
+                {"response_mime_type": "application/json"} if json_mode else None
+            )
+            response = client.models.generate_content(
+                model=prompt_model["id"],
+                contents=f"{system_prompt}\n\n{user_prompt}",
+                **({"config": gen_config} if gen_config else {}),
+            )
+            if not response.candidates or len(response.candidates) == 0:
+                raise ValueError("Gemini returned empty candidates")
+            return response.candidates[0].content.parts[0].text.strip()
+
+        client_kwargs: dict[str, Any] = {"timeout": enhance_timeout}
+        if "base_url" in prompt_model:
+            client_kwargs["base_url"] = prompt_model["base_url"]
+        client = get_openai_client(api_key, **client_kwargs)
+
+        model_id = prompt_model["id"]
+        completion_params: dict[str, Any] = {
+            "model": model_id,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            **_get_model_params(model_id),
+        }
+        # Only ask for JSON mode where it is known to exist. A custom
+        # base_url means an OpenAI-compatible third party, and many of those
+        # reject response_format outright. Sending it there would fail the
+        # call and drop /enhance back to returning the same prompt twice,
+        # which is the bug this method exists to remove.
+        if json_mode and "base_url" not in prompt_model:
+            completion_params["response_format"] = {"type": "json_object"}
+
+        response = client.chat.completions.create(**completion_params)
+        content = response.choices[0].message.content
+        return content.strip() if content else ""
+
+    VARIANTS_SYSTEM_PROMPT = """You expand a user's image prompt into two \
+distinct versions.
+
+Return ONLY JSON of the form:
+{"short": "...", "long": "..."}
+
+- "short": one tight sentence. Adds the most valuable missing detail (subject,
+  lighting or style) and nothing else. Suitable when the user wants the model
+  to retain interpretive freedom.
+- "long": two to four sentences. Adds composition, lighting, mood, and style
+  or artistic reference. Suitable when the user wants tight control.
+
+Both must describe the same subject as the original. "long" must not simply
+be "short" with words appended; they are different levels of direction, not
+lengths of the same sentence."""
+
+    def enhance_variants(self, prompt: str) -> tuple[str, str]:
+        """Return (short, long) enhanced variants of ``prompt``.
+
+        /enhance previously returned the SAME string for both, while the UI
+        renders a short/long toggle and a Use button that picks between them.
+        The control looked functional and did nothing.
+
+        One LLM call produces both, so this costs exactly what the single
+        enhancement cost before and COST_ENHANCE_USD_MICROS stays accurate.
+        Two calls would have doubled the price of an endpoint that is still
+        unauthenticated.
+
+        Falls back to the previous behaviour (the same string twice) rather
+        than failing: a degraded toggle beats a broken button.
+        """
+        if not prompt:
+            return prompt, prompt
+        if not self.is_available:
+            return prompt, prompt
+
+        try:
+            raw = self._complete(self.VARIANTS_SYSTEM_PROMPT, prompt, json_mode=True)
+            data = json.loads(raw)
+            short = (data.get("short") or "").strip()
+            long_ = (data.get("long") or "").strip()
+            # Identical variants are rejected too: that is the original bug
+            # (a toggle over one string) arriving by a different route.
+            if short and long_ and short != long_:
+                return short, long_
+            StructuredLogger.warning(
+                "Enhance variants unusable (missing or identical); "
+                "returning the original prompt"
+            )
+        except Exception as e:
+            StructuredLogger.warning(f"Enhance variants failed: {e}")
+
+        # Return the original rather than retrying. A second call would make
+        # this endpoint cost twice what COST_ENHANCE_USD_MICROS records, so
+        # the failure path would silently under-count spend -- and /enhance is
+        # still unauthenticated, so that is the path an attacker can force.
+        return prompt, prompt
 
     def enhance_safe(self, prompt: str) -> str:
         """

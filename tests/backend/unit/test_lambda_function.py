@@ -193,7 +193,10 @@ class TestRouting:
 
     def test_post_enhance(self, mocks):
         lambda_handler = _get_lambda_handler()
-        mocks["prompt_enhancer"].enhance_safe.return_value = "improved prompt"
+        mocks["prompt_enhancer"].enhance_variants.return_value = (
+            "short improved prompt",
+            "long improved prompt",
+        )
         resp = lambda_handler(_make_event(path="/enhance", body={"prompt": "sunset"}), None)
         assert resp["statusCode"] == 200
         assert _body(resp)["original"] == "sunset"
