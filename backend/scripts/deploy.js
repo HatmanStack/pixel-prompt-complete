@@ -54,26 +54,34 @@ function envToConfig(env) {
     },
 
     // 4 Fixed models
+    // AUTH_ENABLED has no default in the template, by design: there is no
+    // safe value to assume. Deploy fails loudly rather than guessing.
+    authEnabled: env.AUTH_ENABLED,
+    alarmEmail: env.ALARM_EMAIL || '',
+    spend: {
+      monthlyCeilingUsdMicros: env.MONTHLY_SPEND_CEILING_USD_MICROS || '',
+      dailyCeilingUsdMicros: env.GLOBAL_DAILY_SPEND_CEILING_USD_MICROS || ''
+    },
     models: {
-      flux: {
-        enabled: (env.FLUX_ENABLED || 'true').toLowerCase() === 'true',
-        apiKey: env.FLUX_API_KEY || '',
-        modelId: env.FLUX_MODEL_ID || 'flux-pro-1.1'
-      },
-      recraft: {
-        enabled: (env.RECRAFT_ENABLED || 'true').toLowerCase() === 'true',
-        apiKey: env.RECRAFT_API_KEY || '',
-        modelId: env.RECRAFT_MODEL_ID || 'recraftv3'
-      },
       gemini: {
         enabled: (env.GEMINI_ENABLED || 'true').toLowerCase() === 'true',
         apiKey: env.GEMINI_API_KEY || '',
-        modelId: env.GEMINI_MODEL_ID || 'gemini-2.0-flash-exp'
+        modelId: env.GEMINI_MODEL_ID || ''
+      },
+      nova: {
+        enabled: (env.NOVA_ENABLED || 'true').toLowerCase() === 'true',
+        modelId: env.NOVA_MODEL_ID || ''
       },
       openai: {
         enabled: (env.OPENAI_ENABLED || 'true').toLowerCase() === 'true',
         apiKey: env.OPENAI_API_KEY || '',
-        modelId: env.OPENAI_MODEL_ID || 'gpt-image-1'
+        modelId: env.OPENAI_MODEL_ID || ''
+      },
+      firefly: {
+        enabled: (env.FIREFLY_ENABLED || 'true').toLowerCase() === 'true',
+        clientId: env.FIREFLY_CLIENT_ID || '',
+        clientSecret: env.FIREFLY_CLIENT_SECRET || '',
+        modelId: env.FIREFLY_MODEL_ID || ''
       }
     }
   };
@@ -151,50 +159,64 @@ export function loadConfig() {
 }
 
 export function buildParameterOverrides(config) {
+  // Every key here must exist in template.yaml. Passing an unknown parameter
+  // fails the whole deploy, which is how Flux and Recraft -- models this
+  // stack has not had for some time -- were able to sit here unnoticed.
+  if (config.authEnabled !== 'true' && config.authEnabled !== 'false') {
+    console.error(
+      'Error: AUTH_ENABLED must be set to "true" or "false" in .env.deploy.\n' +
+      'There is no safe default: "false" serves unauthenticated traffic,\n' +
+      '"true" requires Cognito and a guest token secret.'
+    );
+    process.exit(1);
+  }
+
   const overrides = [
-    `GlobalRateLimit=${config.globalRateLimit}`,
-    `IPRateLimit=${config.ipRateLimit}`,
+    `AuthEnabled=${config.authEnabled}`,
 
     // Prompt model
     `PromptModelProvider=${config.promptModel.provider}`,
     `PromptModelId=${config.promptModel.id}`,
 
-    // Flux
-    `FluxEnabled=${config.models.flux.enabled}`,
-    `FluxModelId=${config.models.flux.modelId}`,
-
-    // Recraft
-    `RecraftEnabled=${config.models.recraft.enabled}`,
-    `RecraftModelId=${config.models.recraft.modelId}`,
-
-    // Gemini
+    // The four fixed models
     `GeminiEnabled=${config.models.gemini.enabled}`,
-    `GeminiModelId=${config.models.gemini.modelId}`,
-
-    // OpenAI
+    `NovaEnabled=${config.models.nova.enabled}`,
     `OpenaiEnabled=${config.models.openai.enabled}`,
-    `OpenaiModelId=${config.models.openai.modelId}`,
+    `FireflyEnabled=${config.models.firefly.enabled}`
   ];
 
-  // Add API keys only if set
-  if (config.promptModel.apiKey) {
-    overrides.push(`PromptModelApiKey=${config.promptModel.apiKey}`);
+  // Model ids only when overridden, so the template defaults stay
+  // authoritative rather than being shadowed by empty strings.
+  const modelIds = {
+    GeminiModelId: config.models.gemini.modelId,
+    NovaModelId: config.models.nova.modelId,
+    OpenaiModelId: config.models.openai.modelId,
+    FireflyModelId: config.models.firefly.modelId
+  };
+  for (const [key, value] of Object.entries(modelIds)) {
+    if (value) overrides.push(`${key}=${value}`);
   }
 
-  if (config.models.flux.apiKey) {
-    overrides.push(`FluxApiKey=${config.models.flux.apiKey}`);
+  // Credentials only if set. Nova uses the Lambda execution role.
+  const secrets = {
+    PromptModelApiKey: config.promptModel.apiKey,
+    GeminiApiKey: config.models.gemini.apiKey,
+    OpenaiApiKey: config.models.openai.apiKey,
+    FireflyClientId: config.models.firefly.clientId,
+    FireflyClientSecret: config.models.firefly.clientSecret
+  };
+  for (const [key, value] of Object.entries(secrets)) {
+    if (value) overrides.push(`${key}=${value}`);
   }
 
-  if (config.models.recraft.apiKey) {
-    overrides.push(`RecraftApiKey=${config.models.recraft.apiKey}`);
+  // Operational settings. Without AlarmEmail the alarms still fire and are
+  // visible in CloudWatch, but nothing is delivered.
+  if (config.alarmEmail) overrides.push(`AlarmEmail=${config.alarmEmail}`);
+  if (config.spend.monthlyCeilingUsdMicros) {
+    overrides.push(`MonthlySpendCeilingUsdMicros=${config.spend.monthlyCeilingUsdMicros}`);
   }
-
-  if (config.models.gemini.apiKey) {
-    overrides.push(`GeminiApiKey=${config.models.gemini.apiKey}`);
-  }
-
-  if (config.models.openai.apiKey) {
-    overrides.push(`OpenaiApiKey=${config.models.openai.apiKey}`);
+  if (config.spend.dailyCeilingUsdMicros) {
+    overrides.push(`GlobalDailySpendCeilingUsdMicros=${config.spend.dailyCeilingUsdMicros}`);
   }
 
   return overrides;

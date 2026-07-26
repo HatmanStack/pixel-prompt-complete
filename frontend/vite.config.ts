@@ -1,10 +1,10 @@
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-import { visualizer } from 'rollup-plugin-visualizer'
-import path from 'path'
-import { fileURLToPath } from 'url'
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import { visualizer } from 'rollup-plugin-visualizer';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -35,11 +35,7 @@ export default defineConfig({
         manualChunks(id: string) {
           // React core + state management libraries
           if (id.includes('node_modules')) {
-            if (
-              id.includes('react') ||
-              id.includes('react-dom') ||
-              id.includes('zustand')
-            ) {
+            if (id.includes('react') || id.includes('react-dom') || id.includes('zustand')) {
               return 'vendor';
             }
             if (id.includes('uuid')) {
@@ -64,16 +60,16 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
       include: ['src/**/*.{js,jsx,ts,tsx}'],
-      exclude: [
-        'src/main.jsx',
-        'src/main.tsx',
-      ],
+      exclude: ['src/main.jsx', 'src/main.tsx'],
+      // Ratcheted to just under the current numbers so the coverage added
+      // for the generation surface and pages cannot silently regress. Raise
+      // these when coverage rises; never lower them to make a build pass.
       thresholds: {
-        statements: 57,
-        lines: 57,
-        branches: 52,
-        functions: 60,
+        statements: 65,
+        lines: 65,
+        branches: 60,
+        functions: 68,
       },
     },
   },
-})
+});
