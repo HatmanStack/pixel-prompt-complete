@@ -193,7 +193,7 @@ Prompt enhancement uses separate config: `PROMPT_MODEL_PROVIDER`, `PROMPT_MODEL_
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `AUTH_ENABLED` | No | `false` | Enable Cognito auth + tier resolution. Gates **identity only** -- quota and cost caps apply regardless |
+| `AUTH_ENABLED` | **Yes** | _none_ | Enable Cognito auth + tier resolution. Gates **identity only** -- quota, cost caps and spend metering apply either way. No default: config raises at import if unset, and the SAM parameter has no default either, so the choice appears in the deploy parameters |
 | `ANON_GENERATE_LIMIT` | No | `5` | `/generate` calls per source IP per window when `AUTH_ENABLED=false` |
 | `ANON_REFINE_LIMIT` | No | `10` | `/iterate` + `/outpaint` calls per source IP per window when `AUTH_ENABLED=false` |
 | `ANON_WINDOW_SECONDS` | No | `3600` | Rolling window for anonymous limits |
@@ -233,7 +233,7 @@ Prompt enhancement uses separate config: `PROMPT_MODEL_PROVIDER`, `PROMPT_MODEL_
 | `MODEL_OPENAI_DAILY_CAP` | No | `500` | Daily generation cap for OpenAI |
 | `MODEL_FIREFLY_DAILY_CAP` | No | `500` | Daily generation cap for Firefly |
 
-Cost ceiling checks run only when `AUTH_ENABLED=true`. Models at their daily cap are skipped during `/generate` (other models still run). If all models are capped, `/generate` returns 429 `MODEL_COST_CEILING`.
+Cost ceiling checks apply regardless of `AUTH_ENABLED` -- the provider bills for a generation whether or not the caller logged in. Models at their daily cap are skipped during `/generate` (other models still run). If all models are capped, `/generate` returns 429 `MODEL_COST_CEILING`. Also enforced on `/iterate` and `/outpaint`, consumed before dispatch.
 
 **CAPTCHA (Cloudflare Turnstile)**:
 
@@ -260,11 +260,11 @@ Cost ceiling checks run only when `AUTH_ENABLED=true`. Models at their daily cap
 |----------|----------|---------|-------------|
 | `ADMIN_ENABLED` | No | `false` | Enable admin API endpoints (requires `AUTH_ENABLED=true`) |
 
-**Open-Source Mode**: the default `AUTH_ENABLED=false, BILLING_ENABLED=false` disables auth, billing, CAPTCHA, email notifications, and admin features. Contributors can still run the full stack without any paid-tier setup -- no Cognito, no Stripe.
+**Open-Source Mode**: setting `AUTH_ENABLED=false` explicitly (with `BILLING_ENABLED=false`) disables auth, billing, CAPTCHA, email notifications, and admin features. Contributors can still run the full stack without any paid-tier setup -- no Cognito, no Stripe. It is an explicit configuration, not a default: there is no safe value to assume, so `AUTH_ENABLED` must be stated.
 
-**Open does not mean unlimited.** `AUTH_ENABLED` gates *identity only*. Quota, per-model cost caps, and spend metering apply in every configuration, because "I have no Cognito" and "I want no spend limits" are unrelated statements and one flag should not assert both. With auth off, callers resolve to the `anon` tier and are metered against a hash of their source IP (`ANON_GENERATE_LIMIT`, `ANON_REFINE_LIMIT`).
+**Open does not mean unlimited.** `AUTH_ENABLED` gates _identity only_. Quota, per-model cost caps, and spend metering apply in every configuration, because "I have no Cognito" and "I want no spend limits" are unrelated statements and one flag should not assert both. With auth off, callers resolve to the `anon` tier and are metered against a hash of their source IP (`ANON_GENERATE_LIMIT`, `ANON_REFINE_LIMIT`).
 
-This means open-source mode *does* read and write DynamoDB -- metering requires persistence. The users table is created by SAM regardless of the flags. All three checks fail **open** if that store is unreachable, so a missing table degrades to unmetered rather than to a 500, and logs at ERROR so the gap is alarmable.
+This means open-source mode _does_ read and write DynamoDB -- metering requires persistence. The users table is created by SAM regardless of the flags. All three checks fail **open** if that store is unreachable, so a missing table degrades to unmetered rather than to a 500, and logs at ERROR so the gap is alarmable.
 
 **CORS**:
 

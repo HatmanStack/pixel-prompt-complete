@@ -255,3 +255,45 @@ def test_one_abuser_cannot_drain_the_global_pool(auth_on, repo, monkeypatch):
     repo.upsert_guest("honest", "ip-honest", NOW + 4000)
     result = enforce_quota(_guest("honest", "ip-honest"), "generate", repo, NOW)
     assert result.allowed is True, "one abuser locked out everyone else"
+
+
+# ---- Ephemeral buckets must not accumulate forever ----
+
+
+def test_ip_counter_buckets_expire(auth_on, repo):
+    """One permanent row per unique caller IP is unbounded storage growth.
+
+    An abuse counter that outlives its own window is litter, and on a public
+    deployment the number of distinct IPs is effectively unbounded.
+    """
+    repo.increment_anon("anon#abc", "generateCount", 5, 3600, NOW)
+    repo.increment_guest_ip("iphash", 5, 3600, NOW)
+
+    for key in ("anon#abc", "guest#ip#iphash"):
+        item = repo.get_user(key)
+        assert item is not None
+        assert "ttl" in item, f"{key} would live forever"
+        # Must comfortably outlive the window it counts: DynamoDB TTL deletion
+        # is lazy, but early reaping would drop a live counter mid-window.
+        assert int(item["ttl"]) > NOW + 3600
+
+
+def test_real_user_records_never_get_a_ttl(auth_on, repo):
+    """The dangerous half of the same change: expiring a customer.
+
+    The TTL threads through get_or_create_user, which also creates real user
+    rows. Those must never carry one.
+    """
+    repo.get_or_create_user("a-real-user", email="user@example.com", now=NOW)
+    repo.increment_generate("a-real-user", 3600, 5, NOW)
+
+    item = repo.get_user("a-real-user")
+    assert item is not None
+    assert "ttl" not in item, "a real user record must never expire"
+
+
+def test_quota_counters_for_real_users_have_no_ttl(auth_on, repo):
+    """increment_refine/daily share the same code path as the IP buckets."""
+    repo.increment_refine("another-user", 3600, 5, NOW)
+    repo.increment_daily("another-user", 86400, 5, NOW)
+    assert "ttl" not in (repo.get_user("another-user") or {})
