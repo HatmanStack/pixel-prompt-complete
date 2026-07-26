@@ -79,7 +79,18 @@ export interface SessionGenerateResponse {
   sessionId: string;
   status: string;
   prompt: string;
+  /**
+   * Per-model outcomes, including entries that never became iterations
+   * (skipped, daily_cap_reached).
+   */
   models: Record<string, { status: string; imageKey?: string; imageUrl?: string }>;
+  /**
+   * The finished session. /generate awaits every model before responding, so
+   * this is final and the client does not need to poll for it. Optional
+   * because the server attaches it best-effort — if the read-back fails the
+   * images still exist, and the client falls back to polling.
+   */
+  session?: Session;
 }
 
 export interface IterateResponse {

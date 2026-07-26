@@ -858,11 +858,54 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
             set_cookie = _guest_service.set_cookie_header(
                 validated.tier.new_guest_token, config.guest_window_seconds
             )
-        return response(
-            200,
-            {"sessionId": session_id, "prompt": prompt, "models": results},
-            set_cookie=set_cookie,
-        )
+        # Return the finished session, not just per-model outcomes. Every
+        # future has already been awaited above, so this state is final —
+        # the client previously discarded this response, built empty
+        # placeholders, and re-fetched the identical data by polling /status
+        # every 2s for up to 5 minutes.
+        #
+        # `models` is retained alongside it because it carries the skipped/
+        # daily_cap_reached entries, which never become session iterations.
+        payload: dict[str, Any] = {
+            "sessionId": session_id,
+            "prompt": prompt,
+            "models": results,
+        }
+        try:
+            final_session = session_manager.get_session(session_id)
+            # isinstance, not truthiness: get_session is typed to return a
+            # dict or None, and attaching anything else would fail at JSON
+            # serialisation — after the images are already generated and paid
+            # for, and outside any handler that could recover.
+            #
+            # Only attach a TERMINAL session. as_completed's timeout does not
+            # cancel in-flight futures, so a model can still be running and
+            # writing results after this point. Attaching a pending session
+            # would tell the client to stop polling for work that has not
+            # finished, and it would never see the images that arrive later.
+            if isinstance(final_session, dict):
+                if final_session.get("status") in _TERMINAL_SESSION_STATUSES:
+                    payload["session"] = _session_with_urls(final_session)
+                else:
+                    StructuredLogger.info(
+                        "Session still in progress at response time; "
+                        "client will poll for the remainder",
+                        correlation_id=correlation_id,
+                        sessionId=session_id,
+                        sessionStatus=final_session.get("status"),
+                    )
+        except Exception as e:
+            # The session payload is an optimisation, not the result. The
+            # images are already generated and stored; failing the whole
+            # response because the read-back hiccuped would throw away work
+            # the user already paid for. Omitting it degrades to the previous
+            # behaviour — the client falls back to polling /status.
+            StructuredLogger.warning(
+                f"Could not attach session to generate response: {e}",
+                correlation_id=correlation_id,
+                sessionId=session_id,
+            )
+        return response(200, payload, set_cookie=set_cookie)
 
     except Exception as e:
         StructuredLogger.error(
@@ -1181,6 +1224,27 @@ def handle_outpaint(event: LambdaEvent, correlation_id: str | None = None) -> Ap
     )
 
 
+# Statuses from SessionManager._compute_session_status that mean no model is
+# still running. Anything else ("pending", "in_progress") means work may yet
+# land, so the client must keep polling.
+_TERMINAL_SESSION_STATUSES = frozenset({"completed", "partial", "failed"})
+
+
+def _session_with_urls(session: dict[str, Any]) -> dict[str, Any]:
+    """Add CloudFront URLs to completed iterations.
+
+    Shared by /status and /generate so the two cannot return differently
+    shaped sessions — the client treats them as the same object.
+    """
+    for _model_name, model_data in session.get("models", {}).items():
+        for iteration in model_data.get("iterations", []):
+            if iteration.get("status") == "completed" and iteration.get("imageKey"):
+                iteration["imageUrl"] = image_storage.get_cloudfront_url(
+                    iteration["imageKey"]
+                )
+    return session
+
+
 def handle_status(event: LambdaEvent, correlation_id: str | None = None) -> ApiResponse:
     """
     GET /status/{sessionId} - Get session status and results.
@@ -1199,13 +1263,7 @@ def handle_status(event: LambdaEvent, correlation_id: str | None = None) -> ApiR
         if not session:
             return response(404, {"error": f"Session {session_id} not found"})
 
-        # Add CloudFront URLs to all completed iterations
-        for model_name, model_data in session.get("models", {}).items():
-            for iteration in model_data.get("iterations", []):
-                if iteration.get("status") == "completed" and iteration.get("imageKey"):
-                    iteration["imageUrl"] = image_storage.get_cloudfront_url(iteration["imageKey"])
-
-        return response(200, session)
+        return response(200, _session_with_urls(session))
 
     except Exception as e:
         StructuredLogger.error(

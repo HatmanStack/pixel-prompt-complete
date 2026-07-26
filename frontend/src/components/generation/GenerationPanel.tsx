@@ -130,6 +130,13 @@ const ErrorBanner: FC<{ error: string; onDismiss: () => void }> = ({ error, onDi
   </div>
 );
 
+/**
+ * Session statuses meaning no model is still running. Anything else
+ * ("pending", "in_progress") means results may still arrive, so polling has
+ * to continue — /generate's timeout does not cancel in-flight work.
+ */
+const TERMINAL_SESSION_STATUSES: string[] = ['completed', 'partial', 'failed'];
+
 export const GenerationPanel: FC = () => {
   const {
     prompt,
@@ -210,8 +217,26 @@ export const GenerationPanel: FC = () => {
       // Call API to start generation
       const response = await generateSession(prompt, captchaToken ?? undefined);
 
-      if (response.sessionId) {
-        // Initialize session structure for polling
+      if (!response.sessionId) {
+        throw new Error('No session ID received');
+      }
+
+      if (response.session) {
+        // Using the returned session directly replaces up to 150 polls of
+        // /status (2s apart for 5 minutes) that only ever re-fetched data
+        // this response already contained.
+        setCurrentSession(response.session);
+
+        // Only stop if no model is still running. The server should only
+        // attach terminal sessions, but checking here too means a
+        // non-terminal one can never strand the user with polling disabled
+        // and images still arriving.
+        if (TERMINAL_SESSION_STATUSES.includes(response.session.status)) {
+          setIsGenerating(false);
+        }
+      } else {
+        // Server could not attach the session. The images exist regardless,
+        // so fall back to the placeholder-plus-polling path.
         const initialSession = {
           sessionId: response.sessionId,
           status: 'pending' as const,
@@ -227,8 +252,6 @@ export const GenerationPanel: FC = () => {
           ),
         };
         setCurrentSession(initialSession);
-      } else {
-        throw new Error('No session ID received');
       }
     } catch (err) {
       console.error('Generation error:', err);
