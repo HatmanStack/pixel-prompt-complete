@@ -674,6 +674,27 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
             prompt, enabled_model_names, correlation_id=correlation_id
         )
 
+        # Re-filter the rewritten prompts. The user's prompt was checked at
+        # validation, but what actually reaches the provider is this LLM
+        # rewrite — an unfiltered channel between the check and the call. The
+        # rewrite can introduce blocked terms the original never contained,
+        # either because the model elaborated in an unwanted direction or
+        # because the original was crafted to survive the filter and steer the
+        # rewrite. Checking only the input leaves the output unexamined.
+        #
+        # Falls back to the (already-checked) original rather than failing the
+        # request: one model's rewrite going astray should not deny the user
+        # the other three.
+        for _model_name, _adapted in list(adapted_prompts.items()):
+            if _adapted != prompt and content_filter.check_prompt(_adapted):
+                StructuredLogger.warning(
+                    "Adapted prompt failed the content filter; "
+                    "falling back to the original",
+                    correlation_id=correlation_id,
+                    model=_model_name,
+                )
+                adapted_prompts[_model_name] = prompt
+
         # Create session
         session_id = session_manager.create_session(prompt, enabled_model_names)
 
