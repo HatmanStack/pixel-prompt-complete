@@ -146,3 +146,46 @@ def test_missing_session_is_not_attached(stack):
     resp, body = _run(stack)
     assert resp["statusCode"] == 200
     assert "session" not in body
+
+
+# ---- Only terminal sessions may suppress polling ----
+
+
+@pytest.mark.parametrize("status", ["pending", "in_progress"])
+def test_nonterminal_session_is_not_attached(stack, status):
+    """as_completed's timeout does not cancel in-flight futures.
+
+    A model can still be running and writing results after the response is
+    built. Attaching a pending session tells the client to stop polling for
+    work that has not finished, and it would never see those images.
+    """
+    session = json.loads(json.dumps(FINISHED_SESSION))
+    session["status"] = status
+    stack["session"].get_session.return_value = session
+
+    resp, body = _run(stack)
+    assert resp["statusCode"] == 200
+    assert "session" not in body, f"{status} session suppressed the polling fallback"
+    assert "models" in body
+
+
+@pytest.mark.parametrize("status", ["completed", "partial", "failed"])
+def test_terminal_sessions_are_attached(stack, status):
+    """All three terminal states are final — no model is still running."""
+    session = json.loads(json.dumps(FINISHED_SESSION))
+    session["status"] = status
+    stack["session"].get_session.return_value = session
+
+    _, body = _run(stack)
+    assert body["session"]["status"] == status
+
+
+def test_partial_results_are_still_returned_directly(stack):
+    """"partial" means some models failed, not that work continues."""
+    session = json.loads(json.dumps(FINISHED_SESSION))
+    session["status"] = "partial"
+    stack["session"].get_session.return_value = session
+
+    _, body = _run(stack)
+    assert "session" in body
+    assert body["session"]["models"]["nova"]["iterations"][0]["status"] == "error"

@@ -50,3 +50,29 @@ describe('session polling', () => {
     expect(mockGetSessionStatus).not.toHaveBeenCalled();
   });
 });
+
+describe('terminal vs non-terminal sessions', () => {
+  // Mirrors backend _TERMINAL_SESSION_STATUSES. A non-terminal session means
+  // a model is still running, so polling must continue or the user never
+  // sees the images that land after the response.
+  const TERMINAL = ['completed', 'partial', 'failed'];
+  const NON_TERMINAL = ['pending', 'in_progress'];
+
+  it.each(TERMINAL)('%s stops generation', (status) => {
+    expect(TERMINAL.includes(status)).toBe(true);
+  });
+
+  it.each(NON_TERMINAL)('%s keeps polling enabled', async (status) => {
+    expect(TERMINAL.includes(status)).toBe(false);
+
+    // With generation still active, the hook must keep fetching.
+    mockGetSessionStatus.mockResolvedValue({
+      sessionId: 's1',
+      status,
+      prompt: 'a cat',
+      models: {},
+    });
+    renderHook(() => useSessionPolling('s1', { enabled: true, intervalMs: 10 }));
+    await waitFor(() => expect(mockGetSessionStatus).toHaveBeenCalled());
+  });
+});

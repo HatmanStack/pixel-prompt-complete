@@ -877,8 +877,23 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
             # dict or None, and attaching anything else would fail at JSON
             # serialisation — after the images are already generated and paid
             # for, and outside any handler that could recover.
+            #
+            # Only attach a TERMINAL session. as_completed's timeout does not
+            # cancel in-flight futures, so a model can still be running and
+            # writing results after this point. Attaching a pending session
+            # would tell the client to stop polling for work that has not
+            # finished, and it would never see the images that arrive later.
             if isinstance(final_session, dict):
-                payload["session"] = _session_with_urls(final_session)
+                if final_session.get("status") in _TERMINAL_SESSION_STATUSES:
+                    payload["session"] = _session_with_urls(final_session)
+                else:
+                    StructuredLogger.info(
+                        "Session still in progress at response time; "
+                        "client will poll for the remainder",
+                        correlation_id=correlation_id,
+                        sessionId=session_id,
+                        sessionStatus=final_session.get("status"),
+                    )
         except Exception as e:
             # The session payload is an optimisation, not the result. The
             # images are already generated and stored; failing the whole
@@ -1207,6 +1222,12 @@ def handle_outpaint(event: LambdaEvent, correlation_id: str | None = None) -> Ap
         context_prompt_fn=lambda p: f"outpaint:{preset}",
         extra_response_fields={"preset": preset},
     )
+
+
+# Statuses from SessionManager._compute_session_status that mean no model is
+# still running. Anything else ("pending", "in_progress") means work may yet
+# land, so the client must keep polling.
+_TERMINAL_SESSION_STATUSES = frozenset({"completed", "partial", "failed"})
 
 
 def _session_with_urls(session: dict[str, Any]) -> dict[str, Any]:
