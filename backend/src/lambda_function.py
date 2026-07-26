@@ -1294,7 +1294,9 @@ def handle_enhance(event: LambdaEvent, correlation_id: str | None = None) -> Api
         return err
 
     try:
-        enhanced = prompt_enhancer.enhance_safe(validated.prompt)
+        # Two genuinely different variants from one call. This used to return
+        # the same string twice while the UI rendered a toggle over it.
+        short_prompt, long_prompt = prompt_enhancer.enhance_variants(validated.prompt)
         # /enhance is still unauthenticated and unquota'd (that is P0-D), but
         # it calls gpt-4o and therefore costs money. Metering it first means
         # the exposure is at least visible before it is gated.
@@ -1305,7 +1307,12 @@ def handle_enhance(event: LambdaEvent, correlation_id: str | None = None) -> Api
         )
 
         return response(
-            200, {"original": validated.prompt, "short_prompt": enhanced, "long_prompt": enhanced}
+            200,
+            {
+                "original": validated.prompt,
+                "short_prompt": short_prompt,
+                "long_prompt": long_prompt,
+            },
         )
 
     except Exception as e:

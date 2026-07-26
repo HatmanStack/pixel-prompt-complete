@@ -181,7 +181,7 @@ def test_enhance_is_metered():
         patch("lambda_function._cost_meter") as mock_meter,
     ):
         mock_cf.check_prompt.return_value = False
-        mock_enh.enhance_safe.return_value = "an enhanced prompt"
+        mock_enh.enhance_variants.return_value = ("short", "a longer variant")
 
         from lambda_function import handle_enhance
 
