@@ -395,16 +395,6 @@ def _parse_and_validate_request(
         if not verify_turnstile(captcha_token, ip):
             return None, response(403, error_responses.captcha_failed())
 
-    # Age gate. Google's API terms allow use only where the calling service is
-    # not "likely to be accessed by" individuals under 18, which is a stricter
-    # test than a checkbox and is not satisfied by a public URL that asks
-    # nothing. Enforced on /generate only: refinement requires an existing
-    # session, which required a generate, which required this.
-    if config.age_gate_enabled and endpoint_kind == "generate":
-        err = _enforce_age_gate(tier_ctx, body)
-        if err:
-            return None, err
-
     # Guests cannot refine at all, so reject before writing anything. Checked
     # here rather than with the other quota logic below because a request that
     # can never succeed must not create a record on its way to being refused.
@@ -431,6 +421,21 @@ def _parse_and_validate_request(
     # Content filter
     if prompt and content_filter.check_prompt(prompt):
         return None, response(400, error_responses.inappropriate_content())
+
+    # Age gate. Google's API terms allow use only where the calling service is
+    # not "likely to be accessed by" individuals under 18, which is a stricter
+    # test than a checkbox and is not satisfied by a public URL that asks
+    # nothing. Enforced on /generate only: refinement requires an existing
+    # session, which required a generate, which required this.
+    #
+    # Placed here for the same reason quota is: a malformed request should fail
+    # local validation cheaply rather than costing a DynamoDB read and coming
+    # back as 403 when the real problem was a missing prompt. Before quota, so
+    # a request we are about to refuse does not consume any.
+    if config.age_gate_enabled and endpoint_kind == "generate":
+        err = _enforce_age_gate(tier_ctx, body)
+        if err:
+            return None, err
 
     # Quota enforcement (after validation so invalid requests don't consume quota)
     if endpoint_kind in ("generate", "refine", "outpaint"):
