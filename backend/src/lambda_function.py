@@ -213,9 +213,7 @@ def _spend_ceiling_exceeded(endpoint_kind: str) -> tuple[bool, str]:
     return False, ""
 
 
-def _enforce_quota_safe(
-    tier_ctx: TierContext, endpoint_kind: str, now: int
-) -> "QuotaResult":
+def _enforce_quota_safe(tier_ctx: TierContext, endpoint_kind: str, now: int) -> "QuotaResult":
     """Enforce quota, failing OPEN if the quota store is unreachable.
 
     Applied to every tier, not just anon. The anon path had its own
@@ -395,9 +393,7 @@ def _parse_and_validate_request(
             # A user hitting a wall and an attacker probing one used to look
             # identical from outside, and a limit set wrongly low produced
             # silent churn instead of a signal.
-            emit_quota_rejection(
-                tier_ctx.tier, endpoint_kind, result.reason or "unknown"
-            )
+            emit_quota_rejection(tier_ctx.tier, endpoint_kind, result.reason or "unknown")
             if result.reason == "suspended":
                 return None, response(403, error_responses.account_suspended())
             if result.reason == "guest_ip":
@@ -718,8 +714,7 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
         for _model_name, _adapted in list(adapted_prompts.items()):
             if _adapted != prompt and content_filter.check_prompt(_adapted):
                 StructuredLogger.warning(
-                    "Adapted prompt failed the content filter; "
-                    "falling back to the original",
+                    "Adapted prompt failed the content filter; falling back to the original",
                     correlation_id=correlation_id,
                     model=_model_name,
                 )
@@ -834,8 +829,13 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
             # be running by the time we get here. Nova was unbounded until
             # this change, which is exactly how work outlived the budget,
             # completed, and was billed after the user was told it failed.
+            # Counted from the futures themselves, not from len(results):
+            # `results` already holds the skipped models, which were never
+            # dispatched, so subtracting it undercounts by that many and can
+            # go negative -- silencing the log in exactly the case it exists
+            # for (models capped, one real call still burning money).
             cancelled = sum(1 for f in futures if f.cancel())
-            still_running = len(futures) - cancelled - len(results)
+            still_running = sum(1 for f in futures if not f.cancelled() and not f.done())
             if still_running > 0:
                 StructuredLogger.error(
                     "Dispatch budget expired with provider calls still running; "
@@ -1110,9 +1110,7 @@ def _handle_refinement(
         # Previously only /generate consumed slots, so refinement traffic could
         # run a model far past its ceiling.
         try:
-            slot_ok = _model_counter_service.consume_model_slot(
-                model_name, int(time.time())
-            )
+            slot_ok = _model_counter_service.consume_model_slot(model_name, int(time.time()))
         except Exception as e:
             StructuredLogger.error(
                 f"Per-model cap check failed, allowing refinement: {e}",
@@ -1300,9 +1298,7 @@ def _session_with_urls(session: dict[str, Any]) -> dict[str, Any]:
     for _model_name, model_data in session.get("models", {}).items():
         for iteration in model_data.get("iterations", []):
             if iteration.get("status") == "completed" and iteration.get("imageKey"):
-                iteration["imageUrl"] = image_storage.get_cloudfront_url(
-                    iteration["imageKey"]
-                )
+                iteration["imageUrl"] = image_storage.get_cloudfront_url(iteration["imageKey"])
     return session
 
 

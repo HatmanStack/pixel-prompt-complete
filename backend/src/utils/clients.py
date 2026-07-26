@@ -13,7 +13,7 @@ from botocore.config import Config as BotoConfig
 from google import genai
 from openai import OpenAI
 
-from config import api_client_timeout, aws_region
+from config import api_client_timeout, aws_region, generate_dispatch_budget_seconds
 
 # Module-level client singletons for Lambda container reuse
 _openai_clients: Dict[Any, OpenAI] = {}
@@ -51,6 +51,42 @@ def get_genai_client(api_key: str, timeout: float | None = None) -> genai.Client
     return _genai_clients[cache_key]
 
 
+# Bedrock timeout budget components. botocore applies connect_timeout and
+# read_timeout to *separate* phases of one attempt, so a single attempt can
+# take up to their sum, and standard retry mode sleeps between attempts.
+# The bound is therefore:
+#
+#   attempts * (connect + read) + backoff <= dispatch budget
+#
+# not attempts * read. Getting that wrong is how a "bounded" client still
+# outlives the budget: at 30s each, two attempts is 120s against a 70s budget.
+BEDROCK_MAX_ATTEMPTS = 2
+# Connecting to a same-region AWS endpoint from Lambda is sub-second; 5s is
+# already generous, and spending the budget on reads is the better trade
+# because that is where image generation time actually goes.
+BEDROCK_CONNECT_TIMEOUT = 5
+# standard retry mode sleeps with exponential backoff plus jitter between
+# attempts. One retry is ~1s, but reserve enough that jitter cannot push the
+# total past the budget.
+BEDROCK_BACKOFF_ALLOWANCE = 5
+
+
+def bedrock_read_timeout(budget: float) -> int:
+    """Largest per-attempt read timeout that keeps the whole call inside ``budget``.
+
+    Derived from the dispatch budget rather than hardcoded so that tuning
+    ``API_CLIENT_TIMEOUT`` cannot silently push Nova back over the line.
+    """
+    per_attempt = (budget - BEDROCK_BACKOFF_ALLOWANCE) / BEDROCK_MAX_ATTEMPTS
+    return max(1, int(per_attempt - BEDROCK_CONNECT_TIMEOUT))
+
+
+def bedrock_worst_case_seconds(budget: float) -> float:
+    """Worst-case wall time for a Bedrock call: every attempt maxing out, plus backoff."""
+    per_attempt = BEDROCK_CONNECT_TIMEOUT + bedrock_read_timeout(budget)
+    return BEDROCK_MAX_ATTEMPTS * per_attempt + BEDROCK_BACKOFF_ALLOWANCE
+
+
 def get_bedrock_client(region: str | None = None) -> Any:
     """Get or create a cached Bedrock runtime client keyed by region.
 
@@ -62,20 +98,18 @@ def get_bedrock_client(region: str | None = None) -> Any:
     request is abandoned, the user is told the model failed, and Bedrock
     generates and bills for the image anyway.
 
-    The read timeout is halved so one retry still fits inside the budget.
     Gemini, OpenAI and Firefly already bound their calls; Nova was the one
     provider left unbounded.
     """
     region_key = region or aws_region
     if region_key not in _bedrock_clients:
-        per_attempt = max(1, int(api_client_timeout // 2))
         _bedrock_clients[region_key] = boto3.client(
             "bedrock-runtime",
             region_name=region_key,
             config=BotoConfig(
-                connect_timeout=per_attempt,
-                read_timeout=per_attempt,
-                retries={"mode": "standard", "total_max_attempts": 2},
+                connect_timeout=BEDROCK_CONNECT_TIMEOUT,
+                read_timeout=bedrock_read_timeout(generate_dispatch_budget_seconds),
+                retries={"mode": "standard", "total_max_attempts": BEDROCK_MAX_ATTEMPTS},
             ),
         )
     return _bedrock_clients[region_key]
