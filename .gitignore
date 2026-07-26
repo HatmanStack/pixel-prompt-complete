@@ -40,3 +40,6 @@ parameters.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Working notes handed to the next roadmap planner, not part of the repo
+docs/next-roadmap-seed.md
