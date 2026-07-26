@@ -237,7 +237,7 @@ def _run_refinement(
         mock_counter.consume_model_slot.return_value = model_slot_granted
         mock_cf.check_prompt.return_value = False
         mock_val.return_value = (("sess-1", "gemini", ctx["model_cfg"]), None)
-        mock_load.return_value = (("base64image", 1), None)
+        mock_load.return_value = (("base64image", 1, "public"), None)
         mock_sm.add_iteration.return_value = 1
         mock_ok.return_value = {"imageUrl": "http://x/y", "iteration": 1}
 
@@ -439,7 +439,7 @@ def test_refine_refunds_when_the_model_fails():
         mock_counter.consume_model_slot.return_value = True
         mock_cf.check_prompt.return_value = False
         mock_val.return_value = (("sess-1", "gemini", ctx["model_cfg"]), None)
-        mock_load.return_value = (("img", 1), None)
+        mock_load.return_value = (("img", 1, "public"), None)
         mock_sm.add_iteration.return_value = 1
 
         import lambda_function

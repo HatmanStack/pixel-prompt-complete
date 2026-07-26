@@ -324,10 +324,27 @@ All return `{'status': 'success', 'image': base64_str, ...}` or `{'status': 'err
 **S3 Structure**:
 
 ```text
-sessions/{sessionId}/status.json           # Session metadata + iteration array per model
-sessions/{sessionId}/context/{model}.json  # Rolling 3-iteration context window
-sessions/{timestamp}/                      # Gallery images with metadata
+sessions/{sessionId}/status.json               # Session metadata + iteration array per model
+sessions/{sessionId}/context/{model}.json      # Rolling 3-iteration context window
+sessions/{timestamp}-{sessionId8}/             # PUBLIC gallery images (free/guest/anon tiers)
+private/{sessionId}/{model}-iter{n}.png        # PRIVATE images (paid tier)
 ```
+
+**Session visibility**: `paid` generations are private; every other tier is
+public. Visibility is fixed at session creation and recorded on `status.json`
+alongside `ownerId`.
+
+The boundary is structural, not a filter applied on read. The CloudFront origin
+policy grants `sessions/*` only, so a `private/` object has no unsigned URL at
+all and is reachable only through a presigned URL that the Lambda issues after
+checking ownership. Every path that can reach a session authorizes it first:
+`/status`, `/download`, `/iterate` and `/outpaint` return 404 (not 403, which
+would confirm existence) to a non-owner. Private prompts are not written to the
+`GLOBAL#RECENT` feed that `/prompts/recent` serves.
+
+The `{sessionId8}` suffix on public gallery folders is what keeps two sessions
+that start in the same UTC second from sharing a folder and overwriting each
+other's images. Folders without it predate the change and still list.
 
 ### Frontend Architecture
 

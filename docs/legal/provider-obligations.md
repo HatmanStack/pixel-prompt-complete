@@ -144,19 +144,31 @@ problem is not that it exists. The problem is:
 4. **Hosting public UGC creates obligations** — DMCA agent registration and
    takedown process, and moderation of what appears on a page we serve.
 
-**This is a product decision, not a legal one, and it is not mine to make.** The
-two coherent positions are below; the documents in this directory are drafted
-against the current behaviour, which is option A.
+**Resolved: public on free tiers, private on paid.** Privacy became a paid
+benefit rather than a setting, which keeps the discovery loop that makes the
+gallery worth visiting while giving paying users what they already assume they
+are getting.
 
-- **A. Public by default, disclosed.** Keep the gallery as the product's front
-  door. Requires: explicit notice at the point of generation, terms granting a
-  display licence, a privacy policy that says prompts are published, and a
-  working DMCA process. Cheapest to build, and honest once disclosed.
-- **B. Private by default, opt-in to publish.** Add a `visibility` field, scope
-  the gallery to opted-in sessions, and gate the prompt feed the same way. What
-  paying users expect. Costs a schema field, a migration for existing objects,
-  and a share control in the UI. Worth noting the existing corpus was generated
-  without notice, so publishing it retroactively is the part to be careful about.
+Implemented structurally rather than as a filter applied on read. A paid
+generation is written under a `private/` prefix that the CloudFront origin
+policy does not grant, so it has no unsigned URL to leak; reaching it requires
+a presigned URL the Lambda issues only after checking ownership. Every path
+that can reach a session — `/status`, `/download`, `/iterate`, `/outpaint` —
+authorizes it, and private prompts are not written to the global feed. See
+`test_session_visibility.py`, which enumerates those paths deliberately.
+
+Two things surfaced while implementing it that were bugs in their own right:
+
+- Image keys contained no session id, so two sessions starting in the same UTC
+  second shared a gallery folder and, for the same model, produced an identical
+  key and silently overwrote each other. At 500 generates/day that was a 76%
+  chance of happening on any given day.
+- The S3 lifecycle rule was scoped to `sessions/`, so the new `private/` prefix
+  would have been retained forever, contradicting the 30-day deletion this
+  policy states.
+
+The existing corpus was generated before any of this and remains public. It
+ages out under the 30-day lifecycle rule.
 
 ## Deploy checklist
 

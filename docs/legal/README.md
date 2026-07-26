@@ -10,7 +10,7 @@ Service charges money.
 | [terms-of-service.md](terms-of-service.md)           | Draft, has placeholders       | Yes                                 |
 | [privacy-policy.md](privacy-policy.md)               | Draft, has placeholders       | Yes                                 |
 | [acceptable-use-policy.md](acceptable-use-policy.md) | Draft, has placeholders       | Yes                                 |
-| [dmca-policy.md](dmca-policy.md)                     | Draft, needs registered agent | Yes, if the gallery stays public    |
+| [dmca-policy.md](dmca-policy.md)                     | Draft, needs registered agent | Yes, the free-tier gallery is public UGC |
 
 ## What the research found
 
@@ -31,31 +31,31 @@ Three conditions attach, detailed in
 3. **Nova Canvas invisibly watermarks every image it generates.** Not optional.
    Disclosure item only.
 
-## The finding that needs a decision
+## The finding that drove a product change
 
-**The Service publishes every prompt and every generated image, to everyone,
-with no notice and no opt-out.** `/gallery/list`, `/gallery/{sessionId}`, and
-`/prompts/recent` are all unauthenticated, every generation writes to a gallery
-folder, and every prompt writes to a global feed. There is no `visibility`
-field anywhere in the backend.
+The Service used to publish every prompt and every generated image, to
+everyone, with no notice and no opt-out — including on paid tiers.
+`/gallery/list`, `/gallery/{sessionId}` and `/prompts/recent` are all
+unauthenticated, every generation wrote to a gallery folder, and every prompt
+wrote to a global feed. There was no `visibility` field anywhere in the backend
+and no notice anywhere in the frontend.
 
-A public gallery is a reasonable product. Publishing paying users' prompts
-without telling them is not, and prompts are free text that people put personal
-details into. The two coherent options — disclose it, or make it opt-in — are
-laid out at the end of
-[provider-obligations.md](provider-obligations.md#the-larger-exposure-is-ours-not-theirs).
+**Resolved: public on free tiers, private on paid.** Privacy is a paid benefit.
+Free and signed-out generations still feed the public gallery, which is what
+makes it worth browsing; paid generations are stored where they have no public
+address at all and are served through short-lived signed links after an
+ownership check.
 
-**The drafts here are written against current behaviour**, which is
-public-by-default. If publication becomes opt-in, Section 5 of the Terms and
-the "What is public" section of the Privacy Policy both change substantially.
+The drafts here describe that behaviour. If the tier boundary moves, Section 5
+of the Terms and "What is public" in the Privacy Policy are the two places that
+have to move with it.
 
 ## Before publishing
 
-- [ ] Decide public-by-default versus opt-in
 - [ ] Fill every `{{PLACEHOLDER}}`
 - [ ] Attorney review, covering at minimum the GDPR basis for publication and
       the liability cap
-- [ ] Register a DMCA agent, if the gallery stays public
+- [ ] Register a DMCA agent for the public gallery
 - [ ] Confirm the Gemini key tier and write the matching privacy statement
 - [ ] Add an 18+ gate to the guest path
 - [ ] Serve these from the app and link them from the footer, checkout, and the

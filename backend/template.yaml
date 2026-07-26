@@ -1081,6 +1081,14 @@ Resources:
             Status: Enabled
             ExpirationInDays: 30
             Prefix: sessions/
+          # Paid-tier images live outside sessions/, so the rule above does not
+          # reach them. Without this they would be retained forever, breaking
+          # the 30-day deletion the privacy policy states and growing storage
+          # cost without bound.
+          - Id: DeleteOldPrivateSessions
+            Status: Enabled
+            ExpirationInDays: 30
+            Prefix: private/
     DeletionPolicy: Retain
 
   CloudFrontOAI:
@@ -1100,7 +1108,26 @@ Resources:
             Principal:
               CanonicalUser: !GetAtt CloudFrontOAI.S3CanonicalUserId
             Action: s3:GetObject
-            Resource: !Sub '${PixelPromptBucket.Arn}/*'
+            # Scoped to the public gallery prefix only. Objects under
+            # private/* are deliberately outside this grant, so they have no
+            # unsigned CloudFront URL at all and can only be reached through a
+            # presigned URL the Lambda issues after checking ownership. This is
+            # what makes paid-tier privacy a property of the infrastructure
+            # rather than of remembering to filter every read path.
+            Resource: !Sub '${PixelPromptBucket.Arn}/sessions/*'
+          # Session state also lives under sessions/, at sessions/{uuid}/, and
+          # holds the prompt and the owner id. It is read by the Lambda over
+          # S3 and never needs to be on the CDN. An explicit Deny keeps it off
+          # without narrowing the grant to *.png, which would break the legacy
+          # JSON-format gallery images still served through CloudFront.
+          - Sid: DenyCdnAccessToSessionState
+            Effect: Deny
+            Principal:
+              CanonicalUser: !GetAtt CloudFrontOAI.S3CanonicalUserId
+            Action: s3:GetObject
+            Resource:
+              - !Sub '${PixelPromptBucket.Arn}/sessions/*/status.json'
+              - !Sub '${PixelPromptBucket.Arn}/sessions/*/context/*'
 
   CloudFrontDistribution:
     Type: AWS::CloudFront::Distribution

@@ -7,8 +7,8 @@
 
 ## The short version
 
-- **Your prompts and generated images are published publicly.** Every one, on
-  every tier. There is no opt-out today.
+- **On free and signed-out use, your prompts and generated images are published
+  publicly.** On a **paid plan they are private.**
 - Your prompts and images are sent to Google, Amazon, OpenAI, and Adobe.
 - {{GEMINI_TIER_STATEMENT}} — see "Third-party AI providers" below.
 - We do not sell your personal information.
@@ -39,24 +39,35 @@ servers.**
 
 ## What is public
 
-**Everything you generate is published.** Specifically:
+**This depends on your plan.**
+
+### Free, guest, and signed-out generations are published
 
 - Generated images appear in a **public gallery** readable by anyone, including
   people who are not signed in and are not our users.
 - Prompt text appears in a **public feed of recent prompts**, also readable by
   anyone.
 
-This is the default and current behaviour for every tier, including paid tiers,
-and there is no setting to change it.
-
 **Prompts are free text and we do not scan them for personal information before
 publishing.** If you type your name, someone else's name, an address, an
-employer, a medical detail, or a confidential idea into a prompt, it is
-published. Please do not.
+employer, a medical detail, or a confidential idea into a free-tier prompt, it
+is published. Please do not.
 
-To have specific content removed, email {{CONTACT_EMAIL}}. We will remove it
-within {{N}} days. Cached copies, including in CloudFront, may persist for a
-period after removal.
+### Paid generations are private
+
+Images generated on a paid plan are stored under a separate location that is
+not reachable from the public internet at all, and are served to you through
+short-lived signed links issued only after we verify the session belongs to
+you. Their prompts are not written to the public feed.
+
+Visibility is fixed when the session is created. A session generated on the
+free tier stays public even if you subscribe afterwards.
+
+### Removal
+
+To have specific published content removed, email {{CONTACT_EMAIL}}. We will
+remove it within {{N}} days. Cached copies, including in CloudFront, may
+persist for a period after removal.
 
 ## Third-party AI providers
 
@@ -98,15 +109,16 @@ responses to improve its products.
 | Generating images you asked for                  | Performance of a contract |
 | Enforcing quotas and preventing abuse            | Legitimate interests      |
 | Billing and subscription management              | Performance of a contract |
-| Publishing to the public gallery and prompt feed | {{BASIS}} — see note      |
+| Publishing free-tier content to the gallery and prompt feed | {{BASIS}} — see note      |
 | Security and fraud prevention                    | Legitimate interests      |
 | Complying with legal obligations                 | Legal obligation          |
 
-> Note for review: publication is currently unavoidable and bundled into use of
-> the Service, which makes consent difficult to characterise as freely given.
-> Counsel should advise whether this is defensible as contractual necessity or
-> whether an opt-out is required. This is the strongest argument for making
-> publication opt-in.
+> Note for review: publication is unavoidable on the free tier and bundled
+> into use of the Service, which makes consent hard to characterise as freely
+> given. A paid plan is the opt-out. Counsel should advise whether "pay to keep
+> your prompts private" is a defensible basis in the EEA and UK, since making a
+> privacy protection conditional on payment attracts scrutiny under GDPR even
+> where it is common commercial practice.
 
 ## How long we keep it
 
