@@ -37,7 +37,7 @@ def test_ceiling_defaults_to_on():
     import config
 
     importlib.reload(config)
-    assert config.global_daily_spend_ceiling_usd_micros == 100_000_000  # $100/day
+    assert config.global_daily_spend_ceiling_usd_micros == 25_000_000  # $25/day
 
 
 def test_ceiling_is_env_tunable(monkeypatch):
@@ -231,7 +231,7 @@ def test_enhance_sub_ceiling_defaults_on():
     import config
 
     importlib.reload(config)
-    assert config.enhance_daily_spend_ceiling_usd_micros == 5_000_000  # $5/day
+    assert config.enhance_daily_spend_ceiling_usd_micros == 2_000_000  # $2/day
 
 
 def test_enhance_blocked_by_its_own_ceiling_while_generate_still_works():
@@ -341,3 +341,171 @@ def test_spend_items_expire():
         item = repo.get_user(spend_item_key(now))
         assert int(item["ttl"]) == now + SPEND_ITEM_TTL_SECONDS
         assert int(item["totalMicros"]) == 78000
+
+
+# ---- Monthly ceiling ----
+
+
+def test_monthly_ceiling_defaults_to_500_dollars():
+    """The number that actually caps the invoice.
+
+    A daily ceiling alone does not bound a month: even at $25/day it permits
+    roughly $750 across 30 days, so the monthly figure has to exist
+    separately rather than be inferred.
+    """
+    import config
+
+    importlib.reload(config)
+    assert config.monthly_spend_ceiling_usd_micros == 500_000_000
+
+
+def test_daily_ceiling_leaves_burst_headroom_under_the_month():
+    """Deliberately more than 1/30th of the month.
+
+    A busy day should not be throttled for being busy; the month is what
+    stops. But a single day must not be able to consume the whole budget.
+    """
+    import config
+
+    importlib.reload(config)
+    daily = config.global_daily_spend_ceiling_usd_micros
+    monthly = config.monthly_spend_ceiling_usd_micros
+    assert daily > monthly / 30, "no burst headroom"
+    assert daily < monthly / 2, "one day could eat the month"
+
+
+def test_enhance_share_of_the_monthly_budget_is_bounded():
+    """/enhance is unauthenticated, so its share must be a minority."""
+    import config
+
+    importlib.reload(config)
+    enhance_month = config.enhance_daily_spend_ceiling_usd_micros * 30
+    assert enhance_month < config.monthly_spend_ceiling_usd_micros * 0.2
+
+
+def test_monthly_ceiling_blocks_when_reached():
+    import lambda_function
+
+    with (
+        patch("config.monthly_spend_ceiling_usd_micros", 500_000_000),
+        patch.object(
+            lambda_function._cost_meter,
+            "get_monthly_spend",
+            return_value={"totalMicros": 500_000_000},
+        ),
+    ):
+        assert lambda_function._monthly_spend_exceeded() is True
+
+
+def test_monthly_ceiling_allows_under_budget():
+    import lambda_function
+
+    with (
+        patch("config.monthly_spend_ceiling_usd_micros", 500_000_000),
+        patch.object(
+            lambda_function._cost_meter,
+            "get_monthly_spend",
+            return_value={"totalMicros": 499_999_999},
+        ),
+    ):
+        assert lambda_function._monthly_spend_exceeded() is False
+
+
+def test_monthly_breach_reports_itself_as_monthly():
+    """An operator seeing "Global" would look at the wrong dashboard."""
+    import lambda_function
+
+    with (
+        patch("lambda_function._monthly_spend_exceeded", return_value=True),
+        patch("lambda_function._daily_spend_exceeded", return_value=False),
+    ):
+        exceeded, scope = lambda_function._spend_ceiling_exceeded("generate")
+    assert exceeded is True
+    assert scope == "Monthly"
+
+
+def test_monthly_ceiling_fails_open():
+    import lambda_function
+
+    with (
+        patch("config.monthly_spend_ceiling_usd_micros", 1_000),
+        patch.object(
+            lambda_function._cost_meter,
+            "get_monthly_spend",
+            side_effect=RuntimeError("dynamo down"),
+        ),
+    ):
+        assert lambda_function._monthly_spend_exceeded() is False
+
+
+def test_zero_disables_the_monthly_ceiling():
+    import lambda_function
+
+    with patch("config.monthly_spend_ceiling_usd_micros", 0):
+        assert lambda_function._monthly_spend_exceeded() is False
+
+
+def test_generate_returns_503_when_the_month_is_spent():
+    import lambda_function
+
+    with (
+        patch("lambda_function._monthly_spend_exceeded", return_value=True),
+        patch("lambda_function.content_filter") as mock_cf,
+    ):
+        mock_cf.check_prompt.return_value = False
+        resp = lambda_function.handle_generate(_event(), "corr-1")
+
+    assert resp["statusCode"] == 503
+    assert json.loads(resp["body"])["error"] == "DAILY_SPEND_CEILING"
+
+
+def test_monthly_spend_accumulates_separately_from_daily():
+    """Days roll over; the month must not."""
+    import boto3
+    from moto import mock_aws
+
+    with mock_aws():
+        ddb = boto3.resource("dynamodb", region_name="us-east-1")
+        ddb.create_table(
+            TableName="monthly-test",
+            KeySchema=[{"AttributeName": "userId", "KeyType": "HASH"}],
+            AttributeDefinitions=[{"AttributeName": "userId", "AttributeType": "S"}],
+            BillingMode="PAY_PER_REQUEST",
+        )
+        from ops.cost_meter import CostMeter
+        from users.repository import UserRepository
+
+        meter = CostMeter(UserRepository("monthly-test", dynamodb_resource=ddb))
+        day1 = 1784980800  # 2026-07-25
+        day2 = day1 + 86400  # 2026-07-26, same month
+
+        meter.record(costs={"gemini": 40_000}, tier="paid", now=day1)
+        meter.record(costs={"gemini": 60_000}, tier="paid", now=day2)
+
+        assert meter.get_daily_spend(now=day1)["totalMicros"] == 40_000
+        assert meter.get_daily_spend(now=day2)["totalMicros"] == 60_000
+        assert meter.get_monthly_spend(now=day2)["totalMicros"] == 100_000
+
+
+def test_a_new_month_starts_from_zero():
+    import boto3
+    from moto import mock_aws
+
+    with mock_aws():
+        ddb = boto3.resource("dynamodb", region_name="us-east-1")
+        ddb.create_table(
+            TableName="monthly-test2",
+            KeySchema=[{"AttributeName": "userId", "KeyType": "HASH"}],
+            AttributeDefinitions=[{"AttributeName": "userId", "AttributeType": "S"}],
+            BillingMode="PAY_PER_REQUEST",
+        )
+        from ops.cost_meter import CostMeter
+        from users.repository import UserRepository
+
+        meter = CostMeter(UserRepository("monthly-test2", dynamodb_resource=ddb))
+        july = 1784980800
+        august = july + (10 * 86400)  # 2026-08-04
+
+        meter.record(costs={"gemini": 90_000}, tier="paid", now=july)
+        assert meter.get_monthly_spend(now=july)["totalMicros"] == 90_000
+        assert meter.get_monthly_spend(now=august)["totalMicros"] == 0

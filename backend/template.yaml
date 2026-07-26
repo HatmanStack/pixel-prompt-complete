@@ -52,6 +52,7 @@ Metadata:
           - PaidMonthlyCredits
           - FreeCreditPeriodSeconds
           - PaidCreditFallbackPeriodSeconds
+          - MonthlySpendCeilingUsdMicros
           - GlobalDailySpendCeilingUsdMicros
           - EnhanceDailySpendCeilingUsdMicros
           - ModelGeminiDailyCap
@@ -236,16 +237,24 @@ Parameters:
       alarms still fire and are visible in CloudWatch, but nothing is
       delivered. Set it if you want to be told before the invoice arrives.
 
+  MonthlySpendWarningUsd:
+    Type: Number
+    Default: 350
+    Description: >-
+      Monthly spend in dollars that triggers a warning. Default 350 is 70% of
+      the default ceiling, which leaves time to decide rather than only
+      telling you after service has already stopped.
+
   DailySpendWarningUsd:
     Type: Number
-    Default: 50
+    Default: 15
     Description: >-
-      Daily spend in dollars that triggers a warning. Default 50 is half the
-      default hard ceiling, so it fires with room to react.
+      Daily spend in dollars that triggers a warning. Default 15 is 60% of the
+      default daily ceiling.
 
   FreeTierSpendWarningUsd:
     Type: Number
-    Default: 20
+    Default: 5
     Description: Daily free-tier spend in dollars that triggers a warning
 
   QuotaRejectionThreshold:
@@ -456,9 +465,18 @@ Parameters:
       unknown (webhook missed, or an older API shape). Used only as a floor so
       a paying customer is never left at zero credits.
 
+  MonthlySpendCeilingUsdMicros:
+    Type: Number
+    Default: 500000000
+    Description: >-
+      Hard monthly spend ceiling in micro-dollars. Default 500000000 = $500
+      per calendar month. This is the bound that caps the invoice: a daily
+      ceiling alone does not, since even $25/day permits about $750 over 30
+      days. Set to 0 to disable, consciously.
+
   GlobalDailySpendCeilingUsdMicros:
     Type: Number
-    Default: 100000000
+    Default: 25000000
     Description: >-
       Hard daily spend ceiling in micro-dollars (1e-6 USD). Default 100000000
       = $100/day. Applies in every configuration, including AUTH_ENABLED=false.
@@ -466,7 +484,7 @@ Parameters:
 
   EnhanceDailySpendCeilingUsdMicros:
     Type: Number
-    Default: 5000000
+    Default: 2000000
     Description: >-
       Sub-ceiling for /enhance in micro-dollars. Default 5000000 = $5/day.
       /enhance is unauthenticated, so without its own bound anonymous traffic
@@ -627,6 +645,7 @@ Resources:
           PAID_MONTHLY_CREDITS: !Ref PaidMonthlyCredits
           FREE_CREDIT_PERIOD_SECONDS: !Ref FreeCreditPeriodSeconds
           PAID_CREDIT_FALLBACK_PERIOD_SECONDS: !Ref PaidCreditFallbackPeriodSeconds
+          MONTHLY_SPEND_CEILING_USD_MICROS: !Ref MonthlySpendCeilingUsdMicros
           GLOBAL_DAILY_SPEND_CEILING_USD_MICROS: !Ref GlobalDailySpendCeilingUsdMicros
           ENHANCE_DAILY_SPEND_CEILING_USD_MICROS: !Ref EnhanceDailySpendCeilingUsdMicros
           MODEL_GEMINI_DAILY_CAP: !Ref ModelGeminiDailyCap
@@ -1159,6 +1178,26 @@ Resources:
       Period: 86400
       EvaluationPeriods: 1
       Threshold: !Ref DailySpendWarningUsd
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+
+  MonthlySpendWarningAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-monthly-spend-warning'
+      AlarmDescription: >-
+        Monthly provider spend has passed the warning threshold. This is the
+        bound that caps the invoice, so it fires well before the hard ceiling
+        stops service.
+      MetricName: TotalSpendUsd
+      Namespace: PixelPrompt/Operations
+      Statistic: Sum
+      Period: 86400
+      EvaluationPeriods: 30
+      DatapointsToAlarm: 1
+      Threshold: !Ref MonthlySpendWarningUsd
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
       AlarmActions:

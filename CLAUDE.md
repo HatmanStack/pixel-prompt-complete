@@ -193,6 +193,8 @@ Prompt enhancement uses separate config: `PROMPT_MODEL_PROVIDER`, `PROMPT_MODEL_
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
+| `MONTHLY_SPEND_CEILING_USD_MICROS` | No | `500000000` | Hard monthly spend ceiling ($500). The bound that caps the invoice; a daily ceiling alone does not |
+| `GLOBAL_DAILY_SPEND_CEILING_USD_MICROS` | No | `25000000` | Hard daily spend ceiling ($25). Burst headroom under the monthly bound |
 | `AUTH_ENABLED` | **Yes** | _none_ | Enable Cognito auth + tier resolution. Gates **identity only** -- quota, cost caps and spend metering apply either way. No default: config raises at import if unset, and the SAM parameter has no default either, so the choice appears in the deploy parameters |
 | `ANON_GENERATE_LIMIT` | No | `5` | `/generate` calls per source IP per window when `AUTH_ENABLED=false` |
 | `ANON_REFINE_LIMIT` | No | `10` | `/iterate` + `/outpaint` calls per source IP per window when `AUTH_ENABLED=false` |

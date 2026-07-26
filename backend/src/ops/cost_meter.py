@@ -49,6 +49,20 @@ def spend_item_key(now: int) -> str:
     return f"spend#{_day_key(now)}"
 
 
+def _month_key(now: int) -> str:
+    return datetime.fromtimestamp(now, tz=timezone.utc).strftime("%Y-%m")
+
+
+def monthly_spend_item_key(now: int) -> str:
+    """Accumulator for the calendar month.
+
+    A daily ceiling alone does not bound a month: the shipped $100/day
+    permits roughly $3,000 across 30 days. This is the item the monthly
+    ceiling reads.
+    """
+    return f"spend#{_month_key(now)}"
+
+
 class CostMeter:
     """Records what each request actually cost, in dollars."""
 
@@ -97,6 +111,21 @@ class CostMeter:
                 tier=tier,
             )
 
+        # Separate item, not derived by summing days: a monthly ceiling check
+        # on the request path cannot afford 30 reads.
+        try:
+            self._repo.add_counters(
+                monthly_spend_item_key(now),
+                deltas,
+                now=now,
+                ttl=now + SPEND_ITEM_TTL_SECONDS,
+            )
+        except Exception as e:
+            StructuredLogger.error(
+                f"Cost meter failed to record monthly spend: {e}",
+                totalMicros=total,
+            )
+
         # Mirror to CloudWatch so spend can be alarmed on. DynamoDB holds the
         # authoritative number; this is what can actually page someone.
         try:
@@ -136,9 +165,18 @@ class CostMeter:
 
     def get_daily_spend(self, now: int | None = None) -> dict[str, Any]:
         """Read today's accumulator. Missing item means nothing spent yet."""
-        if now is None:
-            now = int(time.time())
-        item = self._repo.get_user(spend_item_key(now))
+        return self._read_spend(spend_item_key(now or int(time.time())))
+
+    def get_monthly_spend(self, now: int | None = None) -> dict[str, Any]:
+        """Read this calendar month's accumulator."""
+        return self._read_spend(monthly_spend_item_key(now or int(time.time())))
+
+    def _read_spend(self, key: str) -> dict[str, Any]:
+        item = self._repo.get_user(key)
         if not item:
             return {"totalMicros": 0}
-        return {k: int(v) for k, v in item.items() if k not in ("userId", "updatedAt")}
+        return {
+            k: int(v)
+            for k, v in item.items()
+            if k not in ("userId", "updatedAt", "ttl")
+        }

@@ -434,7 +434,19 @@ def model_cost_micros(model_name: str, operation: str) -> int:
 # Set to 0 to disable, consciously.
 # ---------------------------------------------------------------------------
 global_daily_spend_ceiling_usd_micros = _safe_int(
-    "GLOBAL_DAILY_SPEND_CEILING_USD_MICROS", 100_000_000
+    "GLOBAL_DAILY_SPEND_CEILING_USD_MICROS", 25_000_000
+)
+
+# Hard monthly ceiling, in micro-dollars. Default $500/month.
+#
+# The daily ceiling alone does not bound a month: at $100/day it permitted
+# roughly $3,000 across 30 days. This is the number that actually caps the
+# invoice while the product is still being figured out.
+#
+# Deliberately more than 30x the daily figure so a busy day is not throttled
+# for being busy; the month is what stops. Set to 0 to disable, consciously.
+monthly_spend_ceiling_usd_micros = _safe_int(
+    "MONTHLY_SPEND_CEILING_USD_MICROS", 500_000_000
 )
 
 # Sub-ceiling for /enhance specifically, in micro-dollars. Default $5/day.
@@ -446,8 +458,11 @@ global_daily_spend_ceiling_usd_micros = _safe_int(
 # endpoint can consume, independently of the global ceiling it also respects.
 #
 # Set to 0 to disable this sub-ceiling (the global one still applies).
+# $2/day, roughly $60/month, about 12% of the monthly budget. At the previous
+# $5/day this unauthenticated endpoint could claim $150/month, 30% of the
+# total, which is not a defensible share for a path with no sign-in.
 enhance_daily_spend_ceiling_usd_micros = _safe_int(
-    "ENHANCE_DAILY_SPEND_CEILING_USD_MICROS", 5_000_000
+    "ENHANCE_DAILY_SPEND_CEILING_USD_MICROS", 2_000_000
 )
 
 # CAPTCHA (Cloudflare Turnstile)
