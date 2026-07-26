@@ -227,6 +227,32 @@ Parameters:
     Description: OAuth2 logout redirect URL for Cognito Hosted UI
 
   # Feature Flags
+  AlarmEmail:
+    Type: String
+    Default: ""
+    Description: >-
+      Email address for operational alarms (spend, provider errors, quota
+      rejections). Leave empty to create the topic without a subscription --
+      alarms still fire and are visible in CloudWatch, but nothing is
+      delivered. Set it if you want to be told before the invoice arrives.
+
+  DailySpendWarningUsd:
+    Type: Number
+    Default: 50
+    Description: >-
+      Daily spend in dollars that triggers a warning. Default 50 is half the
+      default hard ceiling, so it fires with room to react.
+
+  FreeTierSpendWarningUsd:
+    Type: Number
+    Default: 20
+    Description: Daily free-tier spend in dollars that triggers a warning
+
+  QuotaRejectionThreshold:
+    Type: Number
+    Default: 50
+    Description: Quota rejections per 15 minutes that trigger an alarm
+
   AuthEnabled:
     Type: String
     AllowedValues:
@@ -511,6 +537,7 @@ Parameters:
 
 
 Conditions:
+  HasAlarmEmail: !Not [!Equals [!Ref AlarmEmail, ""]]
   AuthEnabledCondition: !Equals [!Ref AuthEnabled, "true"]
 
 
@@ -1082,6 +1109,20 @@ Resources:
       LogGroupName: !Sub '/aws/lambda/${PixelPromptFunction}'
       RetentionInDays: 7
 
+  AlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${AWS::StackName}-alarms'
+      DisplayName: Pixel Prompt operational alarms
+
+  AlarmEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlarmEmail
+    Properties:
+      TopicArn: !Ref AlarmTopic
+      Protocol: email
+      Endpoint: !Ref AlarmEmail
+
   LambdaErrorAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
@@ -1098,6 +1139,91 @@ Resources:
         - Name: FunctionName
           Value: !Ref PixelPromptFunction
       TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+
+  # Spend is recorded in DynamoDB and shown on the admin dashboard, but
+  # neither can page anyone. These are what make a runaway bill something an
+  # operator hears about before the invoice.
+  DailySpendWarningAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-daily-spend-warning'
+      AlarmDescription: >-
+        Daily provider spend has passed the warning threshold. Fires well
+        before the hard ceiling so there is time to look rather than just be
+        cut off.
+      MetricName: TotalSpendUsd
+      Namespace: PixelPrompt/Operations
+      Statistic: Sum
+      Period: 86400
+      EvaluationPeriods: 1
+      Threshold: !Ref DailySpendWarningUsd
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+
+  FreeTierSpendAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-free-tier-spend'
+      AlarmDescription: >-
+        Free-tier spend is pure acquisition cost and the largest single
+        exposure at 4-model access, so it is alarmed separately from total.
+      MetricName: SpendUsd
+      Namespace: PixelPrompt/Operations
+      Statistic: Sum
+      Period: 86400
+      EvaluationPeriods: 1
+      Threshold: !Ref FreeTierSpendWarningUsd
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      Dimensions:
+        - Name: Tier
+          Value: free
+      AlarmActions:
+        - !Ref AlarmTopic
+
+  QuotaRejectionSpikeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-quota-rejection-spike'
+      AlarmDescription: >-
+        Sustained quota rejections. Ambiguous by design: it means either
+        abuse, or a limit set too low and silently costing signups. Both are
+        worth knowing about.
+      MetricName: TotalQuotaRejections
+      Namespace: PixelPrompt/Operations
+      Statistic: Sum
+      Period: 900
+      EvaluationPeriods: 1
+      Threshold: !Ref QuotaRejectionThreshold
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+
+  ProviderErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-provider-errors'
+      AlarmDescription: >-
+        Provider errors across all models. A single provider degrading is
+        otherwise invisible until users report missing images.
+      # TotalErrorCount, not ErrorCount: the latter is only ever published
+      # with an Endpoint dimension, so a dimensionless alarm on it matches no
+      # series and can never fire.
+      MetricName: TotalErrorCount
+      Namespace: PixelPrompt/Operations
+      Statistic: Sum
+      Period: 900
+      EvaluationPeriods: 2
+      Threshold: 10
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
 
 Outputs:
   FunctionName:

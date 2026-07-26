@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import os
 from unittest.mock import MagicMock, patch
 
@@ -130,4 +129,13 @@ class TestEmitRequestMetric:
         mock_client = MagicMock()
         with patch("boto3.client", return_value=mock_client) as mock_boto:
             m.emit_request_metric("/generate", "gemini", 100.0, False)
-            mock_boto.assert_called_once_with("cloudwatch")
+            mock_boto.assert_called_once()
+            assert mock_boto.call_args.args[0] == "cloudwatch"
+
+        # Bounded, not botocore's 60s defaults: put_metric_data is a
+        # synchronous call on the request path, so a degraded CloudWatch would
+        # otherwise add minutes to a user's request while still "succeeding".
+        cfg = mock_boto.call_args.kwargs["config"]
+        assert cfg.connect_timeout == m._CW_TIMEOUT_SECONDS
+        assert cfg.read_timeout == m._CW_TIMEOUT_SECONDS
+        assert cfg.retries["total_max_attempts"] == m._CW_MAX_ATTEMPTS

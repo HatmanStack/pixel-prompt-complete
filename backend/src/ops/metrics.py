@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import boto3
+from botocore.config import Config as BotoConfig
 from botocore.exceptions import ClientError
 
 import config
@@ -24,11 +25,32 @@ _CW_NAMESPACE = "PixelPrompt/Operations"
 _cw_client = None
 
 
+# put_metric_data is a synchronous network call on the request path. The
+# handlers catch its exceptions, which makes telemetry failure-safe but not
+# latency-safe: with botocore's defaults (60s connect and read, legacy
+# retries) a degraded CloudWatch could add minutes to a user's request while
+# still "succeeding".
+#
+# Backgrounding is not an option here. Lambda freezes the execution
+# environment once the response is returned, so a thread that has not flushed
+# is simply lost — and may then resume mid-write on the next invocation.
+# Bounding the call is the correct fix for this runtime.
+_CW_TIMEOUT_SECONDS = 2
+_CW_MAX_ATTEMPTS = 2
+
+
 def _get_cw_client():
-    """Return a lazily-initialized CloudWatch client."""
+    """Return a lazily-initialized CloudWatch client with bounded timeouts."""
     global _cw_client
     if _cw_client is None:
-        _cw_client = boto3.client("cloudwatch")
+        _cw_client = boto3.client(
+            "cloudwatch",
+            config=BotoConfig(
+                connect_timeout=_CW_TIMEOUT_SECONDS,
+                read_timeout=_CW_TIMEOUT_SECONDS,
+                retries={"mode": "standard", "total_max_attempts": _CW_MAX_ATTEMPTS},
+            ),
+        )
     return _cw_client
 
 
@@ -70,12 +92,90 @@ def emit_request_metric(
                 "Unit": "Milliseconds",
                 "Dimensions": dimensions,
             },
+            # Undimensioned copy. A CloudWatch alarm cannot sum across
+            # dimension values, so an alarm on "errors across all providers"
+            # has no series to match unless one is published without
+            # dimensions. Same requirement as TotalSpendUsd and
+            # TotalQuotaRejections.
+            {
+                "MetricName": "TotalErrorCount",
+                "Value": 1 if is_error else 0,
+                "Unit": "Count",
+            },
         ]
 
         client = _get_cw_client()
         client.put_metric_data(Namespace=_CW_NAMESPACE, MetricData=metric_data)
     except Exception as e:
         StructuredLogger.error(f"Failed to emit CloudWatch metric: {e}")
+
+
+def emit_spend_metric(usd_micros: int, tier: str) -> None:
+    """Emit request spend to CloudWatch, in dollars. Fire-and-forget.
+
+    The ledger records micro-dollars because DynamoDB counters must be
+    integers, but this emits dollars: an alarm threshold a human sets should
+    read "50", not "50000000". CloudWatch metrics are not accumulators, so
+    the float carries no drift risk here.
+
+    Spend lives in DynamoDB and is visible on the admin dashboard, but
+    neither of those can page anyone. This is what makes a runaway bill
+    something that wakes an operator rather than something discovered on the
+    next invoice.
+    """
+    if usd_micros <= 0:
+        return
+    try:
+        client = _get_cw_client()
+        client.put_metric_data(
+            Namespace=_CW_NAMESPACE,
+            MetricData=[
+                {
+                    "MetricName": "SpendUsd",
+                    "Value": usd_micros / 1_000_000,
+                    "Unit": "None",
+                    "Dimensions": [{"Name": "Tier", "Value": tier}],
+                },
+                # Undimensioned copy: an alarm on total spend cannot sum
+                # across dimension values, so it needs its own series.
+                {
+                    "MetricName": "TotalSpendUsd",
+                    "Value": usd_micros / 1_000_000,
+                    "Unit": "None",
+                },
+            ],
+        )
+    except Exception as e:
+        StructuredLogger.error(f"Failed to emit spend metric: {e}")
+
+
+def emit_quota_rejection(tier: str, endpoint: str, reason: str) -> None:
+    """Emit a quota/limit rejection. Fire-and-forget.
+
+    Rejections were invisible: a user hitting a wall and an attacker probing
+    one looked identical from outside, and a limit set wrongly low produced
+    silent churn rather than a signal.
+    """
+    try:
+        client = _get_cw_client()
+        client.put_metric_data(
+            Namespace=_CW_NAMESPACE,
+            MetricData=[
+                {
+                    "MetricName": "QuotaRejection",
+                    "Value": 1,
+                    "Unit": "Count",
+                    "Dimensions": [
+                        {"Name": "Tier", "Value": tier},
+                        {"Name": "Endpoint", "Value": endpoint},
+                        {"Name": "Reason", "Value": reason},
+                    ],
+                },
+                {"MetricName": "TotalQuotaRejections", "Value": 1, "Unit": "Count"},
+            ],
+        )
+    except Exception as e:
+        StructuredLogger.error(f"Failed to emit quota rejection metric: {e}")
 
 
 # ---------- Daily Snapshot ----------

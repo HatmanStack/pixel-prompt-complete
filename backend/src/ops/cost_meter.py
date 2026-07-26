@@ -97,6 +97,15 @@ class CostMeter:
                 tier=tier,
             )
 
+        # Mirror to CloudWatch so spend can be alarmed on. DynamoDB holds the
+        # authoritative number; this is what can actually page someone.
+        try:
+            from ops.metrics import emit_spend_metric
+
+            emit_spend_metric(total, tier)
+        except Exception as e:
+            StructuredLogger.error(f"Failed to mirror spend to CloudWatch: {e}")
+
         # Per-user spend. Guests are tracked under their own guest# record;
         # anonymous requests (auth disabled) have no record to attribute to.
         if user_id and user_id != "anon":
