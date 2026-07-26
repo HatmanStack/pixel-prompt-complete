@@ -89,6 +89,13 @@ if billing_enabled and not auth_enabled:
 
 # Feature flags (operational safety)
 captcha_enabled = os.environ.get("CAPTCHA_ENABLED", "false").lower() == "true"
+
+# Age gate. Defaults to ON, unlike every other feature flag here, because the
+# provider terms require it rather than merely permitting it: Google allows its
+# API only where the calling service is not "likely to be accessed by"
+# under-18s. An operator who sets nothing should get the compliant behaviour,
+# so disabling is the explicit act.
+age_gate_enabled = os.environ.get("AGE_GATE_ENABLED", "true").lower() == "true"
 ses_enabled = os.environ.get("SES_ENABLED", "false").lower() == "true"
 admin_enabled = os.environ.get("ADMIN_ENABLED", "false").lower() == "true"
 if admin_enabled and not auth_enabled:

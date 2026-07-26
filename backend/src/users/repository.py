@@ -407,6 +407,45 @@ class UserRepository:
             return self.get_user(key) or item
         return item
 
+    def has_affirmed_age(self, identity_key: str) -> bool:
+        """Return True if this identity has previously affirmed being 18+.
+
+        ``identity_key`` is ``TierContext.user_id``, which already namespaces
+        guests (``guest#...``) and anonymous callers (``anon#...``) apart from
+        Cognito subs, so one method covers every tier.
+        """
+        item = self.get_user(identity_key)
+        return bool(item and item.get("ageAffirmedAt"))
+
+    def record_age_affirmation(self, identity_key: str, now: int, ttl: int | None = None) -> None:
+        """Record that this identity affirmed being 18+.
+
+        Written only if absent, so the timestamp is the first affirmation
+        rather than the most recent request. ``ttl`` is applied only when the
+        item is being created, so this cannot extend or shorten the expiry of
+        an existing guest record.
+        """
+        expr = "SET ageAffirmedAt = :now, updatedAt = :now"
+        values = {":now": now}
+        if ttl is not None:
+            expr += ", #ttl = if_not_exists(#ttl, :ttl)"
+            values[":ttl"] = ttl
+        kwargs = {
+            "Key": {"userId": identity_key},
+            "UpdateExpression": expr,
+            "ConditionExpression": "attribute_not_exists(ageAffirmedAt)",
+            "ExpressionAttributeValues": values,
+        }
+        if ttl is not None:
+            kwargs["ExpressionAttributeNames"] = {"#ttl": "ttl"}
+        try:
+            self._table.update_item(**kwargs)
+        except ClientError as e:
+            # Already affirmed. Two concurrent first requests race here and the
+            # loser is not an error: the fact we wanted recorded is recorded.
+            if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
+                raise
+
     def increment_anon(
         self, key: str, counter: str, limit: int, window_seconds: int, now: int
     ) -> tuple[bool, dict]:

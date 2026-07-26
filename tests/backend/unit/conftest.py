@@ -9,6 +9,12 @@ import os
 # or collection fails. Individual tests override it via monkeypatch.
 os.environ.setdefault("AUTH_ENABLED", "false")
 
+# The age gate defaults ON in production, which means it blocks every
+# /generate path -- correct there, noise here. Tests that are not about the
+# gate opt out via the environment, exactly as they do for AUTH_ENABLED;
+# test_age_gate.py turns it back on explicitly and owns the wiring assertions.
+os.environ.setdefault("AGE_GATE_ENABLED", "false")
+
 import pytest
 from moto import mock_aws
 import boto3

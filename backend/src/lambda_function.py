@@ -213,6 +213,43 @@ def _spend_ceiling_exceeded(endpoint_kind: str) -> tuple[bool, str]:
     return False, ""
 
 
+def _enforce_age_gate(tier_ctx: TierContext, body: dict[str, Any]) -> ApiResponse | None:
+    """Require an 18+ affirmation before a first generation.
+
+    Returns an error response to send, or None to proceed.
+
+    A prior affirmation is remembered against the caller's identity so the
+    prompt appears once rather than on every generation. If the store is
+    unreachable we ask again rather than either blocking the request or waving
+    it through: being unable to recall that someone answered is a reason to
+    repeat the question, and the degraded state is a re-prompt rather than an
+    outage. The subsequent write is best effort for the same reason.
+    """
+    if _user_repo is None:
+        return None
+
+    identity = tier_ctx.user_id
+    affirmed_now = body.get("ageAffirmed") is True
+
+    if not affirmed_now:
+        try:
+            if _user_repo.has_affirmed_age(identity):
+                return None
+        except Exception as e:
+            StructuredLogger.error(f"Age affirmation lookup failed, re-prompting: {e}")
+        return response(403, error_responses.age_verification_required())
+
+    now = int(time.time())
+    ttl = now + config.guest_window_seconds * 24 if tier_ctx.tier in ("guest", "anon") else None
+    try:
+        _user_repo.record_age_affirmation(identity, now, ttl)
+    except Exception as e:
+        # The caller answered; failing to persist it costs a repeat prompt on
+        # their next generation, not access now.
+        StructuredLogger.error(f"Failed to record age affirmation: {e}")
+    return None
+
+
 def _enforce_quota_safe(tier_ctx: TierContext, endpoint_kind: str, now: int) -> "QuotaResult":
     """Enforce quota, failing OPEN if the quota store is unreachable.
 
@@ -357,6 +394,16 @@ def _parse_and_validate_request(
 
         if not verify_turnstile(captcha_token, ip):
             return None, response(403, error_responses.captcha_failed())
+
+    # Age gate. Google's API terms allow use only where the calling service is
+    # not "likely to be accessed by" individuals under 18, which is a stricter
+    # test than a checkbox and is not satisfied by a public URL that asks
+    # nothing. Enforced on /generate only: refinement requires an existing
+    # session, which required a generate, which required this.
+    if config.age_gate_enabled and endpoint_kind == "generate":
+        err = _enforce_age_gate(tier_ctx, body)
+        if err:
+            return None, err
 
     # Guests cannot refine at all, so reject before writing anything. Checked
     # here rather than with the other quota logic below because a request that
