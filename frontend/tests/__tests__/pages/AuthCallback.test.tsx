@@ -52,7 +52,12 @@ describe('AuthCallback', () => {
     render(<AuthCallback />);
 
     await waitFor(() => expect(mockExchange).toHaveBeenCalledWith('abc123'));
-    await waitFor(() => expect(mockSetTokens).toHaveBeenCalled());
+    // Assert the payload, not just the call: forwarding mangled tokens to the
+    // auth store would leave the user signed in with credentials that do not
+    // work, and the weaker assertion passes either way.
+    await waitFor(() =>
+      expect(mockSetTokens).toHaveBeenCalledWith({ idToken: 'id', accessToken: 'acc' }),
+    );
   });
 
   it('redirects home after a successful exchange', async () => {
