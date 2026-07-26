@@ -60,23 +60,52 @@ class ImageStorage:
         """
         self.s3.put_object(Bucket=self.bucket, Key=key, Body=body, ContentType=content_type)
 
+    # Objects under this prefix are deliberately NOT covered by the CloudFront
+    # origin access policy, so they have no unsigned URL. Reaching them requires
+    # a presigned URL, which the Lambda only issues after checking ownership.
+    PRIVATE_PREFIX = "private"
+
     def upload_image(
         self,
         base64_image: str,
         target: str,
         model_name: str,
         iteration: Optional[int] = None,
+        session_id: Optional[str] = None,
+        visibility: str = "public",
     ) -> str:
-        """Upload a generated image to S3 as raw PNG bytes."""
-        normalized_model = self._normalize_model_name(model_name)
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+        """Upload a generated image to S3 as raw PNG bytes.
 
+        The key encodes visibility structurally rather than recording it as
+        metadata to be checked later. A private image has no unsigned URL
+        because its prefix is outside the bucket policy, so forgetting a check
+        on some future read path cannot expose it.
+
+        ``session_id`` also disambiguates the folder. It used to be a bare
+        second-granularity timestamp shared by every session that started in
+        the same second, which merged unrelated users into one gallery folder
+        and, when the same model finished in the same second, produced an
+        identical key and silently overwrote the earlier image.
+        """
+        normalized_model = self._normalize_model_name(model_name)
         iter_suffix = f"-iter{iteration}" if iteration is not None else ""
-        key = f"sessions/{target}/{normalized_model}-{timestamp}{iter_suffix}.png"
+
+        if visibility == "private":
+            if not session_id:
+                raise ValueError("session_id is required for private uploads")
+            key = f"{self.PRIVATE_PREFIX}/{session_id}/{normalized_model}{iter_suffix}.png"
+        else:
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+            folder = f"{target}-{session_id[:8]}" if session_id else target
+            key = f"sessions/{folder}/{normalized_model}-{timestamp}{iter_suffix}.png"
 
         self._store_image(base64_image, key)
 
         return key
+
+    def is_private_key(self, image_key: str) -> bool:
+        """Return True if ``image_key`` has no unsigned URL."""
+        return image_key.startswith(f"{self.PRIVATE_PREFIX}/")
 
     def get_image(self, image_key: str) -> Optional[Dict]:
         """
@@ -142,8 +171,16 @@ class ImageStorage:
         """
         return self.s3.get_object(Bucket=self.bucket, Key=key)
 
-    # Timestamp folder pattern: YYYY-MM-DD-HH-MM-SS
-    _GALLERY_FOLDER_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}$")
+    # Gallery folder pattern: YYYY-MM-DD-HH-MM-SS, optionally suffixed with the
+    # first 8 characters of the session id. The suffix is what keeps two
+    # sessions that started in the same second from sharing a folder; the
+    # optional group keeps folders written before that change listable.
+    #
+    # The suffix class is alphanumeric rather than hex even though session ids
+    # are UUIDs today. Anchored as it is, this still cannot match a session
+    # state folder (a full UUID is 36 characters), and the failure mode of
+    # being too strict is that galleries silently stop appearing.
+    _GALLERY_FOLDER_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}(?:-[0-9a-zA-Z]{8})?$")
 
     def validate_gallery_id(self, gallery_id: str) -> bool:
         """Return True if ``gallery_id`` matches the gallery timestamp format."""
@@ -272,6 +309,22 @@ class ImageStorage:
                 "Bucket": self.bucket,
                 "Key": image_key,
                 "ResponseContentDisposition": f'attachment; filename="{filename}"',
+                "ResponseContentType": "image/png",
+            },
+            ExpiresIn=expires_in,
+        )
+
+    def generate_presigned_view_url(self, image_key: str, expires_in: int = 3600) -> str:
+        """Generate a presigned S3 URL for viewing a private image inline.
+
+        Distinct from ``generate_presigned_download_url``, which forces an
+        attachment disposition. This one renders in an <img> tag.
+        """
+        return self.s3.generate_presigned_url(
+            "get_object",
+            Params={
+                "Bucket": self.bucket,
+                "Key": image_key,
                 "ResponseContentType": "image/png",
             },
             ExpiresIn=expires_in,

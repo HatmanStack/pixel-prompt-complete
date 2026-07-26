@@ -52,25 +52,35 @@ class PromptHistoryRepository:
         user_id: str | None,
         prompt: str,
         session_id: str,
+        publish_to_feed: bool = True,
     ) -> None:
         """Write prompt history record(s) to DynamoDB.
 
-        Always writes a global feed item (``GLOBAL#RECENT``).
-        If ``user_id`` is provided, also writes a per-user item.
+        Writes a global feed item (``GLOBAL#RECENT``) when ``publish_to_feed``
+        is set. The feed is served unauthenticated at ``/prompts/recent``, so
+        a private session must not write one: prompts are free text and
+        publishing a paid user's is the same disclosure as publishing their
+        image.
+
+        If ``user_id`` is provided, also writes a per-user item. That one is
+        written regardless, since it is only readable by its owner.
         """
         now = int(time.time())
 
-        # Global feed item (with TTL)
-        global_item = {
-            "userId": f"prompt#{uuid4()}",
-            "promptOwner": "GLOBAL#RECENT",
-            "createdAt": now,
-            "prompt": prompt,
-            "sessionId": session_id,
-            "ttl": now + _FEED_TTL_SECONDS,
-        }
+        items_to_write = []
 
-        items_to_write = [global_item]
+        if publish_to_feed:
+            # Global feed item (with TTL)
+            items_to_write.append(
+                {
+                    "userId": f"prompt#{uuid4()}",
+                    "promptOwner": "GLOBAL#RECENT",
+                    "createdAt": now,
+                    "prompt": prompt,
+                    "sessionId": session_id,
+                    "ttl": now + _FEED_TTL_SECONDS,
+                }
+            )
 
         if user_id is not None:
             user_item = {

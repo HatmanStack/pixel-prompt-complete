@@ -69,6 +69,7 @@ def stack():
         patch("lambda_function._daily_spend_exceeded", return_value=False),
         patch("lambda_function.image_storage") as mock_storage,
     ):
+        mock_storage.is_private_key.return_value = False
         mock_repo.get_model_runtime_config.return_value = None
         mock_quota.return_value = QuotaResult(
             allowed=True, reason=None, reset_at=0, usage={}

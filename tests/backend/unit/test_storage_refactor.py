@@ -458,7 +458,7 @@ class TestLoadSourceImageFormats:
 
         assert err is None
         assert result is not None
-        source_b64, count = result
+        source_b64, count, _visibility = result
         assert source_b64 == SAMPLE_IMAGE_BASE64
         assert count == 1
 
@@ -488,6 +488,6 @@ class TestLoadSourceImageFormats:
 
         assert err is None
         assert result is not None
-        source_b64, count = result
+        source_b64, count, _visibility = result
         assert source_b64 == SAMPLE_IMAGE_BASE64
         assert count == 1

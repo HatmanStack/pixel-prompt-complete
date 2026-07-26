@@ -136,7 +136,7 @@ def test_refinement_records_the_chosen_model():
         mock_counter.consume_model_slot.return_value = True
         mock_cf.check_prompt.return_value = False
         mock_val.return_value = (("s1", "gemini", model_cfg), None)
-        mock_load.return_value = (("img", 1), None)
+        mock_load.return_value = (("img", 1, "public"), None)
         mock_sm.add_iteration.return_value = 1
 
         lambda_function.handle_iterate(
@@ -195,7 +195,7 @@ def test_a_failed_refinement_records_no_preference():
         mock_counter.consume_model_slot.return_value = True
         mock_cf.check_prompt.return_value = False
         mock_val.return_value = (("s1", "gemini", model_cfg), None)
-        mock_load.return_value = (("img", 1), None)
+        mock_load.return_value = (("img", 1, "public"), None)
         mock_sm.add_iteration.return_value = 1
 
         lambda_function.handle_iterate(

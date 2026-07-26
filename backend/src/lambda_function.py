@@ -426,12 +426,18 @@ def _handle_successful_result(
     iteration_index: int,
     target: str,
     duration: float,
+    visibility: str,
     context_prompt: str | None = None,
 ) -> dict[str, Any]:
     """Handle a successful handler result: upload, complete iteration, add context.
 
     Args:
         context_prompt: Prompt string to store in context. Defaults to ``prompt``.
+        visibility: ``"private"`` routes the image to a prefix with no unsigned
+            URL. Deliberately has no default: defaulting to public would mean a
+            call site nobody remembered to update publishes a paid user's image,
+            and defaulting to private would quietly break the gallery. Required
+            means a missed call site is a TypeError.
 
     Returns:
         Dict with image_key and image_url.
@@ -441,6 +447,8 @@ def _handle_successful_result(
         target,
         model_name,
         iteration=iteration_index,
+        session_id=session_id,
+        visibility=visibility,
     )
 
     session_manager.complete_iteration(
@@ -721,12 +729,28 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
                 adapted_prompts[_model_name] = prompt
 
         # Create session
-        session_id = session_manager.create_session(prompt, enabled_model_names)
+        visibility = _visibility_for_tier(validated.tier.tier if validated.tier else None)
+        owner_id = (
+            validated.tier.user_id
+            if validated.tier and validated.tier.is_authenticated
+            else None
+        )
+        session_id = session_manager.create_session(
+            prompt,
+            enabled_model_names,
+            owner_id=owner_id,
+            visibility=visibility,
+        )
 
         # Record prompt history (best-effort, do not fail generation)
         try:
             user_id = validated.tier.user_id if validated.tier.is_authenticated else None
-            _prompt_history.record_prompt(user_id=user_id, prompt=prompt, session_id=session_id)
+            _prompt_history.record_prompt(
+                user_id=user_id,
+                prompt=prompt,
+                session_id=session_id,
+                publish_to_feed=(visibility == "public"),
+            )
         except Exception as e:
             StructuredLogger.warning(
                 f"Failed to record prompt history: {e}",
@@ -769,6 +793,7 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
                         iteration_index,
                         target,
                         duration,
+                        visibility,
                         context_prompt=prompt,
                     )
                     return model_name, {
@@ -998,11 +1023,17 @@ def _validate_refinement_request(
 def _load_source_image(
     session_id: str,
     model_name: str,
-) -> tuple[tuple[str, int] | None, ApiResponse | None]:
-    """Check iteration limit, load source image from latest iteration.
+    tier_ctx: Any = None,
+) -> tuple[tuple[str, int, str] | None, ApiResponse | None]:
+    """Authorize the session, check the iteration limit, load the source image.
+
+    Refinement is a read of the session's latest image, so a private session
+    has to be authorized here too. Guarding only the obvious viewing endpoints
+    would leave /iterate and /outpaint as a way to read a private image by
+    refining it.
 
     Returns:
-        ((source_image_base64, iteration_count), None) on success,
+        ((source_image_base64, iteration_count, visibility), None) on success,
         or (None, error_response) on failure.
     """
     # Single S3 read: load session once and derive iteration count + image key
@@ -1010,6 +1041,11 @@ def _load_source_image(
     if not session:
         return None, response(404, {"error": f"Session {session_id} not found"})
 
+    if _session_is_private(session) and not _caller_owns_session(session, tier_ctx):
+        # 404, not 403: confirming a session exists is itself a disclosure.
+        return None, response(404, {"error": f"Session {session_id} not found"})
+
+    visibility = session.get("visibility", "public")
     model_data = session.get("models", {}).get(model_name) or {}
     iteration_count = model_data.get("iterationCount", 0)
     if iteration_count >= MAX_ITERATIONS:
@@ -1037,13 +1073,13 @@ def _load_source_image(
         raw_bytes = image_storage.get_image_bytes(source_image_key)
         if not raw_bytes:
             return None, response(500, {"error": "Failed to load source image"})
-        return (base64.b64encode(raw_bytes).decode("utf-8"), iteration_count), None
+        return (base64.b64encode(raw_bytes).decode("utf-8"), iteration_count, visibility), None
 
     source_data = image_storage.get_image(source_image_key)
     if not source_data or not source_data.get("output"):
         return None, response(500, {"error": "Failed to load source image"})
 
-    return (source_data["output"], iteration_count), None
+    return (source_data["output"], iteration_count, visibility), None
 
 
 def _handle_refinement(
@@ -1083,11 +1119,11 @@ def _handle_refinement(
             return err
         session_id, model_name, model_config = refs
 
-        loaded, err = _load_source_image(session_id, model_name)
+        loaded, err = _load_source_image(session_id, model_name, validated.tier)
         if err:
             _refund_credits(validated.tier, refund_kind, correlation_id)
             return err
-        source_image, iteration_count = loaded
+        source_image, iteration_count, visibility = loaded
 
         # Iteration warning at threshold
         warning = None
@@ -1178,6 +1214,7 @@ def _handle_refinement(
                 iteration_index,
                 target,
                 duration,
+                visibility,
                 context_prompt=ctx_prompt,
             )
             resp = {
@@ -1289,16 +1326,65 @@ def handle_outpaint(event: LambdaEvent, correlation_id: str | None = None) -> Ap
 _TERMINAL_SESSION_STATUSES = frozenset({"completed", "partial", "failed"})
 
 
+# Tiers whose generations are private. Paying for the product buys privacy;
+# free and anonymous use feeds the public gallery, which is what makes the
+# gallery worth browsing at all.
+_PRIVATE_TIERS = frozenset({"paid"})
+
+# How long a presigned image URL stays valid. Long enough to view and refine a
+# session without re-fetching, short enough that a leaked URL expires.
+_PRIVATE_URL_TTL_SECONDS = 3600
+
+
+def _visibility_for_tier(tier: str | None) -> str:
+    """Map a tier to the visibility its generations get."""
+    return "private" if tier in _PRIVATE_TIERS else "public"
+
+
+def _session_is_private(session: dict[str, Any]) -> bool:
+    """Return True if ``session`` may only be read by its owner.
+
+    Sessions created before visibility existed have neither field and are
+    public, which matches how they were actually served.
+    """
+    return session.get("visibility") == "private"
+
+
+def _caller_owns_session(session: dict[str, Any], tier_ctx: Any) -> bool:
+    """Return True if ``tier_ctx`` identifies the owner of ``session``.
+
+    An anonymous caller never owns anything: a session with no recorded owner
+    is not "owned by whoever asks", it is unauthenticated legacy data, and it
+    is only reachable here if it is also public.
+    """
+    owner_id = session.get("ownerId")
+    if not owner_id or tier_ctx is None:
+        return False
+    return bool(getattr(tier_ctx, "is_authenticated", False)) and (
+        getattr(tier_ctx, "user_id", None) == owner_id
+    )
+
+
 def _session_with_urls(session: dict[str, Any]) -> dict[str, Any]:
-    """Add CloudFront URLs to completed iterations.
+    """Add image URLs to completed iterations.
 
     Shared by /status and /generate so the two cannot return differently
     shaped sessions — the client treats them as the same object.
+
+    Private images live outside the CloudFront origin policy and have no
+    unsigned URL, so they are presigned here. Callers must authorize the
+    session before calling this; issuing a presigned URL is granting access.
     """
     for _model_name, model_data in session.get("models", {}).items():
         for iteration in model_data.get("iterations", []):
             if iteration.get("status") == "completed" and iteration.get("imageKey"):
-                iteration["imageUrl"] = image_storage.get_cloudfront_url(iteration["imageKey"])
+                key = iteration["imageKey"]
+                if image_storage.is_private_key(key):
+                    iteration["imageUrl"] = image_storage.generate_presigned_view_url(
+                        key, expires_in=_PRIVATE_URL_TTL_SECONDS
+                    )
+                else:
+                    iteration["imageUrl"] = image_storage.get_cloudfront_url(key)
     return session
 
 
@@ -1318,6 +1404,13 @@ def handle_status(event: LambdaEvent, correlation_id: str | None = None) -> ApiR
 
         session = session_manager.get_session(session_id)
         if not session:
+            return response(404, {"error": f"Session {session_id} not found"})
+
+        # A private session is readable only by its owner. 404 rather than 403:
+        # a 403 confirms the session exists, which is itself a disclosure.
+        if _session_is_private(session) and not _caller_owns_session(
+            session, resolve_tier(event, _user_repo, _guest_service)
+        ):
             return response(404, {"error": f"Session {session_id} not found"})
 
         return response(200, _session_with_urls(session))
@@ -1498,6 +1591,13 @@ def handle_download(event: LambdaEvent, correlation_id: str | None = None) -> Ap
         # Load session
         session = session_manager.get_session(session_id)
         if not session:
+            return response(404, {"error": f"Session {session_id} not found"})
+
+        # Same ownership rule as /status. A download URL is a grant of access,
+        # so this endpoint needs the check just as much as the viewing one.
+        if _session_is_private(session) and not _caller_owns_session(
+            session, resolve_tier(event, _user_repo, _guest_service)
+        ):
             return response(404, {"error": f"Session {session_id} not found"})
 
         # Find the iteration

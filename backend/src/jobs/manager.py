@@ -52,13 +52,25 @@ class SessionManager:
         self.s3 = s3_client
         self.bucket = bucket_name
 
-    def create_session(self, prompt: str, enabled_models: list[str]) -> str:
+    def create_session(
+        self,
+        prompt: str,
+        enabled_models: list[str],
+        owner_id: str | None = None,
+        visibility: str = "public",
+    ) -> str:
         """
         Create a new session with the given enabled models.
 
         Args:
             prompt: Original text prompt
             enabled_models: List of enabled model names ('gemini', 'nova', etc.)
+            owner_id: Caller identity, recorded so a private session can be
+                authorized on read. Sessions previously recorded no owner at
+                all, which is why nothing could enforce access to one.
+            visibility: ``"public"`` or ``"private"``. Determines both the S3
+                prefix the images land under and whether the prompt reaches the
+                global feed.
 
         Returns:
             Session ID (UUID)
@@ -83,6 +95,8 @@ class SessionManager:
             "prompt": prompt,
             "createdAt": now,
             "updatedAt": now,
+            "ownerId": owner_id,
+            "visibility": visibility,
             "models": models,
         }
 
