@@ -443,8 +443,9 @@ global_daily_spend_ceiling_usd_micros = _safe_int(
 # roughly $3,000 across 30 days. This is the number that actually caps the
 # invoice while the product is still being figured out.
 #
-# Deliberately more than 30x the daily figure so a busy day is not throttled
-# for being busy; the month is what stops. Set to 0 to disable, consciously.
+# Deliberately 20x the daily figure, not 30x, so a busy day is not throttled
+# for being busy while a single day still cannot consume the month. Set to 0
+# to disable, consciously.
 monthly_spend_ceiling_usd_micros = _safe_int(
     "MONTHLY_SPEND_CEILING_USD_MICROS", 500_000_000
 )

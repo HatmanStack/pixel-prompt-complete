@@ -40,7 +40,7 @@ Metadata:
           - PromptModelId
           - PromptModelApiKey
       - Label:
-          default: "Per-Model Daily Caps"
+          default: "Pricing and Credits"
         Parameters:
           - CreditsEnabled
           - PaidPriceUsdCents
@@ -52,9 +52,15 @@ Metadata:
           - PaidMonthlyCredits
           - FreeCreditPeriodSeconds
           - PaidCreditFallbackPeriodSeconds
+      - Label:
+          default: "Spend Ceilings (global budget)"
+        Parameters:
           - MonthlySpendCeilingUsdMicros
           - GlobalDailySpendCeilingUsdMicros
           - EnhanceDailySpendCeilingUsdMicros
+      - Label:
+          default: "Per-Model Daily Caps"
+        Parameters:
           - ModelGeminiDailyCap
           - ModelNovaDailyCap
           - ModelOpenaiDailyCap
@@ -478,15 +484,19 @@ Parameters:
     Type: Number
     Default: 25000000
     Description: >-
-      Hard daily spend ceiling in micro-dollars (1e-6 USD). Default 100000000
-      = $100/day. Applies in every configuration, including AUTH_ENABLED=false.
-      Set to 0 to disable (not recommended: nothing else bounds provider spend).
+      Hard daily spend ceiling in micro-dollars (1e-6 USD). Default 25000000
+      = $25/day. Deliberately 1/20th of the monthly ceiling rather than
+      1/30th, so a busy day is not throttled for being busy while a single
+      day still cannot consume the month. Applies in every configuration,
+      including AUTH_ENABLED=false. Set to 0 to disable (not recommended).
 
   EnhanceDailySpendCeilingUsdMicros:
     Type: Number
     Default: 2000000
     Description: >-
-      Sub-ceiling for /enhance in micro-dollars. Default 5000000 = $5/day.
+      Sub-ceiling for /enhance in micro-dollars. Default 2000000 = $2/day,
+      about 12% of the monthly budget. At $5/day this unauthenticated
+      endpoint could have claimed 30% of the total.
       /enhance is unauthenticated, so without its own bound anonymous traffic
       could exhaust the global budget and 503 paying users. Set 0 to disable.
 

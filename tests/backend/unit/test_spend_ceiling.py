@@ -509,3 +509,88 @@ def test_a_new_month_starts_from_zero():
         meter.record(costs={"gemini": 90_000}, tier="paid", now=july)
         assert meter.get_monthly_spend(now=july)["totalMicros"] == 90_000
         assert meter.get_monthly_spend(now=august)["totalMicros"] == 0
+
+
+# ---- Monthly cache reconciliation ----
+
+
+def _spend_repo(name):
+    import boto3
+    from moto import mock_aws
+
+    ctx = mock_aws()
+    ctx.start()
+    ddb = boto3.resource("dynamodb", region_name="us-east-1")
+    ddb.create_table(
+        TableName=name,
+        KeySchema=[{"AttributeName": "userId", "KeyType": "HASH"}],
+        AttributeDefinitions=[{"AttributeName": "userId", "AttributeType": "S"}],
+        BillingMode="PAY_PER_REQUEST",
+    )
+    from users.repository import UserRepository
+
+    return ctx, UserRepository(name, dynamodb_resource=ddb)
+
+
+def test_reconciliation_repairs_an_undercounting_month():
+    """The monthly item is a cache; the daily items are authoritative.
+
+    An under-counting monthly total means the ceiling that caps the invoice
+    trips later than it should, so drift has to be corrected rather than
+    tolerated.
+    """
+    from ops.cost_meter import CostMeter, monthly_spend_item_key, reconcile_monthly_spend
+
+    ctx, repo = _spend_repo("recon-1")
+    try:
+        meter = CostMeter(repo)
+        now = 1784980800  # 2026-07-25
+        meter.record(costs={"gemini": 40_000}, tier="paid", now=now - 86400)
+        meter.record(costs={"gemini": 60_000}, tier="paid", now=now)
+
+        # Simulate the monthly write having failed for one of those days.
+        repo.add_counters(monthly_spend_item_key(now), {"totalMicros": -60_000}, now=now)
+        assert meter.get_monthly_spend(now=now)["totalMicros"] == 40_000
+
+        result = reconcile_monthly_spend(repo, now)
+
+        assert result["expected"] == 100_000
+        assert result["corrected"] == 60_000
+        assert meter.get_monthly_spend(now=now)["totalMicros"] == 100_000
+    finally:
+        ctx.stop()
+
+
+def test_reconciliation_is_a_noop_when_consistent():
+    from ops.cost_meter import CostMeter, reconcile_monthly_spend
+
+    ctx, repo = _spend_repo("recon-2")
+    try:
+        meter = CostMeter(repo)
+        now = 1784980800
+        meter.record(costs={"gemini": 40_000}, tier="paid", now=now)
+
+        result = reconcile_monthly_spend(repo, now)
+        assert result["corrected"] == 0
+        assert meter.get_monthly_spend(now=now)["totalMicros"] == 40_000
+    finally:
+        ctx.stop()
+
+
+def test_reconciliation_does_not_reach_into_the_previous_month():
+    """Walking back must stop at the month boundary, not 31 days."""
+    from ops.cost_meter import CostMeter, reconcile_monthly_spend
+
+    ctx, repo = _spend_repo("recon-3")
+    try:
+        meter = CostMeter(repo)
+        july_25 = 1784980800
+        june_28 = july_25 - (27 * 86400)
+
+        meter.record(costs={"gemini": 99_000}, tier="paid", now=june_28)
+        meter.record(costs={"gemini": 10_000}, tier="paid", now=july_25)
+
+        result = reconcile_monthly_spend(repo, july_25)
+        assert result["expected"] == 10_000, "pulled in a previous month's spend"
+    finally:
+        ctx.stop()

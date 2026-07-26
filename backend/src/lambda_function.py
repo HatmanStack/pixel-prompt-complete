@@ -327,7 +327,7 @@ def _parse_and_validate_request(
         exceeded, scope = _spend_ceiling_exceeded(endpoint_kind)
         if exceeded:
             StructuredLogger.error(
-                f"{scope} daily spend ceiling reached — rejecting billable request",
+                f"{scope} spend ceiling reached, rejecting billable request",
                 endpoint=endpoint_kind,
             )
             return None, response(503, error_responses.daily_spend_ceiling())
