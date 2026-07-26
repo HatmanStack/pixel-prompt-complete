@@ -253,7 +253,12 @@ Enhance the following prompt:"""
             ],
             **_get_model_params(model_id),
         }
-        if json_mode:
+        # Only ask for JSON mode where it is known to exist. A custom
+        # base_url means an OpenAI-compatible third party, and many of those
+        # reject response_format outright. Sending it there would fail the
+        # call and drop /enhance back to returning the same prompt twice,
+        # which is the bug this method exists to remove.
+        if json_mode and "base_url" not in prompt_model:
             completion_params["response_format"] = {"type": "json_object"}
 
         response = client.chat.completions.create(**completion_params)

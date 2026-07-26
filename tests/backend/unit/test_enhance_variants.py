@@ -169,3 +169,42 @@ def test_json_mode_is_not_requested_for_plain_enhancement():
         e._complete("sys", "user")
 
     assert "response_format" not in client.chat.completions.create.call_args.kwargs
+
+
+def test_json_mode_is_not_sent_to_an_openai_compatible_provider():
+    """A custom base_url means a third party that may reject response_format.
+
+    Sending it there fails the call and drops /enhance back to returning the
+    same prompt twice, which is the bug this method exists to remove.
+    """
+    e = _enhancer()
+    e.prompt_model = {
+        "provider": "openai",
+        "id": "some-local-model",
+        "api_key": "k",
+        "base_url": "https://llm.internal/v1",
+    }
+    client = MagicMock()
+    client.chat.completions.create.return_value = MagicMock(
+        choices=[MagicMock(message=MagicMock(content=json.dumps({"short": "s", "long": "l"})))]
+    )
+    with patch("api.enhance.get_openai_client", return_value=client):
+        e._complete("sys", "user", json_mode=True)
+
+    params = client.chat.completions.create.call_args.kwargs
+    assert "response_format" not in params
+    assert params["model"] == "some-local-model"
+
+
+def test_variants_still_parse_without_json_mode():
+    """A compatible provider can still return well-formed JSON unprompted."""
+    e = _enhancer()
+    e.prompt_model = {
+        "provider": "openai",
+        "id": "m",
+        "api_key": "k",
+        "base_url": "https://llm.internal/v1",
+    }
+    with patch.object(e, "_complete", return_value=json.dumps({"short": SHORT, "long": LONG})):
+        short, long_ = e.enhance_variants("a cat")
+    assert short == SHORT and long_ == LONG
