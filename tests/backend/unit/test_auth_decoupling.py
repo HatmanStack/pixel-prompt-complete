@@ -150,3 +150,49 @@ def test_anon_identity_is_stable_per_ip():
         }
     )
     assert other.user_id != a.user_id
+
+
+def test_quota_fails_open_for_every_tier():
+    """Fail-open applies uniformly, not just to anon.
+
+    The anon path had its own try/except while guest, free and paid
+    propagated to the top-level handler and 500'd — so a store outage broke
+    the service for exactly the users paying for it.
+    """
+    import lambda_function
+    from users.tier import TierContext
+
+    for tier in ("anon", "guest", "free", "paid"):
+        ctx = TierContext(
+            tier=tier,
+            user_id=f"{tier}#x",
+            email=None,
+            is_authenticated=tier in ("free", "paid"),
+            guest_token_id=None,
+            issue_guest_cookie=False,
+            ip_hash="x",
+        )
+        with patch(
+            "lambda_function.enforce_quota", side_effect=RuntimeError("dynamo down")
+        ):
+            result = lambda_function._enforce_quota_safe(ctx, "generate", 0)
+        assert result.allowed is True, f"{tier} did not fail open"
+
+
+def test_quota_denial_still_denies():
+    """Fail-open must not swallow a legitimate denial."""
+    import lambda_function
+    from users.quota import QuotaResult
+    from users.tier import TierContext
+
+    ctx = TierContext(
+        tier="free",
+        user_id="u1",
+        email=None,
+        is_authenticated=True,
+        guest_token_id=None,
+        issue_guest_cookie=False,
+    )
+    denied = QuotaResult(allowed=False, reason="free_generate", reset_at=1, usage={})
+    with patch("lambda_function.enforce_quota", return_value=denied):
+        assert lambda_function._enforce_quota_safe(ctx, "generate", 0).allowed is False

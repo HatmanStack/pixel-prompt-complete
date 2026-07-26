@@ -48,7 +48,7 @@ from ops.cost_meter import CostMeter
 from ops.metrics import emit_request_metric
 from ops.model_counters import ModelCounterService
 from prompts.repository import PromptHistoryRepository
-from users.quota import enforce_quota
+from users.quota import QuotaResult, enforce_quota
 from users.repository import UserRepository
 from users.tier import TierContext, anon_tier, persist_guest, resolve_tier
 from utils import error_responses
@@ -189,6 +189,35 @@ def _spend_ceiling_exceeded(endpoint_kind: str) -> tuple[bool, str]:
     return False, ""
 
 
+def _enforce_quota_safe(
+    tier_ctx: TierContext, endpoint_kind: str, now: int
+) -> "QuotaResult":
+    """Enforce quota, failing OPEN if the quota store is unreachable.
+
+    Applied to every tier, not just anon. The anon path had its own
+    try/except while guest, free and paid propagated straight to the
+    top-level handler and returned 500 — so a DynamoDB blip took the service
+    down for exactly the users who are paying for it, which is the opposite
+    of the intended behaviour.
+
+    Fail-open is bounded: the global daily spend ceiling still applies and is
+    checked before this. The residual risk is that a *persistent* store
+    failure means silently unmetered traffic, which is why this logs at
+    ERROR rather than WARNING — it needs to be alarmable.
+    """
+    try:
+        return enforce_quota(tier_ctx, endpoint_kind, _user_repo, now)
+    except Exception as e:
+        StructuredLogger.error(
+            f"Quota check failed, allowing request: {e}",
+            tier=tier_ctx.tier,
+            endpoint=endpoint_kind,
+        )
+        from users.quota import QuotaResult
+
+        return QuotaResult(allowed=True, reason=None, reset_at=0, usage={})
+
+
 def _refund_credits(
     tier_ctx: TierContext | None, endpoint_kind: str, correlation_id: str | None = None
 ) -> None:
@@ -307,6 +336,12 @@ def _parse_and_validate_request(
         if not verify_turnstile(captcha_token, ip):
             return None, response(403, error_responses.captcha_failed())
 
+    # Guests cannot refine at all, so reject before writing anything. Checked
+    # here rather than with the other quota logic below because a request that
+    # can never succeed must not create a record on its way to being refused.
+    if tier_ctx.tier == "guest" and endpoint_kind in ("refine", "outpaint"):
+        return None, response(402, error_responses.auth_required())
+
     # Guest record is written only now: identify -> verify -> persist. Writing
     # in resolve_tier let a caller who cannot solve the CAPTCHA still create a
     # DynamoDB item on every request.
@@ -330,10 +365,8 @@ def _parse_and_validate_request(
 
     # Quota enforcement (after validation so invalid requests don't consume quota)
     if endpoint_kind in ("generate", "refine", "outpaint"):
-        # Guests blocked from refine immediately (no auth).
-        if tier_ctx.tier == "guest" and endpoint_kind in ("refine", "outpaint"):
-            return None, response(402, error_responses.auth_required())
-        result = enforce_quota(tier_ctx, endpoint_kind, _user_repo, int(time.time()))
+        # (Guest refine/outpaint was already refused above, before any write.)
+        result = _enforce_quota_safe(tier_ctx, endpoint_kind, int(time.time()))
         if not result.allowed:
             if result.reason == "suspended":
                 return None, response(403, error_responses.account_suspended())

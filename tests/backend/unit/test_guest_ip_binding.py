@@ -8,6 +8,7 @@ was computed and stored on every guest record and then never read.
 from __future__ import annotations
 
 import importlib
+import json
 import os
 
 import boto3
@@ -297,3 +298,80 @@ def test_quota_counters_for_real_users_have_no_ttl(auth_on, repo):
     repo.increment_refine("another-user", 3600, 5, NOW)
     repo.increment_daily("another-user", 86400, 5, NOW)
     assert "ttl" not in (repo.get_user("another-user") or {})
+
+
+# ---- Rejected requests must not write ----
+
+
+def _refine_event():
+    return {
+        "body": json.dumps({"sessionId": "s1", "model": "gemini", "prompt": "bluer"}),
+        "requestContext": {"http": {"sourceIp": "203.0.113.9", "method": "POST"}},
+        "headers": {},
+    }
+
+
+def test_guest_refine_is_refused_without_writing_a_row(auth_on, repo, monkeypatch):
+    """A request that can never succeed must not create a record first.
+
+    Guests cannot refine at all, so a cookie-less caller hitting /iterate was
+    minting a token and writing a DynamoDB row on every request purely to be
+    refused with 402 a few lines later — the same write-before-reject shape
+    fixed for CAPTCHA on /generate, left live on the other two endpoints.
+    """
+    import lambda_function
+    from auth.guest_token import GuestTokenService
+
+    monkeypatch.setattr(lambda_function, "_user_repo", repo)
+    monkeypatch.setattr(lambda_function, "_guest_service", GuestTokenService("secret"))
+    monkeypatch.setattr(lambda_function.content_filter, "check_prompt", lambda p: False)
+
+    before = {u["userId"] for u in repo._table.scan().get("Items", [])}
+    validated, err = lambda_function._parse_and_validate_request(
+        _refine_event(), require_prompt=True, endpoint_kind="refine"
+    )
+    after = {u["userId"] for u in repo._table.scan().get("Items", [])}
+
+    assert validated is None
+    assert err["statusCode"] == 402
+    assert after == before, f"rejected request wrote rows: {after - before}"
+
+
+def test_guest_outpaint_is_refused_without_writing_a_row(auth_on, repo, monkeypatch):
+    import lambda_function
+    from auth.guest_token import GuestTokenService
+
+    monkeypatch.setattr(lambda_function, "_user_repo", repo)
+    monkeypatch.setattr(lambda_function, "_guest_service", GuestTokenService("secret"))
+    monkeypatch.setattr(lambda_function.content_filter, "check_prompt", lambda p: False)
+
+    before = {u["userId"] for u in repo._table.scan().get("Items", [])}
+    _, err = lambda_function._parse_and_validate_request(
+        _refine_event(), require_prompt=False, endpoint_kind="outpaint"
+    )
+    after = {u["userId"] for u in repo._table.scan().get("Items", [])}
+
+    assert err["statusCode"] == 402
+    assert after == before
+
+
+def test_guest_generate_still_writes_its_row(auth_on, repo, monkeypatch):
+    """The fix must not stop legitimate guest generates from being tracked."""
+    import lambda_function
+    from auth.guest_token import GuestTokenService
+
+    monkeypatch.setattr(lambda_function, "_user_repo", repo)
+    monkeypatch.setattr(lambda_function, "_guest_service", GuestTokenService("secret"))
+    monkeypatch.setattr(lambda_function.content_filter, "check_prompt", lambda p: False)
+
+    event = {
+        "body": json.dumps({"prompt": "a cat"}),
+        "requestContext": {"http": {"sourceIp": "203.0.113.9", "method": "POST"}},
+        "headers": {},
+    }
+    validated, err = lambda_function._parse_and_validate_request(
+        event, require_prompt=True, endpoint_kind="generate"
+    )
+    assert err is None
+    assert validated is not None
+    assert repo.get_user(validated.tier.user_id) is not None
