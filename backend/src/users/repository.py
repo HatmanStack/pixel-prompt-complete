@@ -23,6 +23,10 @@ _WEBHOOK_EVENT_TTL_SECONDS = 30 * 86400
 # a lease the claim would persist and every Stripe retry would be answered
 # "duplicate", silently losing the event.
 _WEBHOOK_LEASE_SECONDS = 900
+# Grace added to a per-IP counter's window before it may be reaped. DynamoDB
+# TTL deletion is lazy (up to ~48h), so the bucket must comfortably outlive
+# the window it is counting or a live counter could vanish mid-window.
+_IP_BUCKET_TTL_GRACE_SECONDS = 3 * 86400
 
 
 class UserRepository:
@@ -40,7 +44,11 @@ class UserRepository:
         return resp.get("Item")
 
     def get_or_create_user(
-        self, user_id: str, email: str | None = None, now: int | None = None
+        self,
+        user_id: str,
+        email: str | None = None,
+        now: int | None = None,
+        ttl: int | None = None,
     ) -> dict:
         existing = self.get_user(user_id)
         if existing:
@@ -60,6 +68,10 @@ class UserRepository:
         }
         if email:
             item["email"] = email
+        if ttl is not None:
+            # Only ever set for ephemeral counter buckets. Real user records
+            # must never carry a TTL — expiring one would delete a customer.
+            item["ttl"] = ttl
         try:
             self._table.put_item(
                 Item=item,
@@ -132,10 +144,15 @@ class UserRepository:
         limit: int,
         now: int,
         create_if_missing: bool = True,
+        ttl: int | None = None,
     ) -> tuple[bool, dict]:
-        """Atomic: reset window if stale, then increment if under limit."""
+        """Atomic: reset window if stale, then increment if under limit.
+
+        ``ttl`` is for ephemeral buckets (per-IP abuse counters) only. Leave it
+        None for real user records.
+        """
         if create_if_missing:
-            self.get_or_create_user(user_id, now=now)
+            self.get_or_create_user(user_id, now=now, ttl=ttl)
 
         # Determine sibling counters to zero on window reset.
         _SIBLING_COUNTERS = {
@@ -215,6 +232,7 @@ class UserRepository:
         "event#",
         "prompt#",
         "spend#",
+        "anon#",
     )
 
     def scan_users(
@@ -388,6 +406,50 @@ class UserRepository:
                 raise
             return self.get_user(key) or item
         return item
+
+    def increment_anon(
+        self, key: str, counter: str, limit: int, window_seconds: int, now: int
+    ) -> tuple[bool, dict]:
+        """Count unauthenticated requests per source-IP bucket.
+
+        Expires: one row per unique caller IP, kept forever, would be
+        unbounded storage growth on a public deployment — an abuse counter
+        that outlives its own window is just litter.
+        """
+        return self._atomic_increment(
+            key,
+            counter,
+            "windowStart",
+            window_seconds,
+            limit,
+            now,
+            create_if_missing=True,
+            ttl=now + window_seconds + _IP_BUCKET_TTL_GRACE_SECONDS,
+        )
+
+    def increment_guest_ip(
+        self, ip_hash: str, limit: int, window_seconds: int, now: int
+    ) -> tuple[bool, dict]:
+        """Count guest generates per source-IP hash.
+
+        The per-token counter is trivially reset by discarding a cookie, so it
+        bounds nothing. This one is keyed on something the caller does not
+        choose, which is what makes it an actual limit.
+
+        The ``ipHash`` this reads was already being computed and stored on
+        every guest record — it was simply never used for anything.
+        """
+        key = f"guest#ip#{ip_hash}"
+        return self._atomic_increment(
+            key,
+            "generateCount",
+            "windowStart",
+            window_seconds,
+            limit,
+            now,
+            create_if_missing=True,
+            ttl=now + window_seconds + _IP_BUCKET_TTL_GRACE_SECONDS,
+        )
 
     def increment_guest_generate(
         self, token_id: str, limit: int, window_seconds: int, now: int

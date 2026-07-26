@@ -60,7 +60,29 @@ if cloudfront_domain is None:
     warnings.warn("CLOUDFRONT_DOMAIN not set — CDN URLs will be malformed", stacklevel=1)
 
 # Feature flags (tier system)
-auth_enabled = os.environ.get("AUTH_ENABLED", "false").lower() == "true"
+# AUTH_ENABLED has NO default, deliberately.
+#
+# There is no safe value to guess. "false" serves unauthenticated traffic;
+# "true" requires Cognito and a guest secret. Defaulting to either quietly
+# picks a security posture on the operator's behalf, and the audit that
+# prompted this found exactly that: a stack deployed open because nobody
+# decided it should be.
+#
+# Failing at import is the point — the choice has to appear in the deploy
+# parameters, where it is reviewable.
+_auth_raw = os.environ.get("AUTH_ENABLED")
+if _auth_raw is None:
+    raise RuntimeError(
+        "AUTH_ENABLED must be set explicitly to 'true' or 'false'. "
+        "There is no safe default: 'false' serves unauthenticated traffic, "
+        "'true' requires Cognito. Set it in the deploy parameters."
+    )
+if _auth_raw.lower() not in ("true", "false"):
+    raise RuntimeError(
+        f"AUTH_ENABLED must be 'true' or 'false', got {_auth_raw!r}. "
+        "Anything else silently reads as 'false', i.e. unauthenticated."
+    )
+auth_enabled = _auth_raw.lower() == "true"
 billing_enabled = os.environ.get("BILLING_ENABLED", "false").lower() == "true"
 if billing_enabled and not auth_enabled:
     raise RuntimeError("BILLING_ENABLED=true requires AUTH_ENABLED=true")
@@ -91,8 +113,34 @@ if auth_enabled and not guest_token_secret:
     )
 guest_generate_limit = _safe_int("GUEST_GENERATE_LIMIT", 1)
 guest_window_seconds = _safe_int("GUEST_WINDOW_SECONDS", 3600)
+# Per-IP guest limit. The per-token limit below bounds nothing on its own:
+# a guest identity is a cookie, and dropping it mints a fresh one with a fresh
+# counter. This is the bucket a cookie drop cannot escape.
+#
+# What it actually protects is FAIRNESS, not total spend — GUEST_GLOBAL_LIMIT
+# already caps aggregate guest cost. Without a per-IP bucket, one caller
+# cycling cookies can drain the entire global pool and lock out every other
+# guest. Keep this BELOW the global limit or it can never bind first.
+#
+# More generous than the per-token limit on purpose: an IP is not a person,
+# since offices and mobile carriers NAT many users behind one address. It is
+# an abuse ceiling, not a fair-use quota.
+guest_ip_generate_limit = _safe_int("GUEST_IP_GENERATE_LIMIT", 3)
+guest_ip_window_seconds = _safe_int("GUEST_IP_WINDOW_SECONDS", 3600)
+
 guest_global_limit = _safe_int("GUEST_GLOBAL_LIMIT", 5)
 guest_global_window_seconds = _safe_int("GUEST_GLOBAL_WINDOW_SECONDS", 3600)
+
+# Anonymous tier: what an unauthenticated caller gets when AUTH_ENABLED=false.
+#
+# "I have no Cognito" and "I want no spend limits" are unrelated statements,
+# but one flag used to assert both: auth off meant every caller resolved to
+# tier="paid" and quota short-circuited to allow-everything. A deployment can
+# be open without being unmetered. Metered against the source IP, since with
+# auth off there is no account to bind to.
+anon_generate_limit = _safe_int("ANON_GENERATE_LIMIT", 5)
+anon_refine_limit = _safe_int("ANON_REFINE_LIMIT", 10)
+anon_window_seconds = _safe_int("ANON_WINDOW_SECONDS", 3600)
 
 # Free tier
 free_generate_limit = _safe_int("FREE_GENERATE_LIMIT", 1)

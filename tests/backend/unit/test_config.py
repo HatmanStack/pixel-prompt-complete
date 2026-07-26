@@ -13,6 +13,8 @@ class TestModelConfig:
     def test_get_enabled_models_returns_enabled_only(self):
         """Only enabled models should be returned."""
         env = {
+            # No default in config.py; clear=True would otherwise wipe it.
+            'AUTH_ENABLED': 'false',
             'GEMINI_ENABLED': 'true',
             'GEMINI_API_KEY': 'test-key-2',
             'OPENAI_ENABLED': 'false',
@@ -32,6 +34,8 @@ class TestModelConfig:
     def test_get_model_returns_config_when_enabled(self):
         """get_model() should return config for enabled model."""
         env = {
+            # No default in config.py; clear=True would otherwise wipe it.
+            'AUTH_ENABLED': 'false',
             'GEMINI_ENABLED': 'true',
             'GEMINI_API_KEY': 'test-gemini-key',
             'GEMINI_MODEL_ID': 'gemini-test',
@@ -49,6 +53,8 @@ class TestModelConfig:
     def test_get_model_raises_for_disabled(self):
         """get_model() should raise ValueError for disabled model."""
         env = {
+            # No default in config.py; clear=True would otherwise wipe it.
+            'AUTH_ENABLED': 'false',
             'OPENAI_ENABLED': 'false',
         }
         with patch.dict(os.environ, env, clear=True):
@@ -62,7 +68,8 @@ class TestModelConfig:
 
     def test_get_model_raises_for_unknown(self):
         """get_model() should raise ValueError for unknown model name."""
-        env = {}
+        # AUTH_ENABLED has no default; clear=True would wipe it.
+        env = {'AUTH_ENABLED': 'false'}
         with patch.dict(os.environ, env, clear=True):
             import importlib
             import config
@@ -75,6 +82,8 @@ class TestModelConfig:
     def test_get_model_config_dict(self):
         """get_model_config_dict() should return handler-compatible dict."""
         env = {
+            # No default in config.py; clear=True would otherwise wipe it.
+            'AUTH_ENABLED': 'false',
             'GEMINI_ENABLED': 'true',
             'GEMINI_API_KEY': 'test-gemini-key',
             'GEMINI_MODEL_ID': 'gemini-2.0-flash',
@@ -93,7 +102,8 @@ class TestModelConfig:
 
     def test_default_values_when_env_missing(self):
         """Models requiring credentials are disabled when env vars missing; Nova (IAM auth) stays enabled."""
-        env = {}
+        # AUTH_ENABLED has no default; clear=True would wipe it.
+        env = {'AUTH_ENABLED': 'false'}
         with patch.dict(os.environ, env, clear=True):
             import importlib
             import config
@@ -107,6 +117,8 @@ class TestModelConfig:
     def test_all_models_enabled_with_credentials(self):
         """All 4 models enabled when credentials are present."""
         env = {
+            # No default in config.py; clear=True would otherwise wipe it.
+            'AUTH_ENABLED': 'false',
             "GEMINI_API_KEY": "test-gemini-key",
             "OPENAI_API_KEY": "test-openai-key",
             "FIREFLY_CLIENT_ID": "test-firefly-id",

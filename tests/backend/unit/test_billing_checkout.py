@@ -36,7 +36,7 @@ def billing_on(monkeypatch):
     from billing import stripe_client
     stripe_client.reset_stripe_client()
     yield
-    monkeypatch.delenv("AUTH_ENABLED", raising=False)
+    monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.delenv("BILLING_ENABLED", raising=False)
     monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
     importlib.reload(config)
@@ -90,7 +90,7 @@ def _body(r):
 
 def test_flags_off_returns_501(monkeypatch):
     monkeypatch.delenv("BILLING_ENABLED", raising=False)
-    monkeypatch.delenv("AUTH_ENABLED", raising=False)
+    monkeypatch.setenv("AUTH_ENABLED", "false")
     import config
     importlib.reload(config)
     import lambda_function

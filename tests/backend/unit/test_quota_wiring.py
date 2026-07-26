@@ -31,7 +31,6 @@ def auth_env(monkeypatch):
     gt.reset_guest_token_service()
     yield
     for v in (
-        "AUTH_ENABLED",
         "GUEST_TOKEN_SECRET",
         "GUEST_GENERATE_LIMIT",
         "GUEST_GLOBAL_LIMIT",
@@ -39,6 +38,9 @@ def auth_env(monkeypatch):
         "FREE_REFINE_LIMIT",
     ):
         monkeypatch.delenv(v, raising=False)
+    # AUTH_ENABLED is set, not cleared: it has no default, so reloading
+    # without it raises.
+    monkeypatch.setenv("AUTH_ENABLED", "false")
     importlib.reload(cfg)
     gt.reset_guest_token_service()
 

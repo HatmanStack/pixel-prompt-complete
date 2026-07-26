@@ -207,7 +207,7 @@ def credits_on(monkeypatch):
     importlib.reload(config)
     yield config
     monkeypatch.delenv("CREDITS_ENABLED", raising=False)
-    monkeypatch.delenv("AUTH_ENABLED", raising=False)
+    monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.delenv("GUEST_TOKEN_SECRET", raising=False)
     importlib.reload(config)
 
@@ -340,7 +340,7 @@ def test_ledger_is_off_by_default(repo, monkeypatch):
         # Clear env BEFORE reloading: monkeypatch's own teardown runs after
         # this fixture's, so reloading while AUTH_ENABLED is still set would
         # leave config.auth_enabled True for every subsequent test in the run.
-        monkeypatch.delenv("AUTH_ENABLED", raising=False)
+        monkeypatch.setenv("AUTH_ENABLED", "false")
         monkeypatch.delenv("GUEST_TOKEN_SECRET", raising=False)
         importlib.reload(config)
 

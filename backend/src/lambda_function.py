@@ -48,9 +48,9 @@ from ops.cost_meter import CostMeter
 from ops.metrics import emit_request_metric
 from ops.model_counters import ModelCounterService
 from prompts.repository import PromptHistoryRepository
-from users.quota import enforce_quota
+from users.quota import QuotaResult, enforce_quota
 from users.repository import UserRepository
-from users.tier import TierContext, resolve_tier
+from users.tier import TierContext, anon_tier, persist_guest, resolve_tier
 from utils import error_responses
 from utils.content_filter import ContentFilter
 from utils.logger import StructuredLogger
@@ -189,6 +189,35 @@ def _spend_ceiling_exceeded(endpoint_kind: str) -> tuple[bool, str]:
     return False, ""
 
 
+def _enforce_quota_safe(
+    tier_ctx: TierContext, endpoint_kind: str, now: int
+) -> "QuotaResult":
+    """Enforce quota, failing OPEN if the quota store is unreachable.
+
+    Applied to every tier, not just anon. The anon path had its own
+    try/except while guest, free and paid propagated straight to the
+    top-level handler and returned 500 — so a DynamoDB blip took the service
+    down for exactly the users who are paying for it, which is the opposite
+    of the intended behaviour.
+
+    Fail-open is bounded: the global daily spend ceiling still applies and is
+    checked before this. The residual risk is that a *persistent* store
+    failure means silently unmetered traffic, which is why this logs at
+    ERROR rather than WARNING — it needs to be alarmable.
+    """
+    try:
+        return enforce_quota(tier_ctx, endpoint_kind, _user_repo, now)
+    except Exception as e:
+        StructuredLogger.error(
+            f"Quota check failed, allowing request: {e}",
+            tier=tier_ctx.tier,
+            endpoint=endpoint_kind,
+        )
+        from users.quota import QuotaResult
+
+        return QuotaResult(allowed=True, reason=None, reset_at=0, usage={})
+
+
 def _refund_credits(
     tier_ctx: TierContext | None, endpoint_kind: str, correlation_id: str | None = None
 ) -> None:
@@ -234,17 +263,6 @@ def _refund_credits(
             correlation_id=correlation_id,
             userId=tier_ctx.user_id,
         )
-
-
-def _anon_tier() -> TierContext:
-    return TierContext(
-        tier="paid",
-        user_id="anon",
-        email=None,
-        is_authenticated=False,
-        guest_token_id=None,
-        issue_guest_cookie=False,
-    )
 
 
 def _parse_and_validate_request(
@@ -306,7 +324,7 @@ def _parse_and_validate_request(
             )
         tier_ctx = resolve_tier(event, _user_repo, _guest_service)
     else:
-        tier_ctx = _anon_tier()
+        tier_ctx = anon_tier(event)
 
     # CAPTCHA verification for guest /generate requests
     if config.captcha_enabled and tier_ctx.tier == "guest" and endpoint_kind == "generate":
@@ -317,6 +335,18 @@ def _parse_and_validate_request(
 
         if not verify_turnstile(captcha_token, ip):
             return None, response(403, error_responses.captcha_failed())
+
+    # Guests cannot refine at all, so reject before writing anything. Checked
+    # here rather than with the other quota logic below because a request that
+    # can never succeed must not create a record on its way to being refused.
+    if tier_ctx.tier == "guest" and endpoint_kind in ("refine", "outpaint"):
+        return None, response(402, error_responses.auth_required())
+
+    # Guest record is written only now: identify -> verify -> persist. Writing
+    # in resolve_tier let a caller who cannot solve the CAPTCHA still create a
+    # DynamoDB item on every request.
+    if tier_ctx.guest_row_pending:
+        persist_guest(tier_ctx, _user_repo)
 
     # Extract prompt
     prompt = body.get("prompt", default_prompt)
@@ -334,14 +364,14 @@ def _parse_and_validate_request(
         return None, response(400, error_responses.inappropriate_content())
 
     # Quota enforcement (after validation so invalid requests don't consume quota)
-    if endpoint_kind in ("generate", "refine", "outpaint") and config.auth_enabled:
-        # Guests blocked from refine immediately (no auth).
-        if tier_ctx.tier == "guest" and endpoint_kind in ("refine", "outpaint"):
-            return None, response(402, error_responses.auth_required())
-        result = enforce_quota(tier_ctx, endpoint_kind, _user_repo, int(time.time()))
+    if endpoint_kind in ("generate", "refine", "outpaint"):
+        # (Guest refine/outpaint was already refused above, before any write.)
+        result = _enforce_quota_safe(tier_ctx, endpoint_kind, int(time.time()))
         if not result.allowed:
             if result.reason == "suspended":
                 return None, response(403, error_responses.account_suspended())
+            if result.reason == "guest_ip":
+                return None, response(429, error_responses.guest_ip_limit())
             if result.reason == "guest_global":
                 return None, response(429, error_responses.guest_global_limit())
             if result.reason == "insufficient_credits":
@@ -598,8 +628,11 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
         # Filter models by runtime disable and per-model cost ceiling
         models_to_dispatch = []
         skipped_models = {}
-        if config.auth_enabled:
-            now_ts = int(time.time())
+        # Cost caps are deliberately unconditional: an unauthenticated
+        # deployment still pays the provider, so gating this on auth was the
+        # same conflation that made "open" mean "unlimited".
+        now_ts = int(time.time())
+        try:
             for model in enabled_models:
                 # Runtime disable check (admin-toggled via DynamoDB)
                 runtime_cfg = _user_repo.get_model_runtime_config(model.name)
@@ -617,8 +650,18 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
                         "status": "skipped",
                         "reason": "daily_cap_reached",
                     }
-        else:
+        except Exception as e:
+            # Fail OPEN, consistent with the quota and spend-ceiling checks: an
+            # unreachable counter store is not evidence a model is over its
+            # cap, and refusing every generation because DynamoDB hiccuped
+            # would be a self-inflicted outage. Logged at ERROR so a persistent
+            # failure — which means silently uncapped models — is alarmable.
+            StructuredLogger.error(
+                f"Per-model cap check failed, dispatching all models: {e}",
+                correlation_id=correlation_id,
+            )
             models_to_dispatch = list(enabled_models)
+            skipped_models = {}
 
         if not models_to_dispatch:
             _refund_credits(validated.tier, "generate", correlation_id)
@@ -953,9 +996,17 @@ def _handle_refinement(
         # Per-model daily cap, consumed BEFORE dispatching to the provider.
         # Previously only /generate consumed slots, so refinement traffic could
         # run a model far past its ceiling.
-        if config.auth_enabled and not _model_counter_service.consume_model_slot(
-            model_name, int(time.time())
-        ):
+        try:
+            slot_ok = _model_counter_service.consume_model_slot(
+                model_name, int(time.time())
+            )
+        except Exception as e:
+            StructuredLogger.error(
+                f"Per-model cap check failed, allowing refinement: {e}",
+                correlation_id=correlation_id,
+            )
+            slot_ok = True
+        if not slot_ok:
             _refund_credits(validated.tier, refund_kind, correlation_id)
             return response(429, error_responses.model_cost_ceiling())
 

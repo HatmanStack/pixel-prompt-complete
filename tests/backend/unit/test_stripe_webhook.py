@@ -57,7 +57,7 @@ def billing_on(monkeypatch):
 
     stripe_client.reset_stripe_client()
     yield
-    monkeypatch.delenv("AUTH_ENABLED", raising=False)
+    monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.delenv("BILLING_ENABLED", raising=False)
     monkeypatch.delenv("STRIPE_WEBHOOK_SECRET", raising=False)
     importlib.reload(config)
@@ -159,7 +159,7 @@ def test_no_fixture_injects_user_id():
 
 def test_flags_off_returns_501(monkeypatch):
     monkeypatch.delenv("BILLING_ENABLED", raising=False)
-    monkeypatch.delenv("AUTH_ENABLED", raising=False)
+    monkeypatch.setenv("AUTH_ENABLED", "false")
     import config
 
     importlib.reload(config)

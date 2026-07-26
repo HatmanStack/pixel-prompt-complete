@@ -24,7 +24,6 @@ def env(monkeypatch):
     importlib.reload(config)
     yield
     for v in (
-        "AUTH_ENABLED",
         "GUEST_TOKEN_SECRET",
         "FREE_GENERATE_LIMIT",
         "FREE_REFINE_LIMIT",
@@ -33,6 +32,9 @@ def env(monkeypatch):
         "PAID_DAILY_LIMIT",
     ):
         monkeypatch.delenv(v, raising=False)
+    # AUTH_ENABLED is set, not cleared: it has no default, so reloading
+    # without it raises.
+    monkeypatch.setenv("AUTH_ENABLED", "false")
     importlib.reload(config)
 
 
@@ -72,13 +74,68 @@ def _user_ctx(tier="free", uid="u1"):
     )
 
 
-def test_flags_off_always_allowed(monkeypatch):
-    monkeypatch.delenv("AUTH_ENABLED", raising=False)
+def test_flags_off_still_meters_anonymous_callers(monkeypatch, repo):
+    """Auth off no longer means unlimited.
+
+    Auth answers "who is this"; quota answers "how much may they have".
+    Conflating them made an open deployment an unlimited one. An
+    unauthenticated caller is now metered against their source IP.
+    """
+    monkeypatch.setenv("AUTH_ENABLED", "false")
     import config
+
     importlib.reload(config)
     from users.quota import enforce_quota
-    r = enforce_quota(_user_ctx(), "generate", repo=None, now=0)
-    assert r.allowed
+    from users.tier import TierContext
+
+    ctx = TierContext(
+        tier="anon",
+        user_id="anon#deadbeef",
+        email=None,
+        is_authenticated=False,
+        guest_token_id=None,
+        issue_guest_cookie=False,
+        ip_hash="deadbeef",
+    )
+
+    allowed = 0
+    for _ in range(config.anon_generate_limit + 3):
+        if enforce_quota(ctx, "generate", repo, now=1000).allowed:
+            allowed += 1
+    assert allowed == config.anon_generate_limit
+
+    denied = enforce_quota(ctx, "generate", repo, now=1000)
+    assert denied.allowed is False
+    assert denied.reason == "anon_generate"
+
+
+def test_anon_quota_fails_open_if_the_store_is_unreachable(monkeypatch):
+    """A broken counter store must not 500 every request.
+
+    Same reasoning as the spend ceiling: an unreachable counter is not
+    evidence the caller is over limit.
+    """
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    import config
+
+    importlib.reload(config)
+    from unittest.mock import MagicMock
+
+    from users.quota import enforce_quota
+    from users.tier import TierContext
+
+    broken = MagicMock()
+    broken.increment_anon.side_effect = RuntimeError("dynamo down")
+    ctx = TierContext(
+        tier="anon",
+        user_id="anon#x",
+        email=None,
+        is_authenticated=False,
+        guest_token_id=None,
+        issue_guest_cookie=False,
+        ip_hash="x",
+    )
+    assert enforce_quota(ctx, "generate", broken, now=0).allowed is True
 
 
 def test_guest_refine_blocked(repo):

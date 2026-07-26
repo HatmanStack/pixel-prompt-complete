@@ -229,11 +229,16 @@ Parameters:
   # Feature Flags
   AuthEnabled:
     Type: String
-    Default: "false"
     AllowedValues:
       - "true"
       - "false"
-    Description: Enable Cognito auth and tier-based quotas
+    Description: >-
+      REQUIRED, no default. Enable Cognito auth and tier resolution. Gates
+      identity only -- quota, cost caps and spend metering apply either way.
+      There is no safe default to assume: "false" serves unauthenticated
+      traffic, "true" requires Cognito and GUEST_TOKEN_SECRET. Deliberately
+      left unset so the choice is made in the deploy parameters rather than
+      inherited silently.
 
   BillingEnabled:
     Type: String
@@ -259,6 +264,36 @@ Parameters:
     Type: Number
     Default: 3600
     Description: Guest rolling window length in seconds
+
+  AnonGenerateLimit:
+    Type: Number
+    Default: 5
+    Description: >-
+      /generate calls per source IP per window when AUTH_ENABLED=false.
+      AUTH_ENABLED gates identity only; an open deployment is still metered.
+
+  AnonRefineLimit:
+    Type: Number
+    Default: 10
+    Description: /iterate + /outpaint calls per source IP when AUTH_ENABLED=false
+
+  AnonWindowSeconds:
+    Type: Number
+    Default: 3600
+    Description: Rolling window for anonymous limits, in seconds
+
+  GuestIpGenerateLimit:
+    Type: Number
+    Default: 3
+    Description: >-
+      Guest generations per source-IP hash per window. Must be BELOW
+      GuestGlobalLimit or it can never bind first. Stops one caller cycling
+      cookies from draining the shared guest pool.
+
+  GuestIpWindowSeconds:
+    Type: Number
+    Default: 3600
+    Description: Rolling window for the per-IP guest limit, in seconds
 
   GuestGlobalLimit:
     Type: Number
@@ -533,6 +568,11 @@ Resources:
           # Guest limits
           GUEST_GENERATE_LIMIT: !Ref GuestGenerateLimit
           GUEST_WINDOW_SECONDS: !Ref GuestWindowSeconds
+          ANON_GENERATE_LIMIT: !Ref AnonGenerateLimit
+          ANON_REFINE_LIMIT: !Ref AnonRefineLimit
+          ANON_WINDOW_SECONDS: !Ref AnonWindowSeconds
+          GUEST_IP_GENERATE_LIMIT: !Ref GuestIpGenerateLimit
+          GUEST_IP_WINDOW_SECONDS: !Ref GuestIpWindowSeconds
           GUEST_GLOBAL_LIMIT: !Ref GuestGlobalLimit
           GUEST_GLOBAL_WINDOW_SECONDS: !Ref GuestGlobalWindowSeconds
           # Free tier limits

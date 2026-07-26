@@ -25,7 +25,7 @@ def flags_on(monkeypatch):
     import auth.guest_token as gt
     gt.reset_guest_token_service()
     yield
-    monkeypatch.delenv("AUTH_ENABLED", raising=False)
+    monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.delenv("GUEST_TOKEN_SECRET", raising=False)
     importlib.reload(config)
     gt.reset_guest_token_service()
@@ -97,7 +97,7 @@ def test_me_paid_tier(wired):
 
 
 def test_me_flags_off_returns_501(monkeypatch):
-    monkeypatch.delenv("AUTH_ENABLED", raising=False)
+    monkeypatch.setenv("AUTH_ENABLED", "false")
     import config
     importlib.reload(config)
     import lambda_function

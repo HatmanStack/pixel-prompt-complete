@@ -162,6 +162,16 @@ def subscription_required(**kwargs) -> Dict[str, Any]:
     )
 
 
+def guest_ip_limit(**kwargs) -> Dict[str, Any]:
+    """429 Too many guest generations from one source address."""
+    return error_response(
+        status_code=429,
+        error_code="GUEST_IP_LIMIT",
+        message="Too many guest generations from this network. Please sign in.",
+        **kwargs,
+    )
+
+
 def guest_global_limit(**kwargs) -> Dict[str, Any]:
     """429 Global guest traffic limit reached."""
     return error_response(
