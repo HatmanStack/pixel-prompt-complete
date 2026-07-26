@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import boto3
+from botocore.config import Config as BotoConfig
 from botocore.exceptions import ClientError
 
 import config
@@ -24,11 +25,32 @@ _CW_NAMESPACE = "PixelPrompt/Operations"
 _cw_client = None
 
 
+# put_metric_data is a synchronous network call on the request path. The
+# handlers catch its exceptions, which makes telemetry failure-safe but not
+# latency-safe: with botocore's defaults (60s connect and read, legacy
+# retries) a degraded CloudWatch could add minutes to a user's request while
+# still "succeeding".
+#
+# Backgrounding is not an option here. Lambda freezes the execution
+# environment once the response is returned, so a thread that has not flushed
+# is simply lost — and may then resume mid-write on the next invocation.
+# Bounding the call is the correct fix for this runtime.
+_CW_TIMEOUT_SECONDS = 2
+_CW_MAX_ATTEMPTS = 2
+
+
 def _get_cw_client():
-    """Return a lazily-initialized CloudWatch client."""
+    """Return a lazily-initialized CloudWatch client with bounded timeouts."""
     global _cw_client
     if _cw_client is None:
-        _cw_client = boto3.client("cloudwatch")
+        _cw_client = boto3.client(
+            "cloudwatch",
+            config=BotoConfig(
+                connect_timeout=_CW_TIMEOUT_SECONDS,
+                read_timeout=_CW_TIMEOUT_SECONDS,
+                retries={"mode": "standard", "total_max_attempts": _CW_MAX_ATTEMPTS},
+            ),
+        )
     return _cw_client
 
 
@@ -69,6 +91,16 @@ def emit_request_metric(
                 "Value": duration_ms,
                 "Unit": "Milliseconds",
                 "Dimensions": dimensions,
+            },
+            # Undimensioned copy. A CloudWatch alarm cannot sum across
+            # dimension values, so an alarm on "errors across all providers"
+            # has no series to match unless one is published without
+            # dimensions. Same requirement as TotalSpendUsd and
+            # TotalQuotaRejections.
+            {
+                "MetricName": "TotalErrorCount",
+                "Value": 1 if is_error else 0,
+                "Unit": "Count",
             },
         ]
 

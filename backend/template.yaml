@@ -1211,7 +1211,10 @@ Resources:
       AlarmDescription: >-
         Provider errors across all models. A single provider degrading is
         otherwise invisible until users report missing images.
-      MetricName: ErrorCount
+      # TotalErrorCount, not ErrorCount: the latter is only ever published
+      # with an Endpoint dimension, so a dimensionless alarm on it matches no
+      # series and can never fire.
+      MetricName: TotalErrorCount
       Namespace: PixelPrompt/Operations
       Statistic: Sum
       Period: 900

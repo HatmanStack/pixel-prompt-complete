@@ -195,3 +195,78 @@ def test_quota_denial_emits_a_rejection_metric():
 
     mock_emit.assert_called_once()
     assert mock_emit.call_args.args[2] == "anon_generate"
+
+
+# ---- Alarms need a series to match ----
+
+
+def test_error_count_has_an_undimensioned_total():
+    """A dimensionless alarm on ErrorCount would match no series and never fire.
+
+    ErrorCount is always published with an Endpoint dimension. This is the
+    same requirement as TotalSpendUsd and TotalQuotaRejections — an alarm
+    that looks correct and reports nothing is worse than no alarm.
+    """
+    from ops.metrics import emit_request_metric
+
+    client = MagicMock()
+    with patch("ops.metrics._get_cw_client", return_value=client):
+        emit_request_metric("/generate", "gemini", 120.0, True)
+
+    md = _metrics(client)
+    assert md["TotalErrorCount"]["Value"] == 1
+    assert "Dimensions" not in md["TotalErrorCount"]
+    # The dimensioned series is still published for per-provider breakdown.
+    assert md["ErrorCount"]["Dimensions"][0]["Name"] == "Endpoint"
+
+
+def test_total_error_count_is_zero_on_success():
+    """Sum over the window must not count successes as errors."""
+    from ops.metrics import emit_request_metric
+
+    client = MagicMock()
+    with patch("ops.metrics._get_cw_client", return_value=client):
+        emit_request_metric("/generate", "gemini", 120.0, False)
+
+    assert _metrics(client)["TotalErrorCount"]["Value"] == 0
+
+
+def test_every_alarm_targets_a_metric_that_is_actually_published():
+    """Catch the whole class: an alarm whose series never exists.
+
+    Walks the template's CloudWatch alarms in the app's own namespace and
+    checks each dimensionless one against the undimensioned metrics the code
+    emits.
+    """
+    import pathlib
+
+    import yaml
+
+    class _L(yaml.SafeLoader):
+        pass
+
+    for tag in (
+        "!Ref", "!Sub", "!GetAtt", "!Equals", "!If", "!Not", "!Join",
+        "!Select", "!Split", "!FindInMap", "!Condition", "!And", "!Or",
+        "!ImportValue", "!Base64",
+    ):
+        _L.add_constructor(tag, lambda loader, node: None)
+
+    template = pathlib.Path(__file__).resolve().parents[3] / "backend" / "template.yaml"
+    doc = yaml.load(template.read_text(), Loader=_L)
+
+    # Metrics this codebase publishes without dimensions.
+    undimensioned = {"TotalSpendUsd", "TotalQuotaRejections", "TotalErrorCount"}
+
+    for name, res in doc["Resources"].items():
+        if res.get("Type") != "AWS::CloudWatch::Alarm":
+            continue
+        props = res["Properties"]
+        if props.get("Namespace") != "PixelPrompt/Operations":
+            continue
+        if props.get("Dimensions"):
+            continue  # dimensioned alarms match their dimensioned series
+        assert props["MetricName"] in undimensioned, (
+            f"{name} alarms on dimensionless {props['MetricName']}, which is "
+            "only published with dimensions — it can never fire"
+        )
