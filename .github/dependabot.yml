@@ -28,6 +28,16 @@ updates:
       interval: weekly
     open-pull-requests-limit: 3
 
+  # The Lambda runtime dependencies. /backend above finds pyproject.toml (dev
+  # tooling) and /tests/backend finds the test pins; neither covers this file,
+  # which is why Pillow sat at 12.2.0 with 20 advisories here while
+  # tests/backend/requirements.txt already asked for >=12.3.0.
+  - package-ecosystem: pip
+    directory: /backend/src
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+
   - package-ecosystem: pip
     directory: /tests/backend
     schedule:

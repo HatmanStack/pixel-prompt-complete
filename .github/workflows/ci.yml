@@ -85,10 +85,27 @@ jobs:
         with:
           python-version: '3.13'
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+      # From the lockfile, not requirements.txt: requirements.txt pins only the
+      # eight direct dependencies, so every transitive version was whatever the
+      # index served that morning. The dev extras stay unlocked because
+      # backend/pyproject.toml already pins each of them exactly.
       - name: Install dependencies
         run: |
-          uv pip install --system -r backend/src/requirements.txt
+          uv pip install --system -r backend/requirements-lock.txt
           uv pip install --system -e "backend/.[dev]"
+      # Compiled INTO the committed path on purpose: uv reads an existing output
+      # file as a preference set, so unrelated upstream releases do not move the
+      # pins and only a real requirements.txt change fails this step. Compiling
+      # to a scratch path instead would re-resolve from scratch and go red the
+      # first time any transitive dependency published a version.
+      #
+      # Only the pin lines are compared. The `# via` provenance annotations
+      # differ between uv versions (verified: 0.11.7 attributes distro to
+      # google-genai where the previous run did not) and setup-uv installs
+      # whatever is current, so diffing the comments would fail on uv's release
+      # schedule rather than on this repository's dependencies.
+      - name: Check the lockfile is current
+        run: make lock-check
       - name: Lint
         run: ruff check backend/src/ tests/ backend/scripts/
       # Format is checked on backend/src/ only, deliberately. Reformatting the
@@ -143,9 +160,13 @@ jobs:
         with:
           python-version: '3.13'
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+      # From the lockfile, not requirements.txt: requirements.txt pins only the
+      # eight direct dependencies, so every transitive version was whatever the
+      # index served that morning. The dev extras stay unlocked because
+      # backend/pyproject.toml already pins each of them exactly.
       - name: Install dependencies
         run: |
-          uv pip install --system -r backend/src/requirements.txt
+          uv pip install --system -r backend/requirements-lock.txt
           uv pip install --system -e "backend/.[dev]"
       - name: Wait for ministack
         run: |
