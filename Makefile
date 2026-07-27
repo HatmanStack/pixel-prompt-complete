@@ -7,9 +7,9 @@ install: ## Install all dependencies
 	cd frontend && npm install
 	npm install
 
-test: ## Run all tests (frontend + backend unit)
-	cd frontend && npx vitest run --passWithNoTests
-	PYTHONPATH=backend/src pytest tests/backend/unit -v --tb=short
+test: ## Run all tests (frontend + backend unit), with the same coverage gates CI applies
+	cd frontend && npx vitest run --coverage --passWithNoTests
+	PYTHONPATH=backend/src pytest tests/backend/unit -v --tb=short --cov=backend/src --cov-report=term-missing --cov-fail-under=80
 
 lint: ## Run all linters
 	cd frontend && npm run lint && npm run typecheck && npm run format:check
