@@ -38,6 +38,8 @@ vi.mock('../../../src/api/config', () => ({
 import {
   generateSession,
   getSessionStatus,
+  iterateImage,
+  outpaintImage,
   iterateMultiple,
   enhancePrompt,
   getRecentPrompts,
@@ -46,13 +48,18 @@ import {
 } from '../../../src/api/client';
 
 // Helper to create a mock Response
-function mockResponse(body: unknown, status = 200, statusText = 'OK'): Response {
+function mockResponse(
+  body: unknown,
+  status = 200,
+  statusText = 'OK',
+  headers: Record<string, string> = {},
+): Response {
   return {
     ok: status >= 200 && status < 300,
     status,
     statusText,
     json: () => Promise.resolve(body),
-    headers: new Headers(),
+    headers: new Headers(headers),
     redirected: false,
     type: 'basic' as ResponseType,
     url: '',
@@ -83,67 +90,45 @@ describe('API Client', () => {
   });
 
   // =============================================
-  // Retry on 429 with backoff
+  // 429 is never retried
   // =============================================
-  describe('retry on 429 with backoff', () => {
-    it('retries on 429 and eventually succeeds', async () => {
-      const successBody = { sessionId: 'abc', status: 'created' };
+  describe('no retry on 429', () => {
+    it('does not retry a 429 on a POST', async () => {
+      fetchMock.mockResolvedValue(mockResponse({ error: 'quota exceeded' }, 429, 'Too Many Requests'));
 
-      fetchMock
-        .mockResolvedValueOnce(mockResponse({ error: 'Rate limited' }, 429, 'Too Many Requests'))
-        .mockResolvedValueOnce(mockResponse({ error: 'Rate limited' }, 429, 'Too Many Requests'))
-        .mockResolvedValueOnce(mockResponse(successBody, 200));
+      const p = generateSession('test prompt').catch((e: Error) => e);
+      await vi.advanceTimersByTimeAsync(10_000);
+      await p;
 
-      const promise = generateSession('test prompt');
-
-      // First retry: delay = max(1000 * 2^0, 1000) = 1000ms (429 minimum)
-      await vi.advanceTimersByTimeAsync(1000);
-      // Second retry: delay = max(1000 * 2^1, 1000) = 2000ms
-      await vi.advanceTimersByTimeAsync(2000);
-
-      const result = await promise;
-
-      expect(result).toEqual(successBody);
-      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
-    it('applies minimum 1000ms delay for 429 responses', async () => {
-      // Even though initialDelay * 2^0 = 1000 already, for 429 the minimum
-      // enforced is 1000ms. The key point: 429 delay >= 1000ms always.
-      const successBody = { sessionId: 'abc', status: 'created' };
+    it('does not retry a 429 on a GET either', async () => {
+      // A rolling-window quota cannot succeed a second later, and every retry
+      // re-enters enforce_quota -- DynamoDB writes on a request already denied.
+      fetchMock.mockResolvedValue(mockResponse({ error: 'quota exceeded' }, 429, 'Too Many Requests'));
 
-      fetchMock
-        .mockResolvedValueOnce(mockResponse({ error: 'Rate limited' }, 429, 'Too Many Requests'))
-        .mockResolvedValueOnce(mockResponse(successBody, 200));
+      const p = getSessionStatus('s1').catch((e: Error) => e);
+      await vi.advanceTimersByTimeAsync(10_000);
+      await p;
 
-      const promise = generateSession('test prompt');
-
-      // Advance less than the minimum 429 delay -- should NOT have retried yet
-      await vi.advanceTimersByTimeAsync(500);
       expect(fetchMock).toHaveBeenCalledTimes(1);
-
-      // Advance to complete the 1000ms delay
-      await vi.advanceTimersByTimeAsync(500);
-
-      const result = await promise;
-      expect(result).toEqual(successBody);
-      expect(fetchMock).toHaveBeenCalledTimes(2);
     });
   });
 
   // =============================================
-  // Retry on network error
+  // Retry on network error, idempotent methods only
   // =============================================
   describe('retry on network error', () => {
-    it('retries when fetch throws a network error (no status)', async () => {
+    it('retries a GET when fetch throws a network error (no status)', async () => {
       const networkError = new TypeError('Failed to fetch');
-      const successBody = { sessionId: 'abc', status: 'created' };
+      const successBody = { sessionId: 'abc', status: 'complete' };
 
       fetchMock
         .mockRejectedValueOnce(networkError)
         .mockResolvedValueOnce(mockResponse(successBody, 200));
 
-      const promise = generateSession('test prompt');
+      const promise = getSessionStatus('abc');
 
       // Network error retry: delay = 1000 * 2^0 = 1000ms
       await vi.advanceTimersByTimeAsync(1000);
@@ -162,7 +147,7 @@ describe('API Client', () => {
         .mockRejectedValueOnce(networkError)  // retry 2
         .mockRejectedValueOnce(networkError); // retry 3 (maxRetries=3)
 
-      const promise = generateSession('test prompt');
+      const promise = getSessionStatus('abc');
 
       // Attach rejection handler early to prevent unhandled rejection
       const resultPromise = promise.catch((e: Error) => e);
@@ -176,6 +161,133 @@ describe('API Client', () => {
       expect(error).toBeInstanceOf(TypeError);
       expect((error as Error).message).toBe('Failed to fetch');
       expect(fetchMock).toHaveBeenCalledTimes(4); // 1 initial + 3 retries
+    });
+
+    it('does not retry a POST that fails with a network error', async () => {
+      // The server may already have done the work: a network error on
+      // POST /generate is exactly the case a retry cannot distinguish.
+      fetchMock.mockRejectedValue(new TypeError('Failed to fetch'));
+
+      const p = generateSession('test prompt').catch((e: Error) => e);
+      await vi.advanceTimersByTimeAsync(10_000);
+      await p;
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // =============================================
+  // Non-idempotent methods are never retried
+  // =============================================
+  describe('retries are restricted to idempotent methods', () => {
+    it('does not re-dispatch a POST /generate after a 504', async () => {
+      // The money test. A 504 means the gateway gave up, not that the Lambda
+      // did: it is still generating. Three retries meant one click billing
+      // twelve provider calls and charging four generations.
+      fetchMock.mockResolvedValue(mockResponse({ error: 'timeout' }, 504, 'Gateway Timeout'));
+
+      const p = generateSession('a cat').catch((e: Error) => e);
+      await vi.advanceTimersByTimeAsync(10_000);
+      await p;
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not retry POST /iterate on a 503', async () => {
+      fetchMock.mockResolvedValue(mockResponse({ error: 'unavailable' }, 503, 'Service Unavailable'));
+
+      const p = iterateImage('s1', 'gemini', 'brighter').catch((e: Error) => e);
+      await vi.advanceTimersByTimeAsync(10_000);
+      await p;
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not retry POST /outpaint on a 502', async () => {
+      fetchMock.mockResolvedValue(mockResponse({ error: 'bad gateway' }, 502, 'Bad Gateway'));
+
+      const p = outpaintImage('s1', 'gemini', 0, '16:9', 'wider').catch((e: Error) => e);
+      await vi.advanceTimersByTimeAsync(10_000);
+      await p;
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('still retries a GET on 503 and resolves', async () => {
+      const successBody = { sessionId: 's1', status: 'complete' };
+      fetchMock
+        .mockResolvedValueOnce(mockResponse({ error: 'unavailable' }, 503, 'Service Unavailable'))
+        .mockResolvedValueOnce(mockResponse(successBody, 200));
+
+      const promise = getSessionStatus('s1');
+      await vi.advanceTimersByTimeAsync(1000);
+
+      expect(await promise).toEqual(successBody);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // =============================================
+  // Retry-After is honoured on retryable GETs
+  // =============================================
+  describe('Retry-After header', () => {
+    it('waits the header interval instead of the exponential backoff', async () => {
+      const successBody = { sessionId: 's1', status: 'complete' };
+      fetchMock
+        .mockResolvedValueOnce(
+          mockResponse({ error: 'unavailable' }, 503, 'Service Unavailable', {
+            'Retry-After': '2',
+          }),
+        )
+        .mockResolvedValueOnce(mockResponse(successBody, 200));
+
+      const promise = getSessionStatus('s1');
+
+      // The exponential first delay is 1000ms; the header says 2000ms.
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(500);
+      expect(await promise).toEqual(successBody);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('clamps a Retry-After larger than maxDelay', async () => {
+      // A hostile or mistaken header must not be able to hang the UI.
+      const successBody = { sessionId: 's1', status: 'complete' };
+      fetchMock
+        .mockResolvedValueOnce(
+          mockResponse({ error: 'unavailable' }, 503, 'Service Unavailable', {
+            'Retry-After': '600',
+          }),
+        )
+        .mockResolvedValueOnce(mockResponse(successBody, 200));
+
+      const promise = getSessionStatus('s1');
+
+      await vi.advanceTimersByTimeAsync(3999);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await promise).toEqual(successBody);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('ignores an unparseable Retry-After and falls back to backoff', async () => {
+      const successBody = { sessionId: 's1', status: 'complete' };
+      fetchMock
+        .mockResolvedValueOnce(
+          mockResponse({ error: 'unavailable' }, 503, 'Service Unavailable', {
+            'Retry-After': 'Wed, 21 Oct 2026 07:28:00 GMT',
+          }),
+        )
+        .mockResolvedValueOnce(mockResponse(successBody, 200));
+
+      const promise = getSessionStatus('s1');
+      await vi.advanceTimersByTimeAsync(1000);
+
+      expect(await promise).toEqual(successBody);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -389,16 +501,17 @@ describe('API Client', () => {
       expect(warnSpy).toHaveBeenCalled();
     });
 
-    it('on final 429 surfaces a quota warning toast', async () => {
+    it('on 429 surfaces a quota warning toast immediately', async () => {
       const { useToastStore } = await import('../../../src/stores/useToastStore');
       const warnSpy = vi.spyOn(useToastStore.getState(), 'warning');
-      // 4 retries will all be 429, eventually rejecting
+      // 429 is no longer retried, so the toast fires on the first response
+      // rather than after the retries are exhausted.
       fetchMock.mockResolvedValue(mockResponse({ error: 'quota exceeded' }, 429));
 
-      const p = generateSession('hi').catch(() => null);
-      await vi.advanceTimersByTimeAsync(10_000);
-      await p;
+      await generateSession('hi').catch(() => null);
+
       expect(warnSpy).toHaveBeenCalled();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -489,6 +602,7 @@ describe('error code contract', () => {
       ok: false,
       status: 403,
       statusText: 'Forbidden',
+      headers: new Headers(),
       json: async () => ({
         error: 'AGE_VERIFICATION_REQUIRED',
         message: 'You must confirm you are 18 or older to use this service.',
@@ -506,6 +620,7 @@ describe('error code contract', () => {
       ok: false,
       status: 400,
       statusText: 'Bad Request',
+      headers: new Headers(),
       json: async () => ({ error: 'OUTER', code: 'INNER', message: 'x' }),
     }) as unknown as typeof fetch;
 
