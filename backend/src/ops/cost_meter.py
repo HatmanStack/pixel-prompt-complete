@@ -31,6 +31,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import config
+from ops import store_breaker
 from users.repository import UserRepository
 from utils.logger import StructuredLogger
 
@@ -134,7 +135,13 @@ class CostMeter:
                 now=now,
                 ttl=now + SPEND_ITEM_TTL_SECONDS,
             )
+            store_breaker.record_store_result(True)
         except Exception as e:
+            # The seventh fail-open site, and the one most easily missed: this
+            # is not a guard failing open, it is the ACCOUNTING silently
+            # stopping, which is why a partition problem is invisible as well
+            # as unbounded.
+            store_breaker.record_store_result(False)
             StructuredLogger.error(
                 f"Cost meter failed to record daily spend: {e}",
                 totalMicros=total,
@@ -148,7 +155,9 @@ class CostMeter:
                 now=now,
                 ttl=now + SPEND_ITEM_TTL_SECONDS,
             )
+            store_breaker.record_store_result(True)
         except Exception as e:
+            store_breaker.record_store_result(False)
             StructuredLogger.error(
                 f"Cost meter failed to record monthly spend: {e}",
                 totalMicros=total,
@@ -156,6 +165,13 @@ class CostMeter:
 
         # Mirror to CloudWatch so spend can be alarmed on. DynamoDB holds the
         # authoritative number; this is what can actually page someone.
+        # Deliberately NOT recorded against the store breaker. This block
+        # is a CloudWatch failure, not a DynamoDB one, and the breaker exists
+        # to detect that the quota/spend STORE is unreachable. Counting a
+        # telemetry outage towards it would shed generations because metrics
+        # were throttled -- exactly the self-inflicted outage every fail-open
+        # in this repo argues against. Flagged in the phase report, because
+        # Phase-5 Task 9 lists this block among the sites to wire.
         try:
             from ops.metrics import emit_spend_metric
 
@@ -168,7 +184,9 @@ class CostMeter:
         if user_id and user_id != "anon":
             try:
                 self._repo.add_counters(user_id, {"periodSpendMicros": total}, now=now)
+                store_breaker.record_store_result(True)
             except Exception as e:
+                store_breaker.record_store_result(False)
                 StructuredLogger.error(
                     f"Cost meter failed to record user spend for {user_id}: {e}",
                     totalMicros=total,

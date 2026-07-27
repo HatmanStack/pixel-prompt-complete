@@ -232,6 +232,29 @@ def daily_spend_ceiling(**kwargs) -> Dict[str, Any]:
     )
 
 
+def spend_guard_degraded(**kwargs) -> Dict[str, Any]:
+    """503 The cost guards cannot be evaluated and the degraded budget is spent.
+
+    A distinct code from ``DAILY_SPEND_CEILING`` on purpose. That one means
+    "the budget is known and it is exhausted"; this one means "the store that
+    holds the budget is unreachable and this container has already dispatched
+    all it is willing to dispatch blind". They want different operator
+    responses -- raise the ceiling versus fix DynamoDB -- so they must be
+    separable in the logs.
+
+    No ``retry_after``: unlike the daily ceiling, nothing here knows when the
+    store comes back, and a guessed interval is worse than silence.
+    """
+    return error_response(
+        error_code="SPEND_GUARD_DEGRADED",
+        message=(
+            "Service is temporarily unavailable: usage limits cannot be "
+            "verified right now. Please try again shortly."
+        ),
+        **kwargs,
+    )
+
+
 def age_verification_required(**kwargs) -> Dict[str, Any]:
     """403 Caller has not affirmed they are 18 or older.
 

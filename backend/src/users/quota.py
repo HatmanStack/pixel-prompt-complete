@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 import config
+from ops import store_breaker
 from users.repository import UserRepository
 from users.tier import TierContext
 from utils.logger import StructuredLogger
@@ -311,6 +312,9 @@ def _enforce_anon(
     try:
         ok, item = repo.increment_anon(key, counter, limit, config.anon_window_seconds, now)
     except Exception as e:
+        # Counted by the store breaker: this is one of the seven sites that
+        # swallow a store error, and they all read the same table.
+        store_breaker.record_store_result(False)
         # Fail OPEN on a store error, matching the spend ceiling. An
         # unreachable counter is not evidence the caller is over limit, and
         # 500ing every request because the quota store hiccuped is a
@@ -320,6 +324,7 @@ def _enforce_anon(
         # invisible.
         StructuredLogger.error(f"Anon quota check failed, allowing request: {e}")
         return QuotaResult(allowed=True, reason=None, reset_at=0, usage={})
+    store_breaker.record_store_result(True)
     usage, reset = _usage(item, counter, limit, "windowStart", config.anon_window_seconds)
     return QuotaResult(
         allowed=ok,

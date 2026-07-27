@@ -58,6 +58,8 @@ Metadata:
           - MonthlySpendCeilingUsdMicros
           - GlobalDailySpendCeilingUsdMicros
           - EnhanceDailySpendCeilingUsdMicros
+          - StoreFailureThreshold
+          - DegradedDispatchBudget
       - Label:
           default: "Per-Model Daily Caps"
         Parameters:
@@ -499,6 +501,32 @@ Parameters:
       day still cannot consume the month. Applies in every configuration,
       including AUTH_ENABLED=false. Set to 0 to disable (not recommended).
 
+  StoreFailureThreshold:
+    Type: Number
+    Default: 5
+    Description: >-
+      Consecutive quota-store failures before the per-container circuit
+      breaker trips. Every spend ceiling and quota guard reads one DynamoDB
+      table and fails open when it is unreachable, so a partition opens all of
+      them at once and stops the spend accounting too; this breaker is the
+      only bound that does not need that table. Consecutive rather than a
+      rate, because the case being defended against is a partition. Five is
+      comfortably above the three or four store calls one /generate makes, so
+      a single unlucky request cannot trip it.
+
+  DegradedDispatchBudget:
+    Type: Number
+    Default: 20
+    Description: >-
+      Generations a tripped container may still dispatch before /generate
+      sheds with a 503. About $3.80 per container at $0.19 a generation, and
+      with ReservedConcurrentExecutions of 10 roughly $38 fleet-wide, against
+      a $25 daily and $500 monthly ceiling. Deliberately above the daily
+      ceiling: this is a backstop for when the ceilings cannot be evaluated at
+      all, not a second ceiling, and it should never bind while DynamoDB is
+      healthy. NOTE the bound is PER CONTAINER, not global -- a global one
+      would need the store that is down.
+
   EnhanceDailySpendCeilingUsdMicros:
     Type: Number
     Default: 2000000
@@ -694,6 +722,8 @@ Resources:
           MONTHLY_SPEND_CEILING_USD_MICROS: !Ref MonthlySpendCeilingUsdMicros
           GLOBAL_DAILY_SPEND_CEILING_USD_MICROS: !Ref GlobalDailySpendCeilingUsdMicros
           ENHANCE_DAILY_SPEND_CEILING_USD_MICROS: !Ref EnhanceDailySpendCeilingUsdMicros
+          STORE_FAILURE_THRESHOLD: !Ref StoreFailureThreshold
+          DEGRADED_DISPATCH_BUDGET: !Ref DegradedDispatchBudget
           MODEL_GEMINI_DAILY_CAP: !Ref ModelGeminiDailyCap
           MODEL_NOVA_DAILY_CAP: !Ref ModelNovaDailyCap
           MODEL_OPENAI_DAILY_CAP: !Ref ModelOpenaiDailyCap

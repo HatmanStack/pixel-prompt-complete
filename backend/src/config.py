@@ -479,6 +479,29 @@ enhance_daily_spend_ceiling_usd_micros = _safe_int(
     "ENHANCE_DAILY_SPEND_CEILING_USD_MICROS", 2_000_000
 )
 
+# Circuit breaker over the quota/spend store. See ops/store_breaker.py, which
+# carries the reasoning and the residual risk; this is only the tuning.
+#
+# Every ceiling above reads one DynamoDB table, and every guard that reads it
+# fails open, so a partition opens all of them at once and stops the metering
+# too. These two numbers are the bound that does not need that table.
+#
+# Consecutive failures before the breaker trips. Consecutive, not a rate: the
+# case being defended against is a partition, which looks like an unbroken
+# run. Five is comfortably more than the three or four store calls a single
+# /generate makes, so one unlucky request cannot trip it.
+store_failure_threshold = _safe_int("STORE_FAILURE_THRESHOLD", 5)
+
+# Generations a tripped container may still dispatch before it sheds.
+#
+# 20 at roughly $0.19 per four-model generation is about $3.80 per container.
+# With ReservedConcurrentExecutions: 10 the fleet-wide worst case is about
+# $38, against a $25 daily and $500 monthly ceiling. Deliberately above the
+# daily ceiling: this is a backstop for the case where the ceilings cannot be
+# evaluated at all, not a second ceiling, and it should never bind while
+# DynamoDB is healthy.
+degraded_dispatch_budget = _safe_int("DEGRADED_DISPATCH_BUDGET", 20)
+
 # CAPTCHA (Cloudflare Turnstile)
 turnstile_secret_key = os.environ.get("TURNSTILE_SECRET_KEY", "")
 if captcha_enabled and not turnstile_secret_key:

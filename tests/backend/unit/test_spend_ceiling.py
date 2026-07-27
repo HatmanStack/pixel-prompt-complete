@@ -655,3 +655,196 @@ def test_a_store_error_still_fails_open(monkeypatch):
     assert lf._daily_spend_exceeded(now=1784980800) is False
     assert lf._monthly_spend_exceeded(now=1784980800) is False
     assert lf._enhance_spend_exceeded(now=1784980800) is False
+
+
+# ---------------------------------------------------------------------------
+# The bound that does not read DynamoDB.
+#
+# Six guards fail open on a store error and spend recording silently stops,
+# and they all share one table -- so a single partition problem opens every
+# gate AND stops the accounting, leaving an SNS email as the only signal. At
+# the API Gateway throttle ceiling that is roughly $2k/day against a $500
+# monthly ceiling.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def _clean_breaker():
+    from ops import store_breaker
+
+    store_breaker.reset()
+    yield store_breaker
+    store_breaker.reset()
+
+
+def test_generate_stops_dispatching_once_the_store_has_been_down_and_the_degraded_budget_is_spent(
+    _clean_breaker, monkeypatch
+):
+    """The finding, stated as a test.
+
+    Every store call raises, so every guard fails open and every one of them
+    records a failure. The first `degraded_dispatch_budget` generations still
+    dispatch -- deliberately, because a store blip must not deny service --
+    and the next one is shed.
+    """
+    import importlib
+    import json as _json
+    from unittest.mock import MagicMock, patch
+
+    import config
+    import lambda_function as lf
+
+    importlib.reload(config)
+
+    exploding = MagicMock()
+    exploding.get_user.side_effect = RuntimeError("dynamodb partition")
+    exploding.add_counters.side_effect = RuntimeError("dynamodb partition")
+    exploding.increment_anon.side_effect = RuntimeError("dynamodb partition")
+    exploding.get_model_runtime_config.side_effect = RuntimeError("dynamodb partition")
+
+    def _event():
+        return {
+            "body": _json.dumps({"prompt": "a cat"}),
+            "requestContext": {"http": {"sourceIp": "10.0.0.1"}},
+            "headers": {},
+        }
+
+    dispatched = []
+    statuses = []
+    attempts = config.degraded_dispatch_budget + 6
+    with (
+        patch.object(lf, "_user_repo", exploding),
+        patch.object(lf._cost_meter, "_repo", exploding),
+        patch.object(lf._model_counter_service, "_repo", exploding, create=True),
+        patch.object(lf, "session_manager") as mock_sm,
+        patch.object(lf, "_prompt_history"),
+        patch.object(lf.config, "generate_async", True),
+        patch.object(lf, "_dispatch_generation_async", side_effect=lambda *a, **k: (
+            dispatched.append(1) or True
+        )),
+    ):
+        mock_sm.create_session.return_value = "s1"
+        for _ in range(attempts):
+            statuses.append(lf.handle_generate(_event(), "corr-shed")["statusCode"])
+
+    assert statuses[0] == 202, statuses[:3]
+    assert 503 in statuses, "the breaker never shed"
+    assert statuses.count(503) >= 1
+    # Everything after the first shed stays shed.
+    first_shed = statuses.index(503)
+    assert set(statuses[first_shed:]) == {503}
+    # Requests made BEFORE the breaker tripped are normal dispatches, not
+    # degraded ones -- the counter needs store_failure_threshold consecutive
+    # failures and one /generate produces four, so the first request or two
+    # run before it trips. What the budget bounds is the dispatches made
+    # while tripped, which is exactly what the breaker's own counter reports.
+    assert _clean_breaker.state()["degradedDispatches"] == config.degraded_dispatch_budget
+    assert len(dispatched) < attempts
+
+
+def test_the_shed_response_is_distinguishable_from_the_daily_ceiling(_clean_breaker):
+    """Two different operator responses -- raise the ceiling, or fix DynamoDB
+    -- so the two 503s must be separable in the logs."""
+    import json as _json
+
+    from utils import error_responses
+
+    degraded = _json.loads(_json.dumps(error_responses.spend_guard_degraded()))
+    ceiling = _json.loads(_json.dumps(error_responses.daily_spend_ceiling()))
+
+    assert degraded["error"] == "SPEND_GUARD_DEGRADED"
+    assert ceiling["error"] == "DAILY_SPEND_CEILING"
+    assert degraded["error"] != ceiling["error"]
+
+
+def test_a_shed_generate_reaches_no_provider_handler(_clean_breaker, monkeypatch):
+    """With should_shed forced True, no provider is called at all.
+
+    A test that only checked the status code would pass against an
+    implementation that refuses the caller after dispatching, which is the
+    exact failure the breaker exists to prevent.
+    """
+    import json as _json
+    from unittest.mock import MagicMock, patch
+
+    import lambda_function as lf
+
+    with (
+        patch.object(lf.store_breaker, "should_shed", return_value=True),
+        patch.object(lf, "_spend_ceiling_exceeded", return_value=(False, "")),
+        patch.object(lf, "enforce_quota") as mock_quota,
+        patch.object(lf, "content_filter") as mock_cf,
+        patch.object(lf, "_user_repo", MagicMock()),
+        patch.object(lf, "get_enabled_models") as mock_models,
+        patch.object(lf, "session_manager") as mock_sm,
+        patch.object(lf, "get_handler") as mock_handler,
+        patch.object(lf, "_dispatch_generation_async") as mock_dispatch,
+        patch.object(lf, "_refund_usage") as mock_refund,
+    ):
+        from users.quota import QuotaResult
+
+        mock_quota.return_value = QuotaResult(allowed=True, reason=None, reset_at=0)
+        mock_cf.check_prompt.return_value = False
+
+        resp = lf.handle_generate(
+            {
+                "body": _json.dumps({"prompt": "a cat"}),
+                "requestContext": {"http": {"sourceIp": "10.0.0.1"}},
+                "headers": {},
+            },
+            "corr-forced",
+        )
+
+    assert resp["statusCode"] == 503
+    assert _json.loads(resp["body"])["error"] == "SPEND_GUARD_DEGRADED"
+    mock_handler.assert_not_called()
+    mock_dispatch.assert_not_called()
+    mock_models.assert_not_called()
+    mock_sm.create_session.assert_not_called()
+    # An early exit that never reaches a provider must refund, per the
+    # _refund_usage invariant.
+    mock_refund.assert_called_once()
+
+
+def test_a_healthy_store_never_sheds(_clean_breaker):
+    """A breaker that fires in the healthy case is worse than none."""
+    import json as _json
+    from unittest.mock import MagicMock, patch
+
+    import config
+    import lambda_function as lf
+
+    healthy = MagicMock()
+    healthy.get_user.return_value = None
+    healthy.get_model_runtime_config.return_value = None
+
+    statuses = []
+    with (
+        patch.object(lf, "_user_repo", healthy),
+        patch.object(lf._cost_meter, "_repo", healthy),
+        patch.object(lf, "session_manager") as mock_sm,
+        patch.object(lf, "_prompt_history"),
+        patch.object(lf, "enforce_quota") as mock_quota,
+        patch.object(lf, "_model_counter_service") as mock_counter,
+        patch.object(lf.config, "generate_async", True),
+        patch.object(lf, "_dispatch_generation_async", return_value=True),
+    ):
+        from users.quota import QuotaResult
+
+        mock_quota.return_value = QuotaResult(allowed=True, reason=None, reset_at=0)
+        mock_counter.consume_model_slot.return_value = True
+        mock_sm.create_session.return_value = "s1"
+        for _ in range(config.degraded_dispatch_budget * 3):
+            statuses.append(
+                lf.handle_generate(
+                    {
+                        "body": _json.dumps({"prompt": "a cat"}),
+                        "requestContext": {"http": {"sourceIp": "10.0.0.1"}},
+                        "headers": {},
+                    },
+                    "corr-healthy",
+                )["statusCode"]
+            )
+
+    assert 503 not in statuses
+    assert _clean_breaker.state()["degradedDispatches"] == 0

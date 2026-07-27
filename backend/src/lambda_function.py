@@ -44,6 +44,7 @@ from models.providers import (
     get_outpaint_handler,
     sanitize_error_message,
 )
+from ops import store_breaker
 from ops.cost_meter import CostMeter, UnreadableSpendTotal
 from ops.metrics import emit_quota_rejection, emit_request_metric, emit_request_metrics
 from ops.model_counters import ModelCounterService
@@ -184,12 +185,16 @@ def _daily_spend_exceeded(now: int | None = None) -> bool:
     except UnreadableSpendTotal as e:
         # Fails CLOSED, unlike the store error below. The read succeeded and
         # the number is corrupt, which is permanent: failing open here leaves
-        # the ceiling off until someone reads the logs.
+        # the ceiling off until someone reads the logs. The READ worked, so
+        # this is a success as far as the store breaker is concerned.
+        store_breaker.record_store_result(True)
         StructuredLogger.error(f"Spend accumulator is unreadable, refusing request: {e}")
         return True
     except Exception as e:
+        store_breaker.record_store_result(False)
         StructuredLogger.error(f"Spend ceiling check failed, allowing request: {e}")
         return False
+    store_breaker.record_store_result(True)
     return int(spend.get("totalMicros", 0)) >= ceiling
 
 
@@ -209,11 +214,14 @@ def _monthly_spend_exceeded(now: int | None = None) -> bool:
     try:
         spend = _cost_meter.get_monthly_spend(now=now)
     except UnreadableSpendTotal as e:
+        store_breaker.record_store_result(True)
         StructuredLogger.error(f"Monthly accumulator is unreadable, refusing request: {e}")
         return True
     except Exception as e:
+        store_breaker.record_store_result(False)
         StructuredLogger.error(f"Monthly ceiling check failed, allowing request: {e}")
         return False
+    store_breaker.record_store_result(True)
     return int(spend.get("totalMicros", 0)) >= ceiling
 
 
@@ -231,11 +239,14 @@ def _enhance_spend_exceeded(now: int | None = None) -> bool:
     try:
         spend = _cost_meter.get_daily_spend(now=now)
     except UnreadableSpendTotal as e:
+        store_breaker.record_store_result(True)
         StructuredLogger.error(f"Spend accumulator is unreadable, refusing enhance: {e}")
         return True
     except Exception as e:
+        store_breaker.record_store_result(False)
         StructuredLogger.error(f"Enhance ceiling check failed, allowing request: {e}")
         return False
+    store_breaker.record_store_result(True)
     return int(spend.get("enhanceMicros", 0)) >= ceiling
 
 
@@ -315,8 +326,9 @@ def _enforce_quota_safe(tier_ctx: TierContext, endpoint_kind: str, now: int) -> 
     ERROR rather than WARNING — it needs to be alarmable.
     """
     try:
-        return enforce_quota(tier_ctx, endpoint_kind, _user_repo, now)
+        result = enforce_quota(tier_ctx, endpoint_kind, _user_repo, now)
     except Exception as e:
+        store_breaker.record_store_result(False)
         StructuredLogger.error(
             f"Quota check failed, allowing request: {e}",
             tier=tier_ctx.tier,
@@ -325,6 +337,16 @@ def _enforce_quota_safe(tier_ctx: TierContext, endpoint_kind: str, now: int) -> 
         from users.quota import QuotaResult
 
         return QuotaResult(allowed=True, reason=None, reset_at=0, usage={})
+    # Deliberately NO record_store_result(True) here, and this is not an
+    # oversight. enforce_quota delegates the anon path to
+    # users.quota._enforce_anon, which catches its own store error, records
+    # the failure, and returns an allowed result -- so a success recorded
+    # here would immediately overwrite the failure recorded one frame down
+    # and reset the consecutive counter on every request. Caught by
+    # test_generate_stops_dispatching...: with the True in place the breaker
+    # never tripped at all. The site closest to the store call is the one
+    # that knows whether it was reached.
+    return result
 
 
 def _model_runtime_disabled(model_name: str, correlation_id: str | None = None) -> bool:
@@ -1190,6 +1212,26 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
         return err
 
     try:
+        # Every cost guard above this line reads one DynamoDB table and fails
+        # OPEN when it is unreachable, so a partition opens all of them at
+        # once and stops the spend accounting too. This is the only bound that
+        # does not need that table. Checked AFTER quota -- a caller who cannot
+        # generate anyway should be refused for the reason that actually
+        # applies to them -- and BEFORE any provider is reached.
+        #
+        # Refunds on the way out, per the _refund_usage invariant: this is an
+        # early exit that never reaches a provider. Phase 2 removed 503 from
+        # the client's retryable set for POSTs, so this cannot be retried into.
+        if store_breaker.should_shed():
+            StructuredLogger.error(
+                "Shedding /generate: the quota store is unreachable and this "
+                "container has spent its degraded dispatch budget",
+                correlation_id=correlation_id,
+                **store_breaker.state(),
+            )
+            _refund_usage(validated.tier, "generate", correlation_id)
+            return response(503, error_responses.spend_guard_degraded())
+
         prompt = validated.prompt
 
         # Get enabled models
@@ -1227,12 +1269,14 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
                         "status": "skipped",
                         "reason": "daily_cap_reached",
                     }
+            store_breaker.record_store_result(True)
         except Exception as e:
             # Fail OPEN, consistent with the quota and spend-ceiling checks: an
             # unreachable counter store is not evidence a model is over its
             # cap, and refusing every generation because DynamoDB hiccuped
             # would be a self-inflicted outage. Logged at ERROR so a persistent
             # failure — which means silently uncapped models — is alarmable.
+            store_breaker.record_store_result(False)
             StructuredLogger.error(
                 f"Per-model cap check failed, dispatching all models: {e}",
                 correlation_id=correlation_id,
