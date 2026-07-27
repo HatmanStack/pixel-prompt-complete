@@ -6,6 +6,12 @@ requires-python = ">=3.13"
 [project.optional-dependencies]
 dev = [
     "mypy==2.3.0",
+    # This pin has a second home: the repo-root package.json lint-staged block
+    # runs `uvx ruff@0.15.21`. Bump both together. They were unpinned there and
+    # uvx resolved whatever it fetched, which is why .ruff_cache/ accumulated
+    # directories for 0.14.7, 0.14.8, 0.15.21 and 0.16.0 -- a hook that formats
+    # with a different version than CI checks with is a gate that fails for
+    # reasons the contributor cannot reproduce.
     "ruff==0.15.21",
     "pytest==9.0.3",
     "pytest-mock==3.15.1",

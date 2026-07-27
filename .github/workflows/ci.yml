@@ -31,7 +31,11 @@ jobs:
               - 'frontend/**'
             backend:
               - 'backend/**'
-              - 'tests/backend/**'
+              # tests/** rather than tests/backend/**, and ruff.toml, because
+              # the backend job now lints both. A filter narrower than the
+              # thing it gates is a job that silently does not run.
+              - 'tests/**'
+              - 'ruff.toml'
 
   frontend:
     name: Frontend Lint & Tests
@@ -79,7 +83,14 @@ jobs:
           uv pip install --system -r backend/src/requirements.txt
           uv pip install --system -e "backend/.[dev]"
       - name: Lint
-        run: ruff check backend/src/
+        run: ruff check backend/src/ tests/ backend/scripts/
+      # Format is checked on backend/src/ only, deliberately. Reformatting the
+      # 65 files under tests/ produces a diff no reviewer will read, and
+      # formatting drift there has caused no observed problem. See ADR-A6 --
+      # this asymmetry is a decision, not an oversight, so please do not
+      # "fix" it by adding tests/ here.
+      - name: Format check
+        run: ruff format --check backend/src/
       # --config-file is not optional. mypy discovers config from the current
       # directory and there is no pyproject.toml at the repository root, so
       # `mypy backend/src/` alone runs with mypy's defaults -- none of the
