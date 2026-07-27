@@ -468,6 +468,100 @@ def test_a_healthy_worker_logs_no_failure(stack, caplog):
     assert _worker_error_logs(caplog, "Generate worker failed") == []
 
 
+# ---- A model the worker container cannot resolve ----
+#
+# The request path reserves slots against its own get_enabled_models(); the
+# worker rebuilds the configs from those names. The two can disagree only if a
+# deploy changes a *_ENABLED variable while a request is in flight -- a case
+# that needed an invocation boundary to be possible at all.
+#
+# run_generation is called directly here rather than through lambda_handler,
+# because the returned results map is the observable contract and the worker
+# branch discards it.
+
+
+def test_one_unresolvable_model_does_not_abandon_the_others(stack):
+    """This is the whole reason resolution does not go through config.get_model.
+
+    That function raises ValueError for a model that is not enabled, so a
+    single stale name would have cost the caller every other model too.
+    """
+    import lambda_function
+
+    results = lambda_function.run_generation(_worker_event(modelNames=["gemini", "firefly"]))
+
+    assert results["gemini"]["status"] == "completed"
+    assert results["firefly"] == {"status": "error", "error": "Model is not enabled"}
+
+
+def test_an_unresolvable_model_is_marked_failed_on_the_session(stack):
+    """Leaving the column pending strands the session short of a terminal status.
+
+    The client would then poll for five minutes and give up on a generation
+    that was never going to arrive.
+    """
+    import lambda_function
+
+    lambda_function.run_generation(_worker_event(modelNames=["gemini", "firefly"]))
+
+    stack["session"].add_iteration.assert_any_call("s1", "firefly", "a cat")
+    stack["session"].fail_iteration.assert_any_call("s1", "firefly", 0, "Model is not enabled")
+
+
+def test_an_unresolvable_model_is_not_dispatched_to_a_provider(stack):
+    """It has no config to dispatch with; the point is to fail it, not to guess.
+
+    One handler fetched, for the one model that resolved. Guessing a config for
+    the other would send a prompt to a provider the operator had disabled.
+    """
+    import lambda_function
+
+    lambda_function.run_generation(_worker_event(modelNames=["gemini", "firefly"]))
+
+    assert stack["get_handler"].call_count == 1
+
+
+def test_an_unresolvable_model_is_logged_at_error(stack, caplog):
+    """A silent skip would make a mid-deploy configuration split invisible."""
+    import lambda_function
+
+    with caplog.at_level(logging.ERROR):
+        lambda_function.run_generation(_worker_event(modelNames=["gemini", "firefly"]))
+
+    entries = _worker_error_logs(caplog, "not enabled in this container")
+    assert len(entries) == 1
+    assert entries[0]["metadata"]["model"] == "firefly"
+    assert entries[0]["metadata"]["sessionId"] == "s1"
+
+
+def test_a_failed_session_write_for_an_unresolvable_model_is_not_fatal(stack):
+    """The dispatch must survive it: the other models are still worth running."""
+    import lambda_function
+
+    def _fail_only_firefly(session_id, model, prompt, **kwargs):
+        if model == "firefly":
+            raise RuntimeError("s3 down")
+        return 0
+
+    stack["session"].add_iteration.side_effect = _fail_only_firefly
+
+    results = lambda_function.run_generation(_worker_event(modelNames=["gemini", "firefly"]))
+
+    assert results["gemini"]["status"] == "completed"
+    assert results["firefly"]["status"] == "error"
+
+
+def test_every_named_model_resolving_marks_nothing_failed(stack):
+    """Keeps the five above from passing against code that fails every model."""
+    import lambda_function
+
+    results = lambda_function.run_generation(_worker_event(modelNames=["gemini"]))
+
+    assert results == {"gemini": results["gemini"]}
+    assert results["gemini"]["status"] == "completed"
+    stack["session"].fail_iteration.assert_not_called()
+
+
 def test_the_worker_meters_the_spend(stack):
     """The charge follows the provider call, not the HTTP response."""
     import lambda_function
