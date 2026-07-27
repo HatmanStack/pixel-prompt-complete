@@ -133,6 +133,7 @@ def test_refinement_records_the_chosen_model():
             return_value=MagicMock(return_value={"status": "success", "duration": 1.0}),
         ),
     ):
+        mock_repo.get_model_runtime_config.return_value = None
         mock_counter.consume_model_slot.return_value = True
         mock_cf.check_prompt.return_value = False
         mock_val.return_value = (("s1", "gemini", model_cfg), None)
@@ -192,6 +193,7 @@ def test_a_failed_refinement_records_no_preference():
             return_value=MagicMock(return_value={"status": "error", "error": "boom"}),
         ),
     ):
+        mock_repo.get_model_runtime_config.return_value = None
         mock_counter.consume_model_slot.return_value = True
         mock_cf.check_prompt.return_value = False
         mock_val.return_value = (("s1", "gemini", model_cfg), None)

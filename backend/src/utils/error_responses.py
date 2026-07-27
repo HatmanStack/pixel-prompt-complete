@@ -196,6 +196,22 @@ def model_cost_ceiling(**kwargs) -> Dict[str, Any]:
     )
 
 
+def model_disabled(model_name: str, **kwargs) -> Dict[str, Any]:
+    """503 Model switched off at runtime by an operator.
+
+    503 rather than 429: nothing the caller did caused this and no amount of
+    waiting for their own window is relevant. It is the service that is
+    unavailable for this model, which is what a kill switch means.
+    """
+    return error_response(
+        error_code="MODEL_DISABLED",
+        message=f"{model_name} is temporarily unavailable.",
+        details="An operator has disabled this model. Try a different model.",
+        model=model_name,
+        **kwargs,
+    )
+
+
 def daily_spend_ceiling(**kwargs) -> Dict[str, Any]:
     """503 Daily spend ceiling reached — operator-side cost protection.
 

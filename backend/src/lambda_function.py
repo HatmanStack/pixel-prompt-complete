@@ -310,6 +310,34 @@ def _enforce_quota_safe(tier_ctx: TierContext, endpoint_kind: str, now: int) -> 
         return QuotaResult(allowed=True, reason=None, reset_at=0, usage={})
 
 
+def _model_runtime_disabled(model_name: str, correlation_id: str | None = None) -> bool:
+    """True when an admin has disabled ``model_name`` at runtime.
+
+    The single reader of ``config#model#<name>``. It exists as a helper rather
+    than an inline call because the read had exactly one caller — the
+    ``/generate`` dispatch filter — so a model switched off for burning money
+    or hallucinating went on serving every ``/iterate`` and ``/outpaint``
+    request. Three paths asking one function is what stops a fourth from
+    diverging.
+
+    Fails OPEN on a store error, consistent with every other guard that reads
+    this table (quota, per-model caps, spend ceilings): an unreachable config
+    store is not evidence a model is disabled, and refusing all refinement
+    because DynamoDB hiccuped would be a self-inflicted outage. Logged at
+    ERROR so a persistent failure — which means a kill switch that no longer
+    kills — is alarmable.
+    """
+    try:
+        runtime_cfg = _user_repo.get_model_runtime_config(model_name)
+    except Exception as e:
+        StructuredLogger.error(
+            f"Runtime model config check failed, allowing {model_name}: {e}",
+            correlation_id=correlation_id,
+        )
+        return False
+    return bool(runtime_cfg and runtime_cfg.get("disabled"))
+
+
 def _seconds_until_reset(reset_at: int, now: int) -> int | None:
     """Seconds a rejected caller must wait for their window to reset.
 
@@ -1144,9 +1172,10 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
         now_ts = int(time.time())
         try:
             for model in enabled_models:
-                # Runtime disable check (admin-toggled via DynamoDB)
-                runtime_cfg = _user_repo.get_model_runtime_config(model.name)
-                if runtime_cfg and runtime_cfg.get("disabled"):
+                # Runtime disable check (admin-toggled via DynamoDB). Shared
+                # with /iterate and /outpaint so a kill switch means the same
+                # thing on every path that can spend money on a model.
+                if _model_runtime_disabled(model.name, correlation_id):
                     skipped_models[model.name] = {
                         "status": "skipped",
                         "reason": "admin_disabled",
@@ -1455,6 +1484,21 @@ def _handle_refinement(
             _refund_usage(validated.tier, refund_kind, correlation_id)
             return err
         session_id, model_name, model_config = refs
+
+        # Runtime kill switch, checked before anything is spent or written:
+        # before the per-model cap slot is consumed (burning budget on a
+        # request that produces nothing), before add_iteration writes an
+        # in_progress row this early return would strand, and before the S3
+        # read in _load_source_image. Refunds, per the _refund_usage
+        # invariant -- this is exactly the class of early exit it warns about.
+        if _model_runtime_disabled(model_name, correlation_id):
+            StructuredLogger.warning(
+                f"Refusing {handler_name} for {model_name}: disabled at runtime",
+                correlation_id=correlation_id,
+                sessionId=session_id,
+            )
+            _refund_usage(validated.tier, refund_kind, correlation_id)
+            return response(503, error_responses.model_disabled(model_name))
 
         loaded, err = _load_source_image(session_id, model_name, validated.tier)
         if err:

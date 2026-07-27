@@ -229,7 +229,7 @@ def _run_refinement(
     with (
         patch("config.auth_enabled", True),
         patch("lambda_function._guest_service", MagicMock()),
-        patch("lambda_function._user_repo", MagicMock()),
+        patch("lambda_function._user_repo") as mock_repo,
         patch("lambda_function._model_counter_service") as mock_counter,
         patch("lambda_function.resolve_tier", return_value=tier),
         patch("lambda_function.enforce_quota", return_value=quota),
@@ -243,6 +243,7 @@ def _run_refinement(
         patch("lambda_function.get_outpaint_handler", return_value=ctx["handler"]),
         patch(mock_meter_name) as mock_meter,
     ):
+        mock_repo.get_model_runtime_config.return_value = None
         mock_counter.consume_model_slot.return_value = model_slot_granted
         mock_cf.check_prompt.return_value = False
         mock_val.return_value = (("sess-1", "gemini", ctx["model_cfg"]), None)
@@ -431,7 +432,7 @@ def test_refine_refunds_when_the_model_fails():
         patch("config.auth_enabled", True),
         patch("config.credits_enabled", True),
         patch("lambda_function._guest_service", MagicMock()),
-        patch("lambda_function._user_repo", MagicMock()),
+        patch("lambda_function._user_repo") as mock_repo,
         patch("lambda_function._model_counter_service") as mock_counter,
         patch("lambda_function.resolve_tier", return_value=tier),
         patch("lambda_function.enforce_quota", return_value=quota),
@@ -445,6 +446,7 @@ def test_refine_refunds_when_the_model_fails():
         patch("lambda_function._cost_meter"),
         patch("lambda_function._refund_usage") as mock_refund,
     ):
+        mock_repo.get_model_runtime_config.return_value = None
         mock_counter.consume_model_slot.return_value = True
         mock_cf.check_prompt.return_value = False
         mock_val.return_value = (("sess-1", "gemini", ctx["model_cfg"]), None)
@@ -522,7 +524,7 @@ def _refinement_early_exit(validate_err=None, load_err=None, slot_granted=True):
         patch("config.auth_enabled", True),
         patch("config.credits_enabled", True),
         patch("lambda_function._guest_service", MagicMock()),
-        patch("lambda_function._user_repo", MagicMock()),
+        patch("lambda_function._user_repo") as mock_repo,
         patch("lambda_function._model_counter_service") as mock_counter,
         patch("lambda_function.resolve_tier", return_value=tier),
         patch("lambda_function.enforce_quota", return_value=quota),
@@ -536,6 +538,7 @@ def _refinement_early_exit(validate_err=None, load_err=None, slot_granted=True):
         patch("lambda_function._cost_meter"),
         patch("lambda_function._refund_usage") as mock_refund,
     ):
+        mock_repo.get_model_runtime_config.return_value = None
         mock_counter.consume_model_slot.return_value = slot_granted
         mock_cf.check_prompt.return_value = False
         mock_val.return_value = (
