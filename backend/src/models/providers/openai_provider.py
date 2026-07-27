@@ -1,9 +1,10 @@
 """
 OpenAI provider handlers.
 
-Per ADR-5: ``handle_openai`` targets DALL-E 3 (``dall-e-3``) for generation,
-while ``iterate_openai`` and ``outpaint_openai`` always use ``gpt-image-1``
-because DALL-E 3 does not support ``images.edit``.
+Per docs/adr/005-dalle3-iteration-uses-gpt-image-1.md: ``handle_openai``
+targets DALL-E 3 (``dall-e-3``) for generation, while ``iterate_openai`` and
+``outpaint_openai`` always use ``gpt-image-1`` because DALL-E 3 does not
+support ``images.edit``.
 """
 
 from __future__ import annotations
@@ -28,7 +29,8 @@ from ._common import (
     _success_result,
 )
 
-# Per ADR-5: gpt-image-1 supports images.edit; DALL-E 3 does not.
+# Per docs/adr/005-dalle3-iteration-uses-gpt-image-1.md: gpt-image-1 supports
+# images.edit; DALL-E 3 does not.
 _EDIT_MODEL = "gpt-image-1"
 
 
@@ -103,7 +105,8 @@ def iterate_openai(
     """Iterate using OpenAI ``images.edit``.
 
     Always uses ``gpt-image-1`` regardless of ``model_config["id"]`` because
-    DALL-E 3 does not support the edit endpoint (ADR-5).
+    DALL-E 3 does not support the edit endpoint
+    (docs/adr/005-dalle3-iteration-uses-gpt-image-1.md).
     """
     try:
         timeout = _call_timeout(model_config)
@@ -140,7 +143,8 @@ def outpaint_openai(
 ) -> HandlerResult:
     """Outpaint using OpenAI ``images.edit`` with a padded canvas.
 
-    Always uses ``gpt-image-1`` regardless of ``model_config["id"]`` (ADR-5).
+    Always uses ``gpt-image-1`` regardless of ``model_config["id"]``
+    (docs/adr/005-dalle3-iteration-uses-gpt-image-1.md).
     """
     try:
         from utils.outpaint import (

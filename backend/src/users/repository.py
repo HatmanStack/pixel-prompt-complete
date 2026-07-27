@@ -1,6 +1,6 @@
 """DynamoDB-backed user repository with atomic quota updates.
 
-Implements the ``users`` table described in Phase-0.md ADR-3 / ADR-4.
+Implements the single-table design in docs/adr/003-dynamodb-single-table.md.
 All counter updates use conditional ``UpdateItem`` calls so window reset
 and increment happen atomically in a single round trip.
 """

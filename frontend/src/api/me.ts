@@ -1,6 +1,7 @@
 /**
  * /me endpoint client.
- * Shape matches ADR-10 in docs/plans/2026-04-08-paid-tier/Phase-0.md.
+ * Contract: docs/adr/007-me-endpoint-contract.md. `MeResponse` below declares
+ * a subset — the server also sends `modelChoices` and `preferredModel`.
  */
 
 import { API_BASE_URL, API_ROUTES } from './config';

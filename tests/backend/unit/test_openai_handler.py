@@ -66,7 +66,9 @@ def test_handle_openai_timeout(openai_config):
 
 
 def test_iterate_openai_uses_gpt_image_1(openai_config):
-    """Critical ADR-5 test: iterate must use gpt-image-1 even when config says dall-e-3."""
+    """Critical ADR-5 test (docs/adr/005-dalle3-iteration-uses-gpt-image-1.md):
+    iterate must use gpt-image-1 even when config says dall-e-3.
+    """
     with patch("models.providers.openai_provider._get_openai_client") as mock_factory:
         client = Mock()
         mock_factory.return_value = client
@@ -82,7 +84,9 @@ def test_iterate_openai_uses_gpt_image_1(openai_config):
 
 
 def test_outpaint_openai_uses_gpt_image_1(openai_config):
-    """Critical ADR-5 test: outpaint must use gpt-image-1 even when config says dall-e-3."""
+    """Critical ADR-5 test (docs/adr/005-dalle3-iteration-uses-gpt-image-1.md):
+    outpaint must use gpt-image-1 even when config says dall-e-3.
+    """
     from io import BytesIO
 
     from PIL import Image

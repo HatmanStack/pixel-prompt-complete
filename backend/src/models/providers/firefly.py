@@ -4,6 +4,7 @@ Adobe Firefly provider handlers.
 OAuth2 access tokens are cached at module level with a 50-minute TTL
 (Adobe IMS tokens are valid for 24 hours). The cache lives within a
 single Lambda container and resets on cold start.
+See docs/adr/006-firefly-token-cache.md.
 """
 
 from __future__ import annotations
