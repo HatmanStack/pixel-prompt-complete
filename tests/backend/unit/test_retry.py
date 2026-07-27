@@ -1,5 +1,13 @@
-"""
-Unit tests for retry logic.
+"""Unit tests for retry logic and the SDK client caches.
+
+On the client-cache tests below: **they do not spawn threads.** The defect
+being fixed is that three module-level dicts were read and written by four
+concurrent generation threads with no lock while ``firefly.py`` guarded its
+equivalent cache with an explicit one. A threaded test here would race
+itself -- a pass would prove the interleaving happened not to occur, not that
+it cannot. The lock's presence is verifiable by reading; what is worth
+asserting is the behaviour the lock must not change, which is cache identity.
+Same reasoning as the moto rule in the plan's Phase-0.
 """
 
 import pytest
@@ -186,3 +194,99 @@ class TestRetryDecorator:
             assert mock_logger.warning.called
             call_kwargs = mock_logger.warning.call_args[1]
             assert call_kwargs.get('correlation_id') == "test-correlation-123"
+
+
+class TestRetryMisconfiguration:
+    """A negative max_retries must not replace the real failure with a TypeError.
+
+    The loop body never ran, so ``last_exception`` was still None at the
+    terminal ``raise last_exception`` and the caller got
+    "TypeError: exceptions must derive from BaseException" instead of
+    whatever actually went wrong.
+    """
+
+    def test_a_negative_max_retries_is_rejected_at_decoration(self):
+        with pytest.raises(ValueError, match="max_retries"):
+            retry_with_backoff(max_retries=-1)
+
+    def test_the_error_names_the_parameter_and_the_bound(self):
+        with pytest.raises(ValueError) as exc:
+            retry_with_backoff(max_retries=-5)
+        assert "max_retries" in str(exc.value)
+        assert ">= 0" in str(exc.value)
+
+    def test_decoration_time_not_call_time(self):
+        """Failing at import beats failing on the first error in production."""
+        with pytest.raises(ValueError):
+            retry_with_backoff(max_retries=-1)
+
+    def test_zero_retries_still_calls_the_function_exactly_once(self):
+        """Confirming the existing semantics, since a decoration-time check
+        could accidentally reject 0 along with the negatives."""
+        calls = []
+
+        @retry_with_backoff(max_retries=0)
+        def _once():
+            calls.append(1)
+            return "ok"
+
+        assert _once() == "ok"
+        assert len(calls) == 1
+
+    def test_zero_retries_raises_the_real_error_without_retrying(self):
+        calls = []
+
+        @retry_with_backoff(max_retries=0)
+        def _fails():
+            calls.append(1)
+            raise ConnectionError("nope")
+
+        with pytest.raises(ConnectionError, match="nope"):
+            _fails()
+        assert len(calls) == 1
+
+
+class TestClientCacheIdentity:
+    """The behaviour the lock must not change. See the module docstring for
+    why there are no threads here."""
+
+    def test_the_openai_cache_returns_the_same_instance_for_the_same_key(self):
+        import utils.clients as c
+
+        c._openai_clients.clear()
+        first = c.get_openai_client("k")
+        assert c.get_openai_client("k") is first
+
+    def test_the_openai_cache_separates_different_keys(self):
+        import utils.clients as c
+
+        c._openai_clients.clear()
+        assert c.get_openai_client("k1") is not c.get_openai_client("k2")
+
+    def test_the_genai_cache_returns_the_same_instance_for_the_same_key(self):
+        import utils.clients as c
+
+        c._genai_clients.clear()
+        first = c.get_genai_client("k", timeout=30.0)
+        assert c.get_genai_client("k", timeout=30.0) is first
+        assert c.get_genai_client("k", timeout=10.0) is not first
+
+    def test_the_bedrock_cache_returns_the_same_instance_for_the_same_key(self):
+        import utils.clients as c
+
+        c._bedrock_clients.clear()
+        first = c.get_bedrock_client("us-west-2")
+        assert c.get_bedrock_client("us-west-2") is first
+        assert c.get_bedrock_client("eu-west-1") is not first
+
+    def test_every_cache_is_lock_guarded(self):
+        """Three dicts mutated by four generation threads had no lock while
+        firefly.py guarded its equivalent one. An inconsistency between two
+        caches in the same codebase is itself a defect: the next reader
+        cannot tell which pattern is intended."""
+        import threading
+
+        import utils.clients as c
+
+        for name in ("_openai_lock", "_genai_lock", "_bedrock_lock"):
+            assert isinstance(getattr(c, name), type(threading.Lock())), name

@@ -6,6 +6,7 @@ so that repeated calls within the same Lambda invocation reuse
 the same HTTP connection pool.
 """
 
+import threading
 from typing import Any, Dict
 
 import boto3
@@ -15,10 +16,25 @@ from openai import OpenAI
 
 from config import api_client_timeout, aws_region, generate_dispatch_budget_seconds
 
-# Module-level client singletons for Lambda container reuse
+# Module-level client singletons for Lambda container reuse.
+#
+# Four generation threads read and write these. The race is benign in
+# OUTCOME -- two threads missing a cold cache both construct a client and one
+# connection pool is discarded, not a wrong client returned -- so the lock is
+# not buying correctness so much as consistency: models/providers/firefly.py
+# guards its equivalent token cache with an explicit threading.Lock, and two
+# caches in one codebase following different patterns is itself a defect,
+# because the next reader cannot tell which one is intended. That is worth
+# more than the microseconds.
+#
+# Double-checked on the way in: the common case is a warm cache and takes no
+# lock at all.
 _openai_clients: Dict[Any, OpenAI] = {}
 _genai_clients: Dict[Any, genai.Client] = {}
 _bedrock_clients: Dict[Any, Any] = {}
+_openai_lock = threading.Lock()
+_genai_lock = threading.Lock()
+_bedrock_lock = threading.Lock()
 
 
 def get_openai_client(api_key: str, **kwargs) -> OpenAI:
@@ -40,12 +56,14 @@ def get_openai_client(api_key: str, **kwargs) -> OpenAI:
     extra = tuple(sorted((k, v) for k, v in normalized.items() if v is not None))
     cache_key = (api_key or "__default__", extra)
     if cache_key not in _openai_clients:
-        _openai_clients[cache_key] = OpenAI(
-            api_key=api_key or None,
-            timeout=kwargs.get("timeout", api_client_timeout),
-            max_retries=OPENAI_MAX_ATTEMPTS - 1,
-            **{k: v for k, v in kwargs.items() if k != "timeout"},
-        )
+        with _openai_lock:
+            if cache_key not in _openai_clients:
+                _openai_clients[cache_key] = OpenAI(
+                    api_key=api_key or None,
+                    timeout=kwargs.get("timeout", api_client_timeout),
+                    max_retries=OPENAI_MAX_ATTEMPTS - 1,
+                    **{k: v for k, v in kwargs.items() if k != "timeout"},
+                )
     return _openai_clients[cache_key]
 
 
@@ -53,8 +71,14 @@ def get_genai_client(api_key: str, timeout: float | None = None) -> genai.Client
     """Get or create a cached Google genai client keyed by api_key and timeout."""
     cache_key = (api_key or "__default__", timeout)
     if cache_key not in _genai_clients:
-        http_opts = genai.types.HttpOptions(timeout=int(timeout * 1000)) if timeout else None
-        _genai_clients[cache_key] = genai.Client(api_key=api_key or None, http_options=http_opts)
+        with _genai_lock:
+            if cache_key not in _genai_clients:
+                http_opts = (
+                    genai.types.HttpOptions(timeout=int(timeout * 1000)) if timeout else None
+                )
+                _genai_clients[cache_key] = genai.Client(
+                    api_key=api_key or None, http_options=http_opts
+                )
     return _genai_clients[cache_key]
 
 
@@ -205,15 +229,20 @@ def get_bedrock_client(region: str | None = None, budget: float | None = None) -
     budget_key = generate_dispatch_budget_seconds if budget is None else budget
     cache_key = (region_key, budget_key)
     if cache_key not in _bedrock_clients:
-        _bedrock_clients[cache_key] = boto3.client(
-            "bedrock-runtime",
-            region_name=region_key,
-            config=BotoConfig(
-                connect_timeout=BEDROCK_CONNECT_TIMEOUT,
-                read_timeout=bedrock_read_timeout(budget_key),
-                retries={"mode": "standard", "total_max_attempts": BEDROCK_MAX_ATTEMPTS},
-            ),
-        )
+        with _bedrock_lock:
+            if cache_key not in _bedrock_clients:
+                _bedrock_clients[cache_key] = boto3.client(
+                    "bedrock-runtime",
+                    region_name=region_key,
+                    config=BotoConfig(
+                        connect_timeout=BEDROCK_CONNECT_TIMEOUT,
+                        read_timeout=bedrock_read_timeout(budget_key),
+                        retries={
+                            "mode": "standard",
+                            "total_max_attempts": BEDROCK_MAX_ATTEMPTS,
+                        },
+                    ),
+                )
     return _bedrock_clients[cache_key]
 
 

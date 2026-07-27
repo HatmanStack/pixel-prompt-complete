@@ -71,7 +71,19 @@ def retry_with_backoff(max_retries=3, base_delay=1.0, max_delay=8.0, correlation
 
     Returns:
         Decorated function with retry logic
+
+    Raises:
+        ValueError: if ``max_retries`` is negative. Validated here, at
+            decoration, rather than in the wrapper: decorators are applied at
+            import, so a misconfiguration fails at deploy instead of on the
+            first transient error in production. With a negative value the
+            loop body never ran, ``last_exception`` was still None at the
+            terminal raise, and the caller got
+            "TypeError: exceptions must derive from BaseException" in place of
+            the real failure.
     """
+    if max_retries < 0:
+        raise ValueError(f"max_retries must be >= 0, got {max_retries}")
 
     def decorator(func):
         @wraps(func)
@@ -115,8 +127,15 @@ def retry_with_backoff(max_retries=3, base_delay=1.0, max_delay=8.0, correlation
 
                     time.sleep(delay)
 
-            # Should never reach here, but raise last exception just in case
-            raise last_exception
+            # Unreachable: max_retries is validated >= 0 at decoration, so
+            # the loop runs at least once and every path out of it either
+            # returns or raises. Belt and braces, and a RuntimeError naming
+            # the situation rather than `raise last_exception`, which was
+            # `raise None` in exactly the case it was meant to cover.
+            raise RuntimeError(
+                f"retry_with_backoff exhausted its loop without a result or an "
+                f"exception (max_retries={max_retries})"
+            ) from last_exception
 
         return wrapper
 
