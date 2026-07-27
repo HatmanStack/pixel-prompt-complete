@@ -365,9 +365,18 @@ per-operation values match within a model because an iterate or outpaint call
 generates one image, same as a generate; they are separate variables because
 providers price edits differently.
 
-**None of the fourteen is a SAM parameter or a Lambda environment variable in
-`backend/template.yaml`**, so a deployed stack always gets the defaults above.
-Changing them means adding them to the template.
+**Thirteen of the fourteen — the twelve `COST_*` entries and
+`COST_ENHANCE_USD_MICROS` — are neither SAM parameters nor Lambda environment
+variables in `backend/template.yaml`**, so a deployed stack always gets those
+defaults and changing them means adding them to the template.
+`ENHANCE_DAILY_SPEND_CEILING_USD_MICROS` is the exception: it is the SAM
+parameter `EnhanceDailySpendCeilingUsdMicros` (`template.yaml:530`, grouped at
+`:60`, mapped into the Lambda environment at `:724`), so the `/enhance`
+sub-ceiling is tunable with `sam deploy --parameter-overrides` and needs no
+template edit.
+
+Those thirteen plus the four operational timeouts below are the seventeen
+`backend/.env.example` names as unreachable from a deploy.
 
 **Credit Ledger** (`CREDITS_ENABLED`, off by default; the legacy call-counting
 quotas above stay in force while it is off). Credits are stored as integer
