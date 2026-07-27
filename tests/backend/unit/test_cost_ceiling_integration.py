@@ -9,6 +9,25 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def _synchronous_dispatch(monkeypatch):
+    """This module exercises the dispatch loop, not the transport.
+
+    GENERATE_ASYNC defaults true, and /generate now returns 503 when the
+    worker Invoke does not land instead of silently running the dispatch
+    inline -- inline runs a ~70s budget behind a 29s gateway timeout, so the
+    caller gets a 504 and never learns the sessionId. The Invoke never lands
+    under test (AWS_LAMBDA_FUNCTION_NAME is unset), so these tests pin the
+    synchronous path they were written for. Patched on the config module
+    rather than os.environ because config reads the variable once at import.
+    The asynchronous path is covered in test_generate_async_dispatch.py.
+    """
+    import config
+
+    monkeypatch.setattr(config, "generate_async", False)
+
+
+
+@pytest.fixture(autouse=True)
 def _patch_env(monkeypatch):
     """Set minimal env for lambda_function import."""
     monkeypatch.setenv("S3_BUCKET", "test-bucket")

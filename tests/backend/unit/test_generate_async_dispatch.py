@@ -9,8 +9,9 @@ self-invokes with `InvocationType="Event"`, answering `202` immediately.
 
 **What these tests prove:** the handler performs no provider work when
 `GENERATE_ASYNC=true`, the worker payload carries what the worker needs, an
-`Invoke` failure degrades to running inline rather than orphaning the session,
-and `GENERATE_ASYNC=false` still produces the pre-async `200`.
+`Invoke` failure reports 503 and refunds rather than running inline behind a
+gateway that has already given up, and `GENERATE_ASYNC=false` still produces
+the pre-async `200`.
 
 **What they cannot prove:** that the deployed request completes inside 29
 seconds. That is a property of real provider latency in a real account.
@@ -263,19 +264,38 @@ def test_async_generate_calls_no_provider_handler(stack):
 # ---- The inline fallback ----
 
 
-def test_an_invoke_failure_falls_back_to_inline_execution(stack):
-    """A deploy whose IAM grant did not land must degrade, not orphan sessions.
+def test_an_invoke_failure_returns_503_without_running_the_providers(stack):
+    """A deploy whose IAM grant did not land must fail fast, not run inline.
 
-    Today's behaviour -- a slow request that may 504 -- is strictly better than
-    a session that is created and never worked on.
+    Running inline looks like graceful degradation and is not: the inline path
+    carries generate_dispatch_budget_seconds (~70s) while /generate declares a
+    29s integration timeout, so the gateway 504s at 29s, the caller never
+    learns the sessionId, and four providers generate and bill for images that
+    are now unreachable. One retry is cheaper than four orphaned images.
     """
     stack["lambda_client"].invoke.side_effect = RuntimeError("AccessDeniedException")
 
     resp, body = _run(async_mode=True)
 
-    assert resp["statusCode"] == 200
-    stack["get_handler"].assert_called()
-    assert body["models"]["gemini"]["status"] == "completed"
+    assert resp["statusCode"] == 503
+    assert body["error"] == "GENERATION_DISPATCH_FAILED"
+    stack["get_handler"].assert_not_called(), "no provider may run behind a 504"
+
+
+def test_an_invoke_failure_refunds_the_quota_it_consumed(stack):
+    """Quota is consumed during validation, before the dispatch is attempted.
+
+    Without this the caller pays their whole window for a request that never
+    reached a provider -- the exact case _refund_usage's INVARIANT names.
+    """
+    stack["lambda_client"].invoke.side_effect = RuntimeError("AccessDeniedException")
+
+    with patch("lambda_function._refund_usage") as mock_refund:
+        resp, _ = _run(async_mode=True)
+
+    assert resp["statusCode"] == 503
+    assert mock_refund.called
+    assert mock_refund.call_args[0][1] == "generate"
 
 
 def test_an_invoke_failure_is_logged_at_error(stack):
@@ -287,18 +307,20 @@ def test_an_invoke_failure_is_logged_at_error(stack):
     assert mock_error.called, "a silent fallback hides a missing IAM grant forever"
 
 
-def test_a_missing_function_name_falls_back_to_inline(monkeypatch, stack):
+def test_a_missing_function_name_returns_503_in_async_mode(monkeypatch, stack):
     """AWS_LAMBDA_FUNCTION_NAME is set by the runtime; outside Lambda it is absent.
 
-    That is exactly when running inline is right -- `sam local`, a direct
-    invocation, a test harness.
+    Outside Lambda the right answer is to run synchronously, but that is what
+    GENERATE_ASYNC=false selects -- see the sync-mode tests below. Asking for
+    async and silently getting a 70s inline run behind a 29s ceiling is not a
+    fallback, so this reports the misconfiguration instead.
     """
     monkeypatch.delenv("AWS_LAMBDA_FUNCTION_NAME", raising=False)
 
     resp, body = _run(async_mode=True)
 
-    assert resp["statusCode"] == 200
-    assert body["models"]["gemini"]["status"] == "completed"
+    assert resp["statusCode"] == 503
+    assert body["error"] == "GENERATION_DISPATCH_FAILED"
 
 
 # ---- Synchronous mode ----
@@ -684,3 +706,37 @@ def test_sync_mode_calls_the_cost_meter(stack):
     _run(async_mode=False)
 
     stack["cost_meter"].record_models.assert_called_once()
+
+
+# ---- Invoke transport ----
+
+
+def test_the_invoke_client_makes_exactly_one_attempt():
+    """A retried Event invoke can have BOTH copies delivered.
+
+    An Event invoke is not idempotent from the caller's side: if Lambda accepts
+    it but the 202 is lost or lands after read_timeout, botocore's retry sends
+    the same payload again and two workers run run_generation against one
+    sessionId -- eight iterations instead of four, every provider called and
+    billed twice, and the cost meter double-counting. Losing the retry costs a
+    single 503 the caller can retry; keeping it costs real money and corrupts
+    the session.
+    """
+    import lambda_function
+
+    assert lambda_function._INVOKE_MAX_ATTEMPTS == 1
+
+
+def test_the_invoke_client_config_carries_that_cap():
+    """The constant is only worth anything if it reaches botocore."""
+    import lambda_function
+
+    lambda_function._lambda_client = None
+    try:
+        cfg = lambda_function._get_lambda_client().meta.config
+    except Exception as exc:  # pragma: no cover - only if no credentials at all
+        pytest.skip(f"no local AWS config to build a client: {exc}")
+    finally:
+        lambda_function._lambda_client = None
+
+    assert cfg.retries["total_max_attempts"] == 1

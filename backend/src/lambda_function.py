@@ -120,11 +120,18 @@ _lambda_client = None
 # The Invoke that hands work to the worker is itself on the request path, so it
 # is bounded for the same reason the CloudWatch client is (ops/metrics.py): an
 # unbounded call would put the request back inside the gateway ceiling it
-# exists to escape. Two attempts, not more -- a retried Event invocation that
-# both attempts deliver would generate the images twice.
+# exists to escape.
+#
+# Exactly one attempt. An Event invoke is not idempotent from the caller's
+# side: if Lambda accepts it but the 202 is lost or arrives after read_timeout,
+# a botocore retry sends the same payload again and BOTH can be delivered. Two
+# workers then run run_generation against one sessionId -- eight iterations
+# instead of four, every provider called and billed twice, and _cost_meter
+# double-counting. Retrying buys a second chance at a transport blip; losing
+# that chance costs one inline fallback. Double-generating costs real money.
 _INVOKE_CONNECT_TIMEOUT_SECONDS = 2
 _INVOKE_READ_TIMEOUT_SECONDS = 5
-_INVOKE_MAX_ATTEMPTS = 2
+_INVOKE_MAX_ATTEMPTS = 1
 
 
 def _get_lambda_client():
@@ -448,7 +455,15 @@ def _refund_usage(
     if tier_ctx is None:
         return
 
-    if config.credits_enabled:
+    # `anon` is metered by a call counter, never by credits -- `_enforce_anon`
+    # increments generateCount/refineCount on `anon#<ip_hash>` and no credit is
+    # ever debited. So it takes the counter path below whatever
+    # `credits_enabled` says. Returning early for it here made every anon
+    # refund inert in exactly the deployment where anon is the only tier there
+    # is (CREDITS_ENABLED=true with AUTH_ENABLED=false), while
+    # `_REFUND_COUNTERS` carried anon rows showing the refund was intended.
+    # `guest` is excluded separately and deliberately: nothing to refund to.
+    if config.credits_enabled and tier_ctx.tier != "anon":
         if tier_ctx.tier not in ("free", "paid"):
             return
         amount = config.credit_cost(endpoint_kind)
@@ -1356,7 +1371,29 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
                 validated.tier.new_guest_token, config.guest_window_seconds
             )
 
-        if config.generate_async and _dispatch_generation_async(worker_payload, correlation_id):
+        if config.generate_async and not _dispatch_generation_async(worker_payload, correlation_id):
+            # Async was asked for and the Invoke did not land. Falling through
+            # to the inline path looks like graceful degradation and is not:
+            # run_generation carries generate_dispatch_budget_seconds (~70s)
+            # and this route declares a 29s integration timeout, so the gateway
+            # returns 504 at 29s while the function keeps going. The caller
+            # never receives the sessionId, four providers generate and bill
+            # for images that are now unreachable, and no refund fires because
+            # run_generation only refunds when EVERY model errors.
+            #
+            # Failing fast costs one retry. The cause -- a missing
+            # lambda:InvokeFunction grant, or throttling -- is an operator fact
+            # already logged at ERROR by _dispatch_generation_async.
+            #
+            # Narrowed to generate_async deliberately: when the operator has
+            # chosen synchronous mode the inline path below is the intended
+            # behaviour, not a fallback, and tests/backend/e2e depends on it.
+            _refund_usage(validated.tier, "generate", correlation_id)
+            return response(
+                503, error_responses.generation_dispatch_failed(), set_cookie=set_cookie
+            )
+
+        if config.generate_async:
             # No `session` key, deliberately. GenerationPanel's `else` branch
             # builds a placeholder session and hands over to useSessionPolling,
             # which is the path the client already took whenever a session was
@@ -1432,6 +1469,13 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
         return response(200, payload, set_cookie=set_cookie)
 
     except Exception as e:
+        # Quota was consumed in _parse_and_validate_request, so this 500 owes a
+        # refund like every other non-2xx below that point -- see the INVARIANT
+        # on _refund_usage. create_session raising on an S3 blip, or the worker
+        # payload failing to serialise, otherwise cost a free user their whole
+        # FREE_WINDOW_SECONDS for an image they never got. `validated` is bound
+        # before the try, so it is safe to read here.
+        _refund_usage(validated.tier, "generate", correlation_id)
         StructuredLogger.error(
             f"Error in handle_generate: {e}",
             correlation_id=correlation_id,
@@ -1599,17 +1643,17 @@ def _handle_refinement(
         prompt = validated.prompt
         start_time = time.time()
 
-        iter_kwargs = add_iteration_kwargs or {}
-        iteration_index = session_manager.add_iteration(
-            session_id,
-            model_name,
-            prompt,
-            **iter_kwargs,
-        )
-
         # Per-model daily cap, consumed BEFORE dispatching to the provider.
         # Previously only /generate consumed slots, so refinement traffic could
         # run a model far past its ceiling.
+        #
+        # Ordered before `add_iteration` for the same reason the runtime kill
+        # switch above it is: this branch returns without ever calling
+        # `_handle_failed_result`, so an iteration row written first would stay
+        # `in_progress` forever. `_compute_model_status` would report the model
+        # in progress, `_compute_session_status` the session, and the client
+        # would poll a spinner that never resolves while one of the model's
+        # MAX_ITERATIONS slots stayed spent on work that never ran.
         try:
             slot_ok = _model_counter_service.consume_model_slot(model_name, int(time.time()))
         except Exception as e:
@@ -1622,17 +1666,36 @@ def _handle_refinement(
             _refund_usage(validated.tier, refund_kind, correlation_id)
             return response(429, error_responses.model_cost_ceiling())
 
+        iter_kwargs = add_iteration_kwargs or {}
+        iteration_index = session_manager.add_iteration(
+            session_id,
+            model_name,
+            prompt,
+            **iter_kwargs,
+        )
+
         config_dict = get_model_config_dict(model_config)
-        # The budget this provider call has to fit inside, set on the
-        # refinement path only. /iterate and /outpaint are answered inside the
-        # HTTP request, so their whole chain sits under the 29s gateway
-        # ceiling. /generate deliberately has no such key: after Phase 3 its
-        # dispatch runs in a worker invocation with the function's 900s
-        # timeout and no gateway in front of it, so it keeps
-        # api_client_timeout. That asymmetry is the non-obvious part -- the
-        # same provider handler is bounded differently depending on which
-        # invocation it is running in.
-        config_dict["timeout"] = config.sync_dispatch_budget_seconds
+        # The budget this provider call has to fit inside. It is the same
+        # budget /generate uses, and deliberately NOT the 29s gateway ceiling.
+        #
+        # Sizing it to the gateway looks right -- /iterate and /outpaint are
+        # answered inside the HTTP request -- but it does not survive contact
+        # with the per-provider subdivision in utils/clients.py. A 25s budget
+        # becomes a 5s Bedrock read timeout, 5s per Firefly call and 12s for
+        # OpenAI, because each provider reserves for its own worst case
+        # (retries, token round trip, image download). Image refinement
+        # routinely takes 10-40s, so those bounds do not shorten slow
+        # refinements: they fail all of them, mark the iteration failed, and
+        # still pay the provider, which generated the image anyway.
+        #
+        # Overrunning the gateway is the lesser evil and is already survivable.
+        # `add_iteration` has written the row, the provider result is stored
+        # against it, and `useSessionPolling` observes the outcome on /status
+        # regardless of what the original POST returned. A 504 there costs a
+        # stale error toast; a 5s timeout costs the image and the money. The
+        # durable fix is to dispatch refinement to a worker the way Phase 3 did
+        # for /generate, which removes the ceiling instead of negotiating.
+        config_dict["timeout"] = config.generate_dispatch_budget_seconds
         handler = get_handler_fn(model_config.provider)
         handler_args = build_handler_args_fn(
             config_dict,
@@ -2041,10 +2104,24 @@ def handle_gallery_list(event: LambdaEvent, correlation_id: str | None = None) -
         galleries.sort(key=lambda g: g["id"], reverse=True)
 
         body: dict[str, Any] = {"galleries": galleries, "total": len(galleries)}
-        if has_more and galleries:
-            # The oldest id on this page: the next page is everything strictly
-            # older than it.
-            body["nextCursor"] = galleries[-1]["id"]
+        if has_more and gallery_folders:
+            # The oldest id this page ASKED for, not the oldest that survived
+            # expansion. The two differ whenever a per-folder LIST throws, and
+            # deriving the boundary from the survivors is wrong in both
+            # directions: a failure in the middle of the page leaves a folder
+            # newer than the cursor and therefore excluded from every later
+            # page, while a failure at the tail moves the cursor forward and
+            # re-serves folders the caller already has.
+            #
+            # Anchoring to the requested slice makes the boundary independent
+            # of which expansions happened to succeed: no duplicates, and the
+            # only loss is a folder missing from the run in which its LIST
+            # failed. `dropped` reports that rather than letting `total`
+            # quietly under-count.
+            body["nextCursor"] = gallery_folders[-1]
+        dropped = len(gallery_folders) - len(galleries)
+        if dropped:
+            body["dropped"] = dropped
         return response(200, body)
 
     except Exception as e:

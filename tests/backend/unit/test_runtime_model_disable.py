@@ -355,3 +355,68 @@ def test_the_runtime_config_read_lives_in_exactly_one_place(wired):
 
     source = inspect.getsource(wired)
     assert source.count("get_model_runtime_config(") == 1
+
+
+# --------------------------------------------------------------------------
+# Per-model cap ordering
+# --------------------------------------------------------------------------
+
+
+def test_a_capped_model_refuses_refinement_without_writing_an_iteration(wired):
+    """The cap 429 must be ordered like the kill switch: before add_iteration.
+
+    This branch returns without ever calling `_handle_failed_result`, so a row
+    written first stays `in_progress` forever. `_compute_model_status` then
+    reports the model in progress and `_compute_session_status` the session,
+    so the client polls a spinner that never resolves -- while one of the
+    model's MAX_ITERATIONS slots stays spent on work that never ran.
+    """
+    session, sm, img, cm, gmc, gih, goh, counters = _refinement_seams(wired)
+
+    with sm as m_sm, img as m_img, cm, gmc, gih as m_gih, goh, counters as m_counters:
+        m_sm.get_session.return_value = session
+        m_sm.add_iteration.return_value = 1
+        m_img.get_image_bytes.return_value = b"\x89PNG"
+        m_counters.consume_model_slot.return_value = False
+
+        resp = wired.lambda_handler(_iterate_event(), None)
+
+        assert resp["statusCode"] == 429
+        assert json.loads(resp["body"])["error"] == "MODEL_COST_CEILING"
+        assert m_gih.call_count == 0, "a capped model still reached a provider"
+        assert m_sm.add_iteration.call_count == 0, (
+            "an iteration row was written for a refinement that never ran, "
+            "and nothing will ever move it out of in_progress"
+        )
+
+
+def test_a_capped_model_refuses_outpaint_without_writing_an_iteration(wired):
+    session, sm, img, cm, gmc, gih, goh, counters = _refinement_seams(wired)
+
+    with sm as m_sm, img as m_img, cm, gmc, gih, goh as m_goh, counters as m_counters:
+        m_sm.get_session.return_value = session
+        m_sm.add_iteration.return_value = 1
+        m_img.get_image_bytes.return_value = b"\x89PNG"
+        m_counters.consume_model_slot.return_value = False
+
+        resp = wired.lambda_handler(_outpaint_event(), None)
+
+        assert resp["statusCode"] == 429
+        assert m_goh.call_count == 0
+        assert m_sm.add_iteration.call_count == 0
+
+
+def test_an_uncapped_model_still_writes_its_iteration(wired):
+    """The guard above must not stop a normal refinement recording its work."""
+    session, sm, img, cm, gmc, gih, goh, counters = _refinement_seams(wired)
+
+    with sm as m_sm, img as m_img, cm, gmc, gih as m_gih, goh, counters as m_counters:
+        m_sm.get_session.return_value = session
+        m_sm.add_iteration.return_value = 1
+        m_img.get_image_bytes.return_value = b"\x89PNG"
+        m_counters.consume_model_slot.return_value = True
+        m_gih.return_value = lambda *a, **k: {"status": "success", "image": "aW1n"}
+
+        wired.lambda_handler(_iterate_event(), None)
+
+        assert m_sm.add_iteration.call_count == 1

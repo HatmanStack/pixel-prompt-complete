@@ -331,11 +331,20 @@ export async function iterateMultiple(
  * it to 20, so the bound is the server's guarantee rather than this client's
  * good behaviour.
  */
-export async function listSessions(limit?: number): Promise<SessionGalleryListResponse> {
-  const query = limit === undefined ? '' : `?limit=${limit}`;
-  return apiFetch<SessionGalleryListResponse>(`${API_ROUTES.GALLERY_LIST}${query}`, {
-    method: 'GET',
-  });
+export async function listSessions(
+  limit?: number,
+  cursor?: string,
+): Promise<SessionGalleryListResponse> {
+  const params = new URLSearchParams();
+  if (limit !== undefined) params.set('limit', String(limit));
+  if (cursor) params.set('cursor', cursor);
+  const query = params.toString();
+  return apiFetch<SessionGalleryListResponse>(
+    `${API_ROUTES.GALLERY_LIST}${query ? `?${query}` : ''}`,
+    {
+      method: 'GET',
+    },
+  );
 }
 
 /**

@@ -11,6 +11,30 @@ import boto3
 import pytest
 from moto import mock_aws
 
+
+@pytest.fixture(autouse=True)
+def _synchronous_dispatch(monkeypatch):
+    """This module exercises the dispatch loop, not the transport.
+
+    GENERATE_ASYNC defaults true, and /generate now returns 503 when the
+    worker Invoke does not land instead of silently running the dispatch
+    inline -- inline runs a ~70s budget behind a 29s gateway timeout, so the
+    caller gets a 504 and never learns the sessionId. The Invoke never lands
+    under test (AWS_LAMBDA_FUNCTION_NAME is unset), so these tests pin the
+    synchronous path they were written for. Patched on the config module
+    rather than os.environ because config reads the variable once at import.
+    The asynchronous path is covered in test_generate_async_dispatch.py.
+    """
+    import config
+
+    # Both, deliberately. `auth_env` calls importlib.reload(config), which
+    # rebuilds every module-level binding and would discard a bare setattr;
+    # the environment variable survives the reload because config reads it
+    # there. The setattr covers the tests that never trigger a reload.
+    monkeypatch.setenv("GENERATE_ASYNC", "false")
+    monkeypatch.setattr(config, "generate_async", False)
+
+
 os.environ.setdefault("S3_BUCKET", "test-bucket")
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 os.environ.setdefault("AWS_ACCESS_KEY_ID", "testing")

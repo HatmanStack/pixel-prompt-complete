@@ -5,6 +5,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { listSessions, getSessionDetail } from '@/api/client';
+import type { SessionGalleryListResponse } from '@/types/api';
 
 /**
  * How many galleries the browser asks for. The backend clamps to 1..50 and
@@ -42,6 +43,11 @@ interface UseGalleryReturn {
   refresh: () => void;
   autoRefresh: boolean;
   setAutoRefresh: (value: boolean) => void;
+  /** True while a loadMore is in flight, so the control can disable itself. */
+  loadingMore: boolean;
+  /** True when the last response carried a cursor, i.e. more pages exist. */
+  hasMore: boolean;
+  loadMore: () => Promise<void>;
 }
 
 /**
@@ -53,9 +59,20 @@ function useGallery(): UseGalleryReturn {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  const toItems = (response: SessionGalleryListResponse): GalleryItem[] =>
+    (response.galleries || []).map((gallery): GalleryItem => ({
+      id: gallery.id,
+      timestamp: gallery.timestamp,
+      imageCount: gallery.imageCount,
+      previewUrl: gallery.previewUrl,
+      preview: gallery.previewUrl,
+    }));
 
   /**
-   * Fetch list of all galleries
+   * Fetch the first page of galleries, replacing whatever is loaded.
    */
   const fetchGalleries = useCallback(async () => {
     setLoading(true);
@@ -64,24 +81,51 @@ function useGallery(): UseGalleryReturn {
     try {
       const response = await listSessions(GALLERY_PAGE_SIZE);
 
-      // Map API response to GalleryItem using CloudFront preview URLs
-      const galleriesWithPreviews = (response.galleries || []).map((gallery): GalleryItem => ({
-        id: gallery.id,
-        timestamp: gallery.timestamp,
-        imageCount: gallery.imageCount,
-        previewUrl: gallery.previewUrl,
-        preview: gallery.previewUrl,
-      }));
-
-      setGalleries(galleriesWithPreviews);
+      setGalleries(toItems(response));
+      // The endpoint is paginated: it returns at most `limit` folders and a
+      // cursor when more exist. Dropping that cursor made every gallery past
+      // the first page unreachable from the app.
+      setNextCursor(response.nextCursor ?? null);
     } catch (err) {
       console.error('Error fetching galleries:', err);
       setError(err instanceof Error ? err.message : 'Failed to load galleries');
       setGalleries([]);
+      setNextCursor(null);
     } finally {
       setLoading(false);
     }
   }, []);
+
+  /**
+   * Append the next page. No-op when no cursor is held or one is in flight.
+   */
+  const loadMore = useCallback(async () => {
+    if (!nextCursor || loadingMore) return;
+
+    setLoadingMore(true);
+    setError(null);
+
+    try {
+      const response = await listSessions(GALLERY_PAGE_SIZE, nextCursor);
+
+      // De-duplicate by id. The backend anchors its cursor to the folders it
+      // asked for rather than the ones that survived expansion, so overlap
+      // should not occur -- but a gallery rendered twice is a visible bug and
+      // guarding costs one Set.
+      setGalleries((prev) => {
+        const seen = new Set(prev.map((g) => g.id));
+        return [...prev, ...toItems(response).filter((g) => !seen.has(g.id))];
+      });
+      setNextCursor(response.nextCursor ?? null);
+    } catch (err) {
+      console.error('Error loading more galleries:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load more galleries');
+      // Cursor deliberately retained: the page that failed is still the next
+      // one to fetch, so the control stays live and the user can retry.
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [nextCursor, loadingMore]);
 
   /**
    * Load a specific gallery's images
@@ -158,6 +202,9 @@ function useGallery(): UseGalleryReturn {
     refresh,
     autoRefresh,
     setAutoRefresh,
+    loadingMore,
+    hasMore: nextCursor !== null,
+    loadMore,
   };
 }
 

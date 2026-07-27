@@ -264,6 +264,38 @@ def test_scan_users_exhausting_the_table_returns_no_cursor(users_table):
     assert cursor is None
 
 
+def test_scan_users_returns_no_cursor_when_the_limit_exactly_divides_the_table(
+    users_table,
+):
+    """An exactly-full final page is the END, not an invitation to fetch again.
+
+    `len(collected) >= limit` is also true when the scan exhausted the table
+    and its size happens to divide by the page size. Returning a cursor there
+    fabricates a page that always comes back empty: the admin UI renders an
+    enabled "Next", the operator clicks it, and gets nothing. The end-of-list
+    signal that a `None` cursor carries is lost for every page size that
+    divides the user count.
+    """
+    repo = _repo(users_table)
+    _seed_mixed(repo, real=10)
+
+    page, cursor = repo.scan_users(limit=10, max_pages=50)
+
+    assert len(page) == 10
+    assert cursor is None, "an exactly-full last page offered a phantom next page"
+
+
+def test_scan_users_still_returns_a_cursor_when_rows_remain(users_table):
+    """The guard above must not cost a real cursor when there IS more to read."""
+    repo = _repo(users_table)
+    _seed_mixed(repo, real=11)
+
+    page, cursor = repo.scan_users(limit=10, max_pages=50)
+
+    assert len(page) == 10
+    assert cursor == {"userId": page[-1]["userId"]}
+
+
 def test_scan_users_cursor_is_the_last_returned_item_not_the_last_scanned(users_table):
     """The cursor must key off an item the caller actually saw.
 

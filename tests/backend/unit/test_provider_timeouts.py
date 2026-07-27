@@ -506,8 +506,18 @@ def _recorder(seen):
     return _handler
 
 
-def test_refinement_hands_the_provider_the_synchronous_budget():
-    """/iterate is answered inside the HTTP request, so 60s cannot be its bound."""
+def test_refinement_hands_the_provider_the_dispatch_budget():
+    """/iterate gets the same budget as /generate, NOT the gateway ceiling.
+
+    Sizing it to the 29s gateway looks right and starves every provider: the
+    subdivision in utils/clients.py turns a 25s budget into a 5s Bedrock read
+    timeout, 5s per Firefly call and 12s for OpenAI, because each reserves for
+    retries, a token round trip and an image download. Refinement routinely
+    takes 10-40s, so those bounds fail all of it while the provider generates
+    and bills anyway. Overrunning the gateway costs a stale error toast; the
+    caller still sees the result, because add_iteration has written the row and
+    useSessionPolling reads the outcome off /status.
+    """
     import json
     from unittest.mock import patch
 
@@ -569,7 +579,39 @@ def test_refinement_hands_the_provider_the_synchronous_budget():
 
     assert resp["statusCode"] == 200, resp
     assert seen, "the provider handler was never reached"
-    assert seen[0]["timeout"] == config.sync_dispatch_budget_seconds
+    assert seen[0]["timeout"] == config.generate_dispatch_budget_seconds
+
+
+def test_the_refinement_budget_does_not_starve_any_provider():
+    """The budget is only correct if what it divides down to is usable.
+
+    Guards the arithmetic, not the assignment: a future budget change that
+    looks harmless can still push a per-call timeout under the time an image
+    edit takes, and the failure is silent -- every refinement 500s and every
+    provider still bills. 10s is the floor a real edit needs, well under the
+    10-40s such calls actually take.
+    """
+    import config
+    from utils.clients import (
+        bedrock_read_timeout,
+        firefly_call_timeout,
+        gemini_call_timeout,
+        openai_call_timeout,
+    )
+
+    budget = config.generate_dispatch_budget_seconds
+    floor = 10
+
+    derived = {
+        "gemini": gemini_call_timeout(budget),
+        "openai": openai_call_timeout(budget),
+        "firefly": firefly_call_timeout(budget),
+        "nova": bedrock_read_timeout(budget),
+    }
+    starved = {k: v for k, v in derived.items() if v < floor}
+    assert not starved, (
+        f"per-call timeouts below {floor}s cannot complete an image edit: {starved}"
+    )
 
 
 def test_generation_dispatch_keeps_the_larger_asynchronous_budget():

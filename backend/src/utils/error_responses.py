@@ -255,6 +255,32 @@ def spend_guard_degraded(**kwargs) -> Dict[str, Any]:
     )
 
 
+def generation_dispatch_failed(**kwargs) -> Dict[str, Any]:
+    """503 Asynchronous generation was requested but the worker Invoke did not land.
+
+    Distinct from ``INTERNAL_SERVER_ERROR`` because the cause is a deployment
+    fact, not a bug in the request: the ``lambda:InvokeFunction`` grant is
+    absent, or the account is throttling. Both are operator-fixable and both
+    clear on their own, so the client should retry rather than treat the
+    prompt as rejected.
+
+    Returned instead of silently running the dispatch inline. Inline is the
+    right fallback only when the operator chose synchronous mode; when they
+    asked for async, the inline path runs a ~70s budget behind a 29s gateway
+    integration timeout, so the caller gets a 504 and never learns the
+    sessionId while four providers generate and bill for images nobody can
+    reach.
+    """
+    return error_response(
+        error_code="GENERATION_DISPATCH_FAILED",
+        message=(
+            "Service is temporarily unavailable: generation could not be "
+            "queued right now. Please try again shortly."
+        ),
+        **kwargs,
+    )
+
+
 def age_verification_required(**kwargs) -> Dict[str, Any]:
     """403 Caller has not affirmed they are 18 or older.
 

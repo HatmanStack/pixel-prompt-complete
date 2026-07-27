@@ -268,6 +268,25 @@ def test_refund_covers_anon_refinement(wired):
     assert _counter(wired._user_repo, "anon#hash", "refineCount") == 0
 
 
+def test_refund_covers_anon_even_with_credits_enabled(wired, monkeypatch):
+    """The deployment where anon is the ONLY tier is the one that had no refund.
+
+    `anon` is metered by a call counter -- `_enforce_anon` increments
+    generateCount on anon#<ip_hash> -- and never holds a credit balance. The
+    credits branch returned early for every tier outside (free, paid), so with
+    CREDITS_ENABLED=true and AUTH_ENABLED=false, where every caller resolves to
+    anon, no refund could ever fire. `_REFUND_COUNTERS` carried anon rows the
+    whole time, showing the refund was intended and simply unreachable.
+    """
+    monkeypatch.setattr(wired.config, "credits_enabled", True)
+    _seed(wired._user_repo, "anon#hash", generateCount=1, windowStart=_NOW)
+
+    with patch.object(wired.time, "time", return_value=_NOW):
+        wired._refund_usage(_ctx("anon", "anon#hash"), "generate")
+
+    assert _counter(wired._user_repo, "anon#hash", "generateCount") == 0
+
+
 def test_refund_is_a_no_op_for_a_guest_on_the_counter_path(wired):
     """A guest identity is a cookie delete away, so a refund is a free retry."""
     _seed(wired._user_repo, "guest#tok", generateCount=1, windowStart=_NOW)
@@ -431,3 +450,45 @@ def test_a_free_user_whose_generation_succeeded_keeps_paying_for_it(wired):
     assert first["statusCode"] == 200
     assert used_after_first == 1
     assert second["statusCode"] == 429
+
+
+def test_an_unhandled_error_in_handle_generate_refunds_the_quota(wired):
+    """The one non-2xx path below quota enforcement that did not refund.
+
+    _refund_usage's INVARIANT says every path returning non-2xx after quota
+    enforcement calls it exactly once, and every other early exit in
+    handle_generate obeys it -- the degraded spend guard, no models enabled,
+    every model capped. The outer `except Exception` did not, so a free user
+    with FREE_GENERATE_LIMIT=1 lost their whole window to an S3 blip during
+    create_session, having received no image.
+    """
+    with (
+        patch.object(wired, "_parse_and_validate_request") as mock_validate,
+        patch.object(wired, "_daily_spend_exceeded", return_value=False),
+        patch.object(wired, "_spend_ceiling_exceeded", return_value=(False, "")),
+        patch.object(wired, "_refund_usage") as mock_refund,
+        patch.object(wired, "session_manager") as mock_sm,
+    ):
+        mock_validate.return_value = (
+            wired.ValidatedRequest(
+                body={"prompt": "a cat"},
+                ip="1.2.3.4",
+                prompt="a cat",
+                tier=_ctx("free", "user-1"),
+            ),
+            None,
+        )
+        mock_sm.create_session.side_effect = RuntimeError("s3 is having a day")
+
+        resp = wired.handle_generate(
+            {
+                "body": json.dumps({"prompt": "a cat"}),
+                "requestContext": {"http": {"sourceIp": "1.2.3.4"}},
+                "headers": {},
+            },
+            "corr-boom",
+        )
+
+    assert resp["statusCode"] == 500
+    assert mock_refund.called, "a 500 after quota enforcement kept the charge"
+    assert mock_refund.call_args[0][1] == "generate"

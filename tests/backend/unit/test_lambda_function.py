@@ -12,6 +12,25 @@ import boto3
 import pytest
 from moto import mock_aws
 
+
+@pytest.fixture(autouse=True)
+def _synchronous_dispatch(monkeypatch):
+    """This module exercises the dispatch loop, not the transport.
+
+    GENERATE_ASYNC defaults true, and /generate now returns 503 when the
+    worker Invoke does not land instead of silently running the dispatch
+    inline -- inline runs a ~70s budget behind a 29s gateway timeout, so the
+    caller gets a 504 and never learns the sessionId. The Invoke never lands
+    under test (AWS_LAMBDA_FUNCTION_NAME is unset), so these tests pin the
+    synchronous path they were written for. Patched on the config module
+    rather than os.environ because config reads the variable once at import.
+    The asynchronous path is covered in test_generate_async_dispatch.py.
+    """
+    import config
+
+    monkeypatch.setattr(config, "generate_async", False)
+
+
 # Ensure env vars are set before import
 os.environ.setdefault('S3_BUCKET', 'test-bucket')
 os.environ.setdefault('AWS_DEFAULT_REGION', 'us-east-1')
@@ -812,6 +831,37 @@ class TestGalleryListBound:
         assert cursor == first_ids[-1]
         assert set(first_ids).isdisjoint(second_ids)
         assert max(second_ids) < min(first_ids)
+
+    def test_a_folder_whose_listing_fails_does_not_move_the_cursor(self, mocks):
+        """The cursor must anchor to what was ASKED for, not what survived.
+
+        A per-folder LIST that throws is logged and its entry omitted. Deriving
+        the boundary from the survivors is wrong in both directions: a failure
+        mid-page leaves a folder newer than the cursor and therefore excluded
+        from every later page, and a failure at the tail moves the cursor
+        forward so the next page re-serves folders the caller already has.
+        """
+        pool = self._seed(mocks)
+        # _seed writes 2026-01-01-00-00-00 .. -59; newest-first, a page of 5
+        # ends on -55, which is where the cursor must land.
+        oldest_on_page = "2026-01-01-00-00-55"
+
+        def _fail_oldest(folder):
+            if folder == oldest_on_page:
+                raise RuntimeError("s3 throttled")
+            return ["sessions/x/img.png"]
+
+        mocks["image_storage"].list_gallery_images.side_effect = _fail_oldest
+        resp = self._get({"limit": "5"})
+        pool.shutdown(wait=True)
+
+        body = _body(resp)
+        assert len(body["galleries"]) == 4, "the failed folder should be omitted"
+        assert body["dropped"] == 1, "a silent omission makes total under-count"
+        assert body["nextCursor"] == oldest_on_page, (
+            "the cursor moved to the oldest SURVIVOR, so the next page will "
+            "re-serve folders this page already returned"
+        )
 
     def test_next_cursor_is_absent_on_the_last_page(self, mocks):
         pool = self._seed(mocks, count=3)

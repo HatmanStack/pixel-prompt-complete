@@ -650,6 +650,26 @@ Resources:
       MemorySize: 3008
       Timeout: 900
       ReservedConcurrentExecutions: 10
+      # The asynchronous /generate hand-off is an Event invocation, and an
+      # Event invocation that Lambda accepts but cannot place -- the account
+      # throttling against the reservation above -- is retried on Lambda's own
+      # schedule and then DROPPED. A dropped event leaves a session created, a
+      # 202 already returned, quota consumed, and no worker to write a result
+      # or refund it, so the client polls a session that never terminates.
+      #
+      # Retries here are safe in a way a botocore-level retry of the Invoke is
+      # not: Lambda re-delivers only when the invocation did not run to
+      # completion, and the worker branch catches every exception and acks, so
+      # a partial generation is never re-run. A retried *send*, by contrast,
+      # can have both copies delivered and generate the images twice -- which
+      # is why _INVOKE_MAX_ATTEMPTS is 1.
+      #
+      # MaximumEventAgeInSeconds bounds staleness: past it the caller is long
+      # gone and generating four images would bill for output nobody can be
+      # waiting for.
+      EventInvokeConfig:
+        MaximumRetryAttempts: 2
+        MaximumEventAgeInSeconds: 900
       Environment:
         Variables:
           # Model Configuration

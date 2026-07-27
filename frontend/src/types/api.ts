@@ -127,7 +127,18 @@ export interface GalleryListItem {
 
 export interface SessionGalleryListResponse {
   galleries: GalleryListItem[];
+  /** Count of galleries in THIS page, not the size of the collection. */
   total: number;
+  /**
+   * Opaque cursor for the next page. Absent on the last page — its presence
+   * is the only "there is more" signal the endpoint gives.
+   */
+  nextCursor?: string;
+  /**
+   * Galleries this page asked for whose listing failed and were omitted.
+   * Present only when non-zero, so `total` is never silently short.
+   */
+  dropped?: number;
 }
 
 // Gallery detail response (matches backend handle_gallery_detail)

@@ -386,7 +386,17 @@ class UserRepository:
             # Resume from the last item the caller actually receives, so the
             # surplus this truncation drops is returned next time rather than
             # skipped.
-            return page, {"userId": page[-1]["userId"]}
+            #
+            # Only when something actually remains, though. `>= limit` is also
+            # true when the table was exhausted and its size happens to divide
+            # by the page size, and handing back a cursor there fabricates a
+            # final page that always comes back empty -- the admin UI renders
+            # an enabled "Next" for it. A cursor is warranted when this
+            # truncation dropped surplus rows, or when the scan stopped with
+            # more table left to read.
+            if len(collected) > limit or page_last_key:
+                return page, {"userId": page[-1]["userId"]}
+            return page, None
 
         # Under the limit: either the table is exhausted (no key) or the page
         # ceiling stopped us early (key present, short page).
