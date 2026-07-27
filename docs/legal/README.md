@@ -35,9 +35,11 @@ Three conditions attach, detailed in
    `backend/src/lambda_function.py`, called from request validation on
    `/generate` and refusing with `403` until the caller sends
    `ageAffirmed: true`. `AGE_GATE_ENABLED` (`backend/src/config.py:98`) defaults
-   **on**, the only flag in that file that does, so an operator who configures
-   nothing gets the compliant behaviour. Refinement is not separately gated
-   because it requires a session, which required a generation, which required
+   **on**, where the other compliance and abuse-prevention flags beside it —
+   `CAPTCHA_ENABLED`, `SES_ENABLED`, `ADMIN_ENABLED`, `BILLING_ENABLED` — all
+   default off. So an operator who configures nothing gets the compliant
+   behaviour. Refinement is not separately gated because it requires a session,
+   which required a generation, which required
    this. An affirmation still falls short of the "not likely to be accessed by"
    test on its own; it is the part of that test the Service can implement.
 3. **Nova Canvas invisibly watermarks every image it generates.** Not optional.

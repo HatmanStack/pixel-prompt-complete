@@ -19,7 +19,7 @@ released. No tag has been created; that is the operator's call.
 - Quota refunds now apply on the default configuration. `_refund_credits` became `_refund_usage` and decrements the tier counter when `CREDITS_ENABLED=false`, which is the default — previously the entire refund path was inert and a free user whose generation failed lost their hourly allowance
 - Paid-tier generations are private; every other tier is public. Visibility is fixed at session creation and recorded on `status.json` alongside `ownerId`, and private objects are written under a prefix the CloudFront origin grant does not cover, so they have no unsigned URL at all
 - `GLOBAL_DAILY_SPEND_CEILING_USD_MICROS` default lowered from $100/day to **$25/day**, and `ENHANCE_DAILY_SPEND_CEILING_USD_MICROS` from $5/day to **$2/day**
-- `AGE_GATE_ENABLED` defaults **on** — the only flag in `config.py` that does. Google's API terms permit use only where the service is not "likely to be accessed by" under-18s, so the compliant behaviour is what an operator gets by doing nothing
+- `AGE_GATE_ENABLED` defaults **on**, where `CAPTCHA_ENABLED`, `SES_ENABLED`, `ADMIN_ENABLED` and `BILLING_ENABLED` beside it all default off. Google's API terms permit use only where the service is not "likely to be accessed by" under-18s, so the compliant behaviour is what an operator gets by doing nothing
 - Every provider timeout is derived from the budget that binds the request. A hardcoded 60s made Firefly's four-call outpaint chain ~190s against a 70s budget
 - `/enhance` timeout is clamped under the 29s gateway ceiling rather than merely defaulted, because a 30s enhance inside a 29s ceiling cannot succeed at its limit
 - One `PutMetricData` call per generation instead of one per model
