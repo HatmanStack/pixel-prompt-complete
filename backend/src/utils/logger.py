@@ -20,12 +20,7 @@ class StructuredLogger:
     """
 
     @staticmethod
-    def log(
-        level: str,
-        message: str,
-        correlation_id: Optional[str] = None,
-        **kwargs
-    ) -> None:
+    def log(level: str, message: str, correlation_id: Optional[str] = None, **kwargs) -> None:
         """
         Log a structured message to CloudWatch.
 
@@ -39,7 +34,7 @@ class StructuredLogger:
         log_entry = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "level": level,
-            "message": message
+            "message": message,
         }
 
         # Add correlation ID if provided

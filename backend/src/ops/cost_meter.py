@@ -186,11 +186,7 @@ class CostMeter:
         item = self._repo.get_user(key)
         if not item:
             return {"totalMicros": 0}
-        return {
-            k: int(v)
-            for k, v in item.items()
-            if k not in ("userId", "updatedAt", "ttl")
-        }
+        return {k: int(v) for k, v in item.items() if k not in ("userId", "updatedAt", "ttl")}
 
 
 def reconcile_monthly_spend(repo: Any, now: int) -> dict[str, int]:
