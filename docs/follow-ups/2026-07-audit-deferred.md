@@ -246,23 +246,28 @@ caller, on every tier.
 
 ## Declared correctness gaps
 
-### 16. `handle_generate`'s outer exception path does not refund
+### 16. A dead `/generate` worker leaves the charge consumed — RESOLVED IN PART
 
-**Finding.** `handle_generate`'s outermost `except Exception` logs and returns
-500 **without** calling `_refund_usage`, while its sibling
-`_handle_refinement` does refund on the equivalent path. Pre-existing —
-present before Phase 4 — but Phase 4 changed its blast radius: refunds used to
-be inert by default, and now they are live, so this exit can cost a user with
-`FREE_GENERATE_LIMIT=1` their whole hour.
+**Resolved.** `handle_generate`'s outermost `except Exception` now calls
+`_refund_usage` before returning 500. The double-refund this section warned
+about is handled by a `refund_owned_downstream` flag set once `run_generation`
+returns rather than by branching on `config.generate_async`: after that call
+the refund decision is already made — refund on total failure, deliberately
+none on a partial result — and the outer handler must not make it again. The
+flag is the stronger form, because it also refunds a synchronous failure that
+lands _before_ `run_generation`, which the `generate_async`-conditional form
+proposed here would have missed. Both branches are covered by tests.
 
-**Why deferred.** The fix is not unconditional. In synchronous mode
-(`GENERATE_ASYNC=false`) `run_generation` runs inside that same `try` and
-refunds on its own, so an unguarded refund here would double-refund. The safe
-form is `config.generate_async`-conditional, and it wants a test on both
-branches.
+**What remains.** On the asynchronous path the caller already holds a `202`,
+so there is no response left to attach a refund to. A worker that raises past
+its own handler therefore leaves the charge consumed. `EventInvokeConfig`
+(`MaximumRetryAttempts: 2`) covers the common case, a throttled delivery that
+never ran; it does not cover a worker that runs and dies. Closing it needs a
+compensating path — a reaper over sessions stuck in `in_progress`, or a DLQ
+consumer that refunds — neither of which exists yet.
 
-**Retire this section when** the 500 path refunds in asynchronous mode, does
-not double-refund in synchronous mode, and a test covers both.
+**Retire this section when** a session whose worker died has its charge
+returned without operator action.
 
 ## Testing
 

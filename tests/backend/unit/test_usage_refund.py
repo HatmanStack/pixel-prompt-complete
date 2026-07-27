@@ -492,3 +492,105 @@ def test_an_unhandled_error_in_handle_generate_refunds_the_quota(wired):
     assert resp["statusCode"] == 500
     assert mock_refund.called, "a 500 after quota enforcement kept the charge"
     assert mock_refund.call_args[0][1] == "generate"
+
+
+def _stub_model(name="gemini", provider="google_gemini"):
+    m = MagicMock()
+    m.name = name
+    m.provider = provider
+    return m
+
+
+def test_a_synchronous_failure_after_run_generation_does_not_double_refund(wired):
+    """run_generation owns the refund decision once it returns.
+
+    In synchronous mode it runs inside handle_generate's own `try` and refunds
+    on total failure. An unconditional refund in the outer handler would hand
+    the charge back a SECOND time when a total failure is followed by a raise
+    -- and would refund a caller who actually received images, since a partial
+    result deliberately gets no refund. The docs/follow-ups register called
+    this out before the fix landed; this is the test it asked for.
+    """
+    with (
+        patch.object(wired.config, "generate_async", False),
+        patch.object(wired, "_parse_and_validate_request") as mock_validate,
+        patch.object(wired, "_daily_spend_exceeded", return_value=False),
+        patch.object(wired, "_spend_ceiling_exceeded", return_value=(False, "")),
+        patch.object(wired, "_refund_usage") as mock_refund,
+        patch.object(wired, "session_manager") as mock_sm,
+        patch.object(wired, "get_enabled_models", return_value=[_stub_model()]),
+        patch.object(wired, "_model_runtime_disabled", return_value=False),
+        patch.object(wired, "_model_counter_service") as mock_counter,
+        patch.object(wired, "prompt_enhancer") as mock_enh,
+        patch.object(wired, "run_generation", return_value={}) as mock_run,
+        patch.object(wired, "response") as mock_response,
+    ):
+        mock_counter.consume_model_slot.return_value = True
+        mock_enh.adapt_per_model.return_value = {"gemini": "a cat"}
+        mock_validate.return_value = (
+            wired.ValidatedRequest(
+                body={"prompt": "a cat"},
+                ip="1.2.3.4",
+                prompt="a cat",
+                tier=_ctx("free", "user-1"),
+            ),
+            None,
+        )
+        mock_sm.create_session.return_value = "s1"
+        # Raise AFTER run_generation has returned and owned the decision.
+        mock_response.side_effect = [RuntimeError("serialisation blew up"), {}]
+
+        wired.handle_generate(
+            {
+                "body": json.dumps({"prompt": "a cat"}),
+                "requestContext": {"http": {"sourceIp": "1.2.3.4"}},
+                "headers": {},
+            },
+            "corr-sync-late",
+        )
+
+    assert mock_run.called, "the test must actually reach run_generation"
+    assert not mock_refund.called, (
+        "the outer handler refunded on top of run_generation's own decision"
+    )
+
+
+def test_a_synchronous_failure_before_run_generation_still_refunds(wired):
+    """The guard must not cost a refund that nothing downstream will make.
+
+    This is the case the `config.generate_async`-conditional form proposed in
+    the follow-up register would have missed: synchronous mode, but the failure
+    lands before run_generation is ever called, so no refund has happened.
+    """
+    with (
+        patch.object(wired.config, "generate_async", False),
+        patch.object(wired, "_parse_and_validate_request") as mock_validate,
+        patch.object(wired, "_daily_spend_exceeded", return_value=False),
+        patch.object(wired, "_spend_ceiling_exceeded", return_value=(False, "")),
+        patch.object(wired, "_refund_usage") as mock_refund,
+        patch.object(wired, "session_manager") as mock_sm,
+        patch.object(wired, "run_generation") as mock_run,
+    ):
+        mock_validate.return_value = (
+            wired.ValidatedRequest(
+                body={"prompt": "a cat"},
+                ip="1.2.3.4",
+                prompt="a cat",
+                tier=_ctx("free", "user-1"),
+            ),
+            None,
+        )
+        mock_sm.create_session.side_effect = RuntimeError("s3 is having a day")
+
+        resp = wired.handle_generate(
+            {
+                "body": json.dumps({"prompt": "a cat"}),
+                "requestContext": {"http": {"sourceIp": "1.2.3.4"}},
+                "headers": {},
+            },
+            "corr-sync-early",
+        )
+
+    assert resp["statusCode"] == 500
+    assert not mock_run.called
+    assert mock_refund.called, "nothing downstream had refunded, so this path owed one"

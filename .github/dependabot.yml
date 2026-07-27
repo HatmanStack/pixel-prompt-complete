@@ -32,6 +32,15 @@ updates:
   # tooling) and /tests/backend finds the test pins; neither covers this file,
   # which is why Pillow sat at 12.2.0 with 20 advisories here while
   # tests/backend/requirements.txt already asked for >=12.3.0.
+  #
+  # NOTE: this job can only edit backend/src/requirements.txt, but CI and
+  # `make lock-check` install from backend/requirements-lock.txt, which
+  # Dependabot does not know about. So a bump here lands with a stale lockfile
+  # and fails the backend job until someone runs `make relock` on the PR
+  # branch and pushes the result. That extra step is deliberate -- pointing CI
+  # at requirements.txt instead would give up reproducible installs to save a
+  # command -- but it is not discoverable, hence this comment and the
+  # `make relock` hint in lock-check's failure message.
   - package-ecosystem: pip
     directory: /backend/src
     schedule:

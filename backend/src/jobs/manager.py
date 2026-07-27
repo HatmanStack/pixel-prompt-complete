@@ -523,7 +523,14 @@ class SessionManager:
             return True
         except ClientError as e:
             code = e.response["Error"]["Code"]
-            if code in ("PreconditionFailed", "412"):
+            # ConditionalRequestConflict (409) is the other way S3 reports a
+            # lost conditional write: 412 means the ETag no longer matched,
+            # 409 means a concurrent conditional write to the same key was in
+            # flight. Both mean "another writer won", and both want the same
+            # answer -- re-read and retry. Re-raising the 409 surfaced a
+            # ClientError to the caller for what is a routine race on a busy
+            # session, which is exactly what the retry loop exists to absorb.
+            if code in ("PreconditionFailed", "412", "ConditionalRequestConflict", "409"):
                 return False
             raise
 

@@ -1,4 +1,4 @@
-.PHONY: help install test test-backend lint docs-lint format build lock-check e2e-up e2e e2e-down check
+.PHONY: help install test test-backend lint docs-lint format build lock-check relock e2e-up e2e e2e-down check
 
 # Where the Python toolchain lives. `make install` creates backend/.venv and
 # installs into it, so nothing here needs an activated environment; CI installs
@@ -83,15 +83,41 @@ build: ## Build the production frontend bundle, as CI does
 #
 # ci.yml runs this same target rather than a copy of these lines.
 lock-check: ## Check backend/requirements-lock.txt is current (needs network)
+	# Never writes the tracked file. The previous form compiled INTO
+	# backend/requirements-lock.txt and copied the original back afterwards, so
+	# any compile failure -- no network, a yanked release -- aborted before the
+	# copy-back and left the working tree file modified, turning a check into
+	# an edit.
+	#
+	# The scratch target is SEEDED with the committed lockfile first, and that
+	# is load-bearing: `uv pip compile -o FILE` reads an existing FILE as
+	# preferences and keeps its pins where they still satisfy the constraints.
+	# Compiling to an empty path instead resolves unconstrained and picks the
+	# newest of everything, so the check would report a perfectly current
+	# lockfile as stale the moment any transitive dependency published a
+	# release. That is a gate that fails on a schedule nobody controls.
+	#
+	# --python 3.13 because that is the Lambda runtime (template.yaml) and CI's
+	# pin. Environment markers resolve against the interpreter, so compiling
+	# under whatever python happens to be on PATH can report a clean lockfile
+	# as stale, or miss a genuinely stale one.
 	@cp backend/requirements-lock.txt /tmp/pp-lock-committed.txt
-	@uv pip compile backend/src/requirements.txt -o backend/requirements-lock.txt --no-header --quiet
+	@cp backend/requirements-lock.txt /tmp/pp-lock-fresh.txt
+	@uv pip compile --python 3.13 backend/src/requirements.txt \
+	  -o /tmp/pp-lock-fresh.txt --no-header --quiet
 	@grep -v '^[[:space:]]*#' /tmp/pp-lock-committed.txt > /tmp/pp-lock-committed-pins.txt
-	@grep -v '^[[:space:]]*#' backend/requirements-lock.txt > /tmp/pp-lock-fresh-pins.txt
-	@cp /tmp/pp-lock-committed.txt backend/requirements-lock.txt
+	@grep -v '^[[:space:]]*#' /tmp/pp-lock-fresh.txt > /tmp/pp-lock-fresh-pins.txt
 	@diff -u /tmp/pp-lock-committed-pins.txt /tmp/pp-lock-fresh-pins.txt \
 	  || (echo "backend/requirements-lock.txt is stale. Rerun:" \
-	      && echo "  uv pip compile backend/src/requirements.txt -o backend/requirements-lock.txt --no-header" \
+	      && echo "  make relock" \
 	      && exit 1)
+
+relock: ## Regenerate backend/requirements-lock.txt from requirements.txt
+	# The one command that is allowed to rewrite the lockfile. Named so that
+	# lock-check's failure message can point at it, and so a Dependabot bump to
+	# backend/src/requirements.txt has an obvious follow-up.
+	uv pip compile --python 3.13 backend/src/requirements.txt \
+	  -o backend/requirements-lock.txt --no-header
 
 e2e-up: ## Start MiniStack
 	docker compose up -d --wait

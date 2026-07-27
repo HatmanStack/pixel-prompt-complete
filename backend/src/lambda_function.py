@@ -1231,6 +1231,11 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
     if err:
         return err
 
+    # Set once run_generation has returned, after which the refund decision is
+    # already made and the outer handler must not make it again. Bound here so
+    # the handler can read it however early the failure lands.
+    refund_owned_downstream = False
+
     try:
         # Every cost guard above this line reads one DynamoDB table and fails
         # OPEN when it is unreachable, so a partition opens all of them at
@@ -1416,8 +1421,14 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
                 set_cookie=set_cookie,
             )
 
-        # Synchronous mode, or an Invoke that did not land.
+        # Synchronous mode.
         results = run_generation(worker_payload)
+        # From here on the refund decision belongs to run_generation, which
+        # refunds on total failure and deliberately does not on a partial
+        # result. The outer handler must not second-guess it: refunding again
+        # would return the charge twice, and refunding after a partial success
+        # would pay for images the caller actually received.
+        refund_owned_downstream = True
 
         # Return the finished session, not just per-model outcomes. Every
         # future has already been awaited above, so this state is final —
@@ -1475,7 +1486,17 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
         # payload failing to serialise, otherwise cost a free user their whole
         # FREE_WINDOW_SECONDS for an image they never got. `validated` is bound
         # before the try, so it is safe to read here.
-        _refund_usage(validated.tier, "generate", correlation_id)
+        #
+        # Guarded, not unconditional. In synchronous mode `run_generation` runs
+        # inside this same `try` and owns the refund decision once it returns:
+        # it refunds on total failure and deliberately withholds one on a
+        # partial result. An unguarded refund here would hand the charge back
+        # twice when a total failure is followed by a raise, and would refund a
+        # caller who actually received images. Asynchronous mode never reaches
+        # that call in the request path, so the flag is still False and the
+        # refund fires -- which is the case this handler exists for.
+        if not refund_owned_downstream:
+            _refund_usage(validated.tier, "generate", correlation_id)
         StructuredLogger.error(
             f"Error in handle_generate: {e}",
             correlation_id=correlation_id,

@@ -247,6 +247,52 @@ def test_a_mutation_costs_two_round_trips_not_three():
 # --------------------------------------------------------------------------
 
 
+def test_a_conditional_request_conflict_is_treated_as_a_conflict():
+    """S3 reports a lost conditional write two ways, and both mean retry.
+
+    412/PreconditionFailed means the ETag no longer matched. 409
+    ConditionalRequestConflict means a concurrent conditional write to the same
+    key was in flight. Re-raising the 409 surfaced a ClientError to the caller
+    for a routine race on a busy session -- precisely what the retry loop is
+    for.
+    """
+    client = _stub_client(_session_doc())
+    calls = {"n": 0}
+
+    def _conflict_once(**kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise ClientError(
+                {"Error": {"Code": "ConditionalRequestConflict"}}, "PutObject"
+            )
+        return {}
+
+    client.put_object.side_effect = _conflict_once
+    mgr = SessionManager(client, "bucket")
+
+    mgr.add_iteration("sess-1", "gemini", "bluer")
+
+    assert calls["n"] == 2, "the losing writer did not retry"
+
+
+def test_a_409_status_code_is_treated_as_a_conflict():
+    client = _stub_client(_session_doc())
+    calls = {"n": 0}
+
+    def _conflict_once(**kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise ClientError({"Error": {"Code": "409"}}, "PutObject")
+        return {}
+
+    client.put_object.side_effect = _conflict_once
+    mgr = SessionManager(client, "bucket")
+
+    mgr.add_iteration("sess-1", "gemini", "bluer")
+
+    assert calls["n"] == 2
+
+
 def test_a_non_conflict_client_error_propagates_rather_than_retrying():
     """AccessDenied is not contention. Swallowing it as a conflict would burn
     the whole retry budget and then report the wrong failure."""

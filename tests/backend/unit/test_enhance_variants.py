@@ -208,3 +208,49 @@ def test_variants_still_parse_without_json_mode():
     with patch.object(e, "_complete", return_value=json.dumps({"short": SHORT, "long": LONG})):
         short, long_ = e.enhance_variants("a cat")
     assert short == SHORT and long_ == LONG
+
+
+def test_adapt_per_model_does_not_send_json_mode_to_a_third_party_endpoint():
+    """`adapt_per_model` must guard on base_url exactly as `_complete` does.
+
+    It keyed the check purely on the model id, so a third-party
+    OpenAI-compatible endpoint serving a "gpt-4"- or "gpt-5"-named model got
+    `response_format` anyway. Those endpoints commonly reject it, the call
+    raised, and the except fell back to the ORIGINAL prompt for every model --
+    silently disabling per-model adaptation with nothing but a warning log.
+    """
+    e = _enhancer()
+    e.prompt_model = {
+        "provider": "openai",
+        "id": "gpt-4o",
+        "api_key": "k",
+        "base_url": "https://llm.internal/v1",
+    }
+    client = MagicMock()
+    client.chat.completions.create.return_value = MagicMock(
+        choices=[MagicMock(message=MagicMock(content=json.dumps({"gemini": "a blue cat"})))]
+    )
+
+    with patch("api.enhance.get_openai_client", return_value=client):
+        e.adapt_per_model("a cat", ["gemini"])
+
+    params = client.chat.completions.create.call_args.kwargs
+    assert "response_format" not in params, (
+        "a third-party endpoint was sent response_format and will reject it"
+    )
+
+
+def test_adapt_per_model_still_sends_json_mode_to_openai_proper():
+    """The guard must not cost json mode where it works and is wanted."""
+    e = _enhancer()
+    e.prompt_model = {"provider": "openai", "id": "gpt-4o", "api_key": "k"}
+    client = MagicMock()
+    client.chat.completions.create.return_value = MagicMock(
+        choices=[MagicMock(message=MagicMock(content=json.dumps({"gemini": "a blue cat"})))]
+    )
+
+    with patch("api.enhance.get_openai_client", return_value=client):
+        e.adapt_per_model("a cat", ["gemini"])
+
+    params = client.chat.completions.create.call_args.kwargs
+    assert params["response_format"] == {"type": "json_object"}
