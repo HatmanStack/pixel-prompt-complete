@@ -7,6 +7,7 @@ The client is created once per Lambda container and reused.
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Any
 
 import boto3
 
@@ -14,7 +15,7 @@ import config
 
 
 @lru_cache(maxsize=1)
-def get_ses_client():
+def get_ses_client() -> Any:
     """Return a cached boto3 SES client.
 
     Raises:

@@ -41,7 +41,10 @@ class UserRepository:
 
     def get_user(self, user_id: str) -> dict | None:
         resp = self._table.get_item(Key={"userId": user_id})
-        return resp.get("Item")
+        # boto3 is untyped, so resp is Any. Annotate rather than let an
+        # implicit Any satisfy the declared return type.
+        item: dict | None = resp.get("Item")
+        return item
 
     def get_or_create_user(
         self,

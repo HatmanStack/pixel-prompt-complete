@@ -43,7 +43,7 @@ _CW_MAX_ATTEMPTS = 2
 _CW_MAX_DATUMS_PER_CALL = 1000
 
 
-def _get_cw_client():
+def _get_cw_client() -> Any:
     """Return a lazily-initialized CloudWatch client with bounded timeouts."""
     global _cw_client
     if _cw_client is None:

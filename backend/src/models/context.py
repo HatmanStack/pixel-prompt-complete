@@ -37,7 +37,7 @@ class ContextManager:
 
     WINDOW_SIZE = 3
 
-    def __init__(self, s3_client, bucket: str):
+    def __init__(self, s3_client: Any, bucket: str) -> None:
         """
         Initialize context manager.
 

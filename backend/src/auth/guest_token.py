@@ -7,6 +7,7 @@ guest tokens stored in the ``pp_guest`` HttpOnly cookie.
 from __future__ import annotations
 
 import base64
+import binascii
 import hmac
 import os
 from hashlib import sha256
@@ -43,7 +44,7 @@ class GuestTokenService:
             token_id_b64, sig_b64 = token.split(".", 1)
             token_id = _b64u_decode(token_id_b64)
             sig = _b64u_decode(sig_b64)
-        except (ValueError, base64.binascii.Error):
+        except (ValueError, binascii.Error):
             return None
         expected = hmac.new(self._secret, token_id, sha256).digest()
         if not hmac.compare_digest(sig, expected):

@@ -135,7 +135,7 @@ class ContentFilter:
        and check for keywords
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize Content Filter with blocked keywords."""
         self._unambiguous_patterns = [_word_pattern(kw) for kw in UNAMBIGUOUS_KEYWORDS]
         self._context_patterns = [_word_pattern(kw) for kw in CONTEXT_DEPENDENT_KEYWORDS]

@@ -43,12 +43,13 @@ def _invoke_nova(model_id: str, body: dict[str, Any], budget: float) -> dict[str
         contentType="application/json",
         accept="application/json",
     )
-    return json.loads(response["body"].read().decode("utf-8"))
+    payload: dict[str, Any] = json.loads(response["body"].read().decode("utf-8"))
+    return payload
 
 
 def _extract_nova_image(payload: dict[str, Any]) -> str:
     """Extract the first image from a Nova Canvas response payload."""
-    images = payload.get("images") or []
+    images: list[str] = payload.get("images") or []
     if not images:
         raise ValueError("Nova Canvas returned empty images array")
     return images[0]

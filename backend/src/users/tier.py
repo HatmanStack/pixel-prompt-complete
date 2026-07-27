@@ -65,7 +65,7 @@ def extract_claims(event: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _cookie_header(event: dict[str, Any]) -> str | None:
-    headers = event.get("headers") or {}
+    headers: dict[str, str] = event.get("headers") or {}
     # headers may be any-case
     for k, v in headers.items():
         if k.lower() == "cookie":

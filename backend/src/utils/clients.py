@@ -37,7 +37,7 @@ _genai_lock = threading.Lock()
 _bedrock_lock = threading.Lock()
 
 
-def get_openai_client(api_key: str, **kwargs) -> OpenAI:
+def get_openai_client(api_key: str, **kwargs: Any) -> OpenAI:
     """Get or create a cached OpenAI client keyed by api_key and relevant kwargs.
 
     Note: The cache key only includes ``base_url`` and ``timeout``.  If a new kwarg
