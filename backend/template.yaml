@@ -521,6 +521,18 @@ Parameters:
     Default: 500
     Description: Daily generation cap for Firefly model
 
+  GenerateAsync:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Dispatch /generate provider work via an asynchronous self-invocation and
+      answer the caller with 202. Set false only where there is no Lambda
+      service to invoke (sam local, the MiniStack E2E suite): the inline path
+      runs a 70s dispatch budget behind the 30s gateway ceiling below.
+
   # CAPTCHA
   CaptchaEnabled:
     Type: String
@@ -687,6 +699,8 @@ Resources:
           SES_REGION: !Ref SesRegion
           # Admin
           ADMIN_ENABLED: !Ref AdminEnabled
+          # Async generate dispatch
+          GENERATE_ASYNC: !Ref GenerateAsync
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref UsersTable
@@ -721,18 +735,27 @@ Resources:
               Action: ses:SendEmail
               Resource: "*"
       Events:
+        # The integration timeout is stated explicitly on the three routes
+        # that can do provider work. 30000ms is an AWS hard cap on HTTP API
+        # integrations and is not adjustable via a quota increase; declaring
+        # 29000 puts the real bound where a reader looks for it instead of
+        # leaving it an invisible service default. Keep it equal to
+        # config.gateway_integration_timeout_seconds * 1000 --
+        # tests/backend/unit/test_dispatch_budget.py fails if the two drift.
         GenerateApi:
           Type: HttpApi
           Properties:
             Path: /generate
             Method: POST
             ApiId: !Ref HttpApi
+            TimeoutInMillis: 29000
         IterateApi:
           Type: HttpApi
           Properties:
             Path: /iterate
             Method: POST
             ApiId: !Ref HttpApi
+            TimeoutInMillis: 29000
             Auth: !If
               - AuthEnabledCondition
               - Authorizer: CognitoJwt
@@ -743,6 +766,7 @@ Resources:
             Path: /outpaint
             Method: POST
             ApiId: !Ref HttpApi
+            TimeoutInMillis: 29000
             Auth: !If
               - AuthEnabledCondition
               - Authorizer: CognitoJwt

@@ -494,11 +494,44 @@ if auth_enabled and cors_allowed_origin == "*":
 api_client_timeout = _safe_float("API_CLIENT_TIMEOUT", 60.0)
 
 # Every provider must bound its own call below this, because the dispatch
-# timeout in handle_generate cannot cancel a future that has already started:
+# timeout in run_generation cannot cancel a future that has already started:
 # the call is blocking I/O inside a worker thread. If a provider outlives the
-# budget the request is abandoned, the user is told the model failed, and the
-# provider generates and bills for the image anyway.
+# budget the dispatch is abandoned, the session records the model as failed,
+# and the provider generates and bills for the image anyway.
+#
+# 70s is legitimate only because the dispatch no longer runs inside the HTTP
+# request: with GENERATE_ASYNC=true it runs in a worker invocation that has the
+# function's 900s timeout and no gateway in front of it. Synchronous mode has
+# no such headroom -- see sync_mode_fits_gateway below.
 generate_dispatch_budget_seconds = api_client_timeout + 10
 image_download_timeout = _safe_int("IMAGE_DOWNLOAD_TIMEOUT", 30)
 enhance_timeout = _safe_float("ENHANCE_TIMEOUT", 30.0)
 generate_thread_workers = _safe_int("GENERATE_THREAD_WORKERS", 4)
+
+# API Gateway HTTP APIs cap the integration timeout at 30 seconds and the
+# quota is not adjustable. One second of margin is kept so a request that
+# is going to be abandoned is abandoned by us, with a logged reason,
+# rather than by the gateway with a 504 and no record.
+gateway_integration_timeout_seconds = 29
+
+# When true (the default), POST /generate answers the caller as soon as the
+# session exists and hands the provider dispatch to an asynchronous
+# self-invocation. When false, the handler runs the generation inline and
+# returns the full result -- the pre-async behaviour, and the only mode that
+# works where there is no Lambda service to invoke: `sam local start-api` and
+# the MiniStack E2E suite.
+generate_async = os.environ.get("GENERATE_ASYNC", "true").lower() == "true"
+
+
+def sync_mode_fits_gateway(budget_seconds: float) -> bool:
+    """Whether a synchronous dispatch budget clears the gateway ceiling.
+
+    Deliberately NOT called at import. GENERATE_ASYNC=false exists for the
+    environments that have no gateway at all, so failing closed there would
+    enforce a constraint that does not apply and would break the escape hatch.
+    It is also unsatisfiable in a deployed stack: API_CLIENT_TIMEOUT is neither
+    a SAM parameter nor a Lambda environment variable, so a deployment always
+    gets the 60.0 default and a budget of 70. The relationship is asserted by
+    tests/backend/unit/test_dispatch_budget.py instead. See ADR-A1.
+    """
+    return budget_seconds <= gateway_integration_timeout_seconds
