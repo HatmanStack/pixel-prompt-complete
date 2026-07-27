@@ -31,6 +31,31 @@ def test_importing_the_logger_does_not_leave_root_at_info():
     assert logging.getLogger().level >= logging.WARNING
 
 
+def test_a_runtime_that_puts_root_at_info_is_corrected_on_import():
+    """The half of the fix that Python's own defaults hide.
+
+    CPython's default root level is already WARNING, so
+    test_importing_the_logger_does_not_leave_root_at_info passes whether or
+    not this module sets it -- verified by mutation. The Lambda Python
+    runtime has in some versions installed its handler and set root to INFO,
+    and inheriting that would ship every SDK's INFO records, which is the
+    whole defect. Putting root at INFO first is the only way to tell the two
+    apart.
+    """
+    import importlib
+
+    import utils.logger
+
+    root = logging.getLogger()
+    previous = root.level
+    try:
+        root.setLevel(logging.INFO)
+        importlib.reload(utils.logger)
+        assert root.level == logging.WARNING
+    finally:
+        root.setLevel(previous)
+
+
 def test_the_application_logger_is_at_info():
     import utils.logger
 
