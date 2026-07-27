@@ -172,30 +172,3 @@ class TestFutureResultResilience:
         body = _body(resp)
         assert body["models"]["gemini"]["status"] == "error"
         assert body["models"]["nova"]["status"] == "error"
-
-
-class TestThreadPoolLifecycle:
-    def test_shutdown_executors_calls_shutdown_on_both_pools(self, mocks):
-        """_shutdown_executors should call shutdown(wait=False) on both executors."""
-        from lambda_function import _shutdown_executors
-
-        mock_exec = MagicMock()
-        mock_gallery_exec = MagicMock()
-
-        with patch("lambda_function._executor", mock_exec), patch(
-            "lambda_function._gallery_executor", mock_gallery_exec
-        ):
-            _shutdown_executors()
-
-        mock_exec.shutdown.assert_called_once_with(wait=False)
-        mock_gallery_exec.shutdown.assert_called_once_with(wait=False)
-
-    def test_atexit_is_registered(self, mocks):
-        """atexit should have _shutdown_executors registered."""
-        import importlib
-
-        with patch("atexit.register") as mock_register:
-            importlib.reload(__import__("lambda_function"))
-
-        registered_funcs = [call.args[0].__name__ for call in mock_register.call_args_list]
-        assert "_shutdown_executors" in registered_funcs

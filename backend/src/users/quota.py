@@ -51,8 +51,10 @@ def enforce_quota(
         return _enforce_credits(ctx, endpoint, repo, now)
 
     if ctx.tier == "guest":
-        if endpoint in ("refine", "outpaint"):
-            return QuotaResult(allowed=False, reason="guest_per_user", reset_at=0, usage={})
+        # Guest refine/outpaint is refused with a 402 in lambda_function before
+        # enforce_quota is reached, so only "generate" arrives here. Do not
+        # re-add a refine branch: it would be unreachable.
+        #
         # Per-IP first: it is the only guest bucket a caller cannot reset.
         # Dropping the cookie mints a new token with a fresh per-token
         # counter, so checking that alone bounds nothing.

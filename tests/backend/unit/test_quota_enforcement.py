@@ -138,13 +138,6 @@ def test_anon_quota_fails_open_if_the_store_is_unreachable(monkeypatch):
     assert enforce_quota(ctx, "generate", broken, now=0).allowed is True
 
 
-def test_guest_refine_blocked(repo):
-    from users.quota import enforce_quota
-    r = enforce_quota(_guest_ctx(), "refine", repo, now=1000)
-    assert not r.allowed
-    assert r.reason == "guest_per_user"
-
-
 def test_guest_generate_allowed_once(repo):
     from users.quota import enforce_quota
     repo.upsert_guest("tok1", "ip", 9999)

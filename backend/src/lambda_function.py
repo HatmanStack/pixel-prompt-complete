@@ -4,7 +4,6 @@ Routes API requests to appropriate handlers for image generation,
 iteration, outpainting, and session status.
 """
 
-import atexit
 import base64
 import json
 import re
@@ -110,14 +109,6 @@ prompt_enhancer = PromptEnhancer()
 # Separate pools prevent gallery metadata fetches from starving generation threads.
 _executor = ThreadPoolExecutor(max_workers=generate_thread_workers)
 _gallery_executor = ThreadPoolExecutor(max_workers=4)
-
-
-def _shutdown_executors():
-    _executor.shutdown(wait=False)
-    _gallery_executor.shutdown(wait=False)
-
-
-atexit.register(_shutdown_executors)
 
 
 @dataclass
@@ -547,11 +538,6 @@ def extract_correlation_id(event: LambdaEvent) -> str:
     headers = event.get("headers", {}) or {}
     correlation_id = headers.get("x-correlation-id") or headers.get("X-Correlation-ID")
     return correlation_id or str(uuid4())
-
-
-def _not_implemented(endpoint: str) -> ApiResponse:
-    """Stub response for routes whose business logic lands in later phases."""
-    return response(501, {"error": f"{endpoint} not implemented"})
 
 
 def _route_admin(path: str, method: str, event: LambdaEvent, correlation_id: str) -> ApiResponse:
@@ -1546,10 +1532,7 @@ def handle_gallery_list(event: LambdaEvent, correlation_id: str | None = None) -
             if preview_candidate:
                 preview_url = image_storage.get_cloudfront_url(preview_candidate)
 
-            try:
-                timestamp_str = f"{folder[:10]}T{folder[11:13]}:{folder[14:16]}:{folder[17:19]}Z"
-            except (IndexError, ValueError):
-                timestamp_str = folder
+            timestamp_str = f"{folder[:10]}T{folder[11:13]}:{folder[14:16]}:{folder[17:19]}Z"
 
             return {
                 "id": folder,

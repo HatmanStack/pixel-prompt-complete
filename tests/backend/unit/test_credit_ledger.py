@@ -48,7 +48,7 @@ def repo():
         yield UserRepository(TABLE_NAME, dynamodb_resource=ddb)
 
 
-def _ctx(tier="paid", user_id="u1"):
+def _ctx(tier="paid", user_id="u1", guest_token_id=None):
     from users.tier import TierContext
 
     return TierContext(
@@ -56,7 +56,7 @@ def _ctx(tier="paid", user_id="u1"):
         user_id=user_id,
         email=None,
         is_authenticated=True,
-        guest_token_id=None,
+        guest_token_id=guest_token_id,
         issue_guest_cookie=False,
     )
 
@@ -301,11 +301,20 @@ def test_free_period_uses_fixed_window(credits_on, repo):
 
 
 def test_guests_stay_on_legacy_limits(credits_on, repo):
-    """A guest credit balance would bound nothing: drop the cookie, get a new one."""
+    """A guest credit balance would bound nothing: drop the cookie, get a new one.
+
+    Asserted on "generate" rather than "refine": guest refine/outpaint is
+    refused with a 402 in lambda_function before enforce_quota is reached, so
+    a guest + refine call cannot happen in production.
+    """
     from users.quota import enforce_quota
 
-    result = enforce_quota(_ctx("guest", "guest#abc"), "refine", repo, NOW)
-    assert result.reason == "guest_per_user"
+    repo.upsert_guest("tok_g", "iphash", NOW + 9999)
+    result = enforce_quota(
+        _ctx("guest", "guest#tok_g", guest_token_id="tok_g"), "generate", repo, NOW
+    )
+
+    assert result.allowed is True
     assert "creditsRemaining" not in result.usage
 
 
@@ -376,14 +385,6 @@ def test_outpaint_and_refine_are_independently_priced(credits_on, repo, monkeypa
     assert out.usage["creditsCharged"] == 70
     assert ref.usage["creditsCharged"] == credits_on.credits_per_refine
     assert out.usage["creditsCharged"] != ref.usage["creditsCharged"]
-
-
-def test_guests_are_blocked_from_outpaint_like_refine(credits_on, repo):
-    from users.quota import enforce_quota
-
-    result = enforce_quota(_ctx("guest", "guest#x"), "outpaint", repo, NOW)
-    assert result.allowed is False
-    assert result.reason == "guest_per_user"
 
 
 def test_advertised_outpaint_cost_matches_enforced_cost(credits_on, repo):
