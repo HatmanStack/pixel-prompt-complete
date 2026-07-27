@@ -67,14 +67,23 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     });
 
     // The console is not an observability channel for a static app on a CDN.
-    // Fire-and-forget and never throwing, by contract -- a reporter that
-    // throws in here would lose the error it was called to report. Not
-    // awaited: the fallback must render now, not after a network round trip.
-    void reportError('ERROR', error.message, {
-      stack: errorInfo.componentStack ?? undefined,
-      metadata: { component: this.props.componentName || 'Unknown' },
-      correlationId,
-    });
+    // Not awaited: the fallback must render now, not after a network round
+    // trip.
+    //
+    // Wrapped rather than relying on reportError's "never throws" contract.
+    // This is the last place in the UI that can still render anything, so it
+    // should not depend on another module keeping a promise: if a future edit
+    // to the reporter breaks that contract the user sees the fallback, not a
+    // blank page. Reporting is best effort; the fallback is not.
+    try {
+      void reportError('ERROR', error.message, {
+        stack: errorInfo.componentStack ?? undefined,
+        metadata: { component: this.props.componentName || 'Unknown' },
+        correlationId,
+      });
+    } catch {
+      // Deliberately empty; see above.
+    }
 
     this.setState({
       error,
