@@ -1,0 +1,22 @@
+# Coverage configuration for the whole repository.
+#
+# Separate from pytest.ini because pytest.ini accepts only a [pytest] section --
+# coverage reads [coverage:*] tables out of setup.cfg/tox.ini, or plain [run] /
+# [report] out of this file. Two small files that load beat one that does not:
+# these settings previously sat in backend/pyproject.toml, which nothing running
+# from the repository root ever read.
+#
+# pytest-cov honours fail_under from here (verified with pytest-cov 7.1.0), so
+# the threshold is stated once, in this file, and no invocation passes
+# --cov-fail-under. If you find that flag on a command line again, delete it
+# rather than changing this number: a duplicated threshold is one that drifts.
+
+[run]
+# The source is supplied by `--cov=backend/src` in pytest.ini's addopts. This
+# omit is belt-and-braces for anyone who runs `coverage` directly from the root.
+omit =
+    */tests/*
+    */.venv/*
+
+[report]
+fail_under = 80

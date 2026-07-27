@@ -8,8 +8,11 @@ install: ## Install all dependencies
 	npm install
 
 test: ## Run all tests (frontend + backend unit), with the same coverage gates CI applies
+# The backend coverage gate is not on this line: /pytest.ini enables coverage
+# and /.coveragerc sets fail_under = 80, so the flags CI used to pass are gone
+# from both. The threshold lives in exactly one file now.
 	cd frontend && npx vitest run --coverage --passWithNoTests
-	PYTHONPATH=backend/src pytest tests/backend/unit -v --tb=short --cov=backend/src --cov-report=term-missing --cov-fail-under=80
+	PYTHONPATH=backend/src pytest tests/backend/unit -v --tb=short
 
 lint: ## Run all linters
 	cd frontend && npm run lint && npm run typecheck && npm run format:check
@@ -28,7 +31,7 @@ e2e-up: ## Start MiniStack
 	docker compose up -d --wait
 
 e2e: ## Run E2E tests
-	PYTHONPATH=backend/src pytest tests/backend/e2e -v -m e2e
+	PYTHONPATH=backend/src pytest tests/backend/e2e -v -m e2e --no-cov
 
 e2e-down: ## Stop MiniStack
 	docker compose down

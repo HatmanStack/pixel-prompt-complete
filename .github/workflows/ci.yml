@@ -105,8 +105,13 @@ jobs:
       # reports 80 errors in 17 files that way, against 0 with the config.
       - name: Type check
         run: mypy --config-file backend/pyproject.toml backend/src/
+      # No --cov flags: /pytest.ini turns coverage on by default and
+      # /.coveragerc holds the 80% floor. They were passed here explicitly
+      # while the config in backend/pyproject.toml went unread, which is
+      # exactly why the gap survived -- CI was green on a threshold that
+      # applied nowhere else.
       - name: Tests
-        run: pytest tests/backend/unit -v --tb=short --cov=backend/src --cov-report=term-missing --cov-fail-under=80
+        run: pytest tests/backend/unit -v --tb=short
 
   e2e:
     name: E2E Tests
@@ -153,8 +158,12 @@ jobs:
           done
           echo "ministack failed to become healthy" >&2
           exit 1
+      # --no-cov: coverage is on by default from /pytest.ini, and eleven E2E
+      # tests against MiniStack cannot reach the 80% floor that applies to the
+      # unit suite. Measuring them and ignoring the number would be worse than
+      # not measuring them.
       - name: Run E2E tests
-        run: pytest tests/backend/e2e -v -m e2e
+        run: pytest tests/backend/e2e -v -m e2e --no-cov
 
   docs:
     name: Documentation Lint

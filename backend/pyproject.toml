@@ -127,18 +127,15 @@ disable_error_code = ["arg-type", "no-any-return"]
 module = ["utils.outpaint"]
 disable_error_code = ["assignment", "misc"]
 
-[tool.pytest.ini_options]
-markers = [
-    "e2e: E2E tests requiring MiniStack",
-    "slow: slow tests (deselect with -m 'not slow')",
-]
-
-[tool.coverage.run]
-source = ["."]
-omit = ["**/tests/**"]
-
-[tool.coverage.report]
-fail_under = 80
+# The pytest and coverage configuration used to live here, and pytest never
+# loaded it: every documented invocation runs from the repository root, where
+# this file is not on the search path. It is now in /pytest.ini (markers,
+# addopts) and /.coveragerc (fail_under). Do not restore it here -- a config
+# in two places is a config that disagrees with itself.
+#
+# [tool.mypy] and [tool.ruff] stay: mypy is passed
+# --config-file backend/pyproject.toml explicitly, and ruff finds this file by
+# walking up from backend/src (ruff.toml extends it for the rest of the tree).
 
 [tool.ruff]
 line-length = 100
