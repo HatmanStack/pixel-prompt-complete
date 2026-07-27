@@ -1849,9 +1849,30 @@ def handle_enhance(event: LambdaEvent, correlation_id: str | None = None) -> Api
 
 
 def handle_gallery_list(event: LambdaEvent, correlation_id: str | None = None) -> ApiResponse:
-    """GET /gallery/list - List all galleries with preview images."""
+    """GET /gallery/list - List galleries with preview images.
+
+    Unauthenticated and unquota'd, so the work one request can ask for has to
+    be bounded by the request itself. Clamped exactly as /prompts/recent and
+    /prompts/history clamp, so the three endpoints are visibly consistent.
+    """
+    params = event.get("queryStringParameters") or {}
     try:
-        gallery_folders = image_storage.list_galleries()
+        limit = max(1, min(int(params.get("limit", 20)), 50))
+    except (ValueError, TypeError):
+        return response(400, {"error": "Invalid limit parameter"})
+    cursor = params.get("cursor") or None
+
+    try:
+        # One folder more than asked for. That extra name is how the response
+        # knows whether a next page exists without a second LIST, and it is
+        # dropped before anything is expanded.
+        gallery_folders = image_storage.list_galleries(limit=limit + 1, cursor=cursor)
+        has_more = len(gallery_folders) > limit
+        # Slice BEFORE the fan-out. This is the whole finding: each surviving
+        # folder costs its own paginating LIST, and expanding folders that
+        # will not be returned is what made an unauthenticated GET cost O(N)
+        # with N growing with every session ever created.
+        gallery_folders = gallery_folders[:limit]
 
         def _build_gallery_entry(folder):
             images = image_storage.list_gallery_images(folder)
@@ -1884,10 +1905,16 @@ def handle_gallery_list(event: LambdaEvent, correlation_id: str | None = None) -
                     correlation_id=correlation_id,
                 )
 
-        # Sort by ID (timestamp) descending
+        # Sort by ID (timestamp) descending. list_galleries already returns
+        # them that way; as_completed does not preserve submission order.
         galleries.sort(key=lambda g: g["id"], reverse=True)
 
-        return response(200, {"galleries": galleries, "total": len(galleries)})
+        body: dict[str, Any] = {"galleries": galleries, "total": len(galleries)}
+        if has_more and galleries:
+            # The oldest id on this page: the next page is everything strictly
+            # older than it.
+            body["nextCursor"] = galleries[-1]["id"]
+        return response(200, body)
 
     except Exception as e:
         StructuredLogger.error(

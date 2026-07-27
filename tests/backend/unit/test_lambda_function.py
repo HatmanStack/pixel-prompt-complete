@@ -685,3 +685,134 @@ class TestAdminRouting:
                 _make_event(method="POST", path="/admin/models/gemini/disable"), None
             )
             mock_route.assert_called_once()
+
+
+# ============================================================
+# GET /gallery/list — bounded fan-out
+# ============================================================
+
+
+class TestGalleryListBound:
+    """One unauthenticated GET used to fan out to N+1 paginating S3 LISTs, with
+    N growing with every session ever created inside the retention window.
+
+    These drive the REAL ImageStorage.list_galleries against a moto bucket, so
+    the ordering and cursor semantics under test are the ones production uses;
+    only list_gallery_images -- the per-folder fan-out being bounded -- is a
+    counting stub.
+    """
+
+    @staticmethod
+    def _seed(mocks, count=60, extra_keys=()):
+        from utils.storage import ImageStorage
+
+        s3 = boto3.client("s3", region_name="us-east-1")
+        for i in range(count):
+            folder = f"2026-01-01-00-{i // 60:02d}-{i % 60:02d}"
+            s3.put_object(Bucket="test-bucket", Key=f"sessions/{folder}/img.png", Body=b"x")
+        for key in extra_keys:
+            s3.put_object(Bucket="test-bucket", Key=key, Body=b"x")
+
+        real = ImageStorage(s3, "test-bucket", "cdn.example.com")
+        mocks["image_storage"].list_galleries.side_effect = real.list_galleries
+        mocks["image_storage"].list_gallery_images.return_value = ["sessions/x/img.png"]
+        mocks["image_storage"].get_cloudfront_url.return_value = "https://cdn/img.png"
+
+        from concurrent.futures import ThreadPoolExecutor
+
+        pool = ThreadPoolExecutor(max_workers=2)
+        mocks["_gallery_executor"].submit.side_effect = pool.submit
+        return pool
+
+    @staticmethod
+    def _get(params=None):
+        event = _make_event(method="GET", path="/gallery/list")
+        event["queryStringParameters"] = params or {}
+        return _get_lambda_handler()(event, None)
+
+    def test_no_parameters_returns_twenty_and_expands_only_those(self, mocks):
+        pool = self._seed(mocks)
+        resp = self._get()
+        pool.shutdown(wait=True)
+
+        body = _body(resp)
+        assert resp["statusCode"] == 200
+        assert len(body["galleries"]) == 20
+        assert mocks["image_storage"].list_gallery_images.call_count == 20, (
+            "the per-folder fan-out is what costs; it must not exceed the limit"
+        )
+
+    def test_the_page_is_newest_first(self, mocks):
+        pool = self._seed(mocks)
+        resp = self._get()
+        pool.shutdown(wait=True)
+
+        ids = [g["id"] for g in _body(resp)["galleries"]]
+        assert ids == sorted(ids, reverse=True)
+        assert ids[0] == "2026-01-01-00-00-59"
+
+    def test_an_explicit_limit_bounds_the_fan_out(self, mocks):
+        pool = self._seed(mocks)
+        resp = self._get({"limit": "5"})
+        pool.shutdown(wait=True)
+
+        assert len(_body(resp)["galleries"]) == 5
+        assert mocks["image_storage"].list_gallery_images.call_count == 5
+
+    def test_an_oversized_limit_is_clamped_to_fifty(self, mocks):
+        pool = self._seed(mocks)
+        resp = self._get({"limit": "500"})
+        pool.shutdown(wait=True)
+
+        assert len(_body(resp)["galleries"]) == 50
+        assert mocks["image_storage"].list_gallery_images.call_count == 50
+
+    def test_a_zero_limit_is_clamped_up_to_one(self, mocks):
+        pool = self._seed(mocks)
+        resp = self._get({"limit": "0"})
+        pool.shutdown(wait=True)
+
+        assert len(_body(resp)["galleries"]) == 1
+
+    def test_a_non_integer_limit_is_a_400(self, mocks):
+        self._seed(mocks)
+        resp = self._get({"limit": "abc"})
+        assert resp["statusCode"] == 400
+
+    def test_a_cursor_returns_only_folders_older_than_it(self, mocks):
+        pool = self._seed(mocks)
+        first = self._get({"limit": "5"})
+        cursor = _body(first)["nextCursor"]
+        second = self._get({"limit": "5", "cursor": cursor})
+        pool.shutdown(wait=True)
+
+        first_ids = [g["id"] for g in _body(first)["galleries"]]
+        second_ids = [g["id"] for g in _body(second)["galleries"]]
+        assert cursor == first_ids[-1]
+        assert set(first_ids).isdisjoint(second_ids)
+        assert max(second_ids) < min(first_ids)
+
+    def test_next_cursor_is_absent_on_the_last_page(self, mocks):
+        pool = self._seed(mocks, count=3)
+        resp = self._get({"limit": "5"})
+        pool.shutdown(wait=True)
+
+        body = _body(resp)
+        assert len(body["galleries"]) == 3
+        assert "nextCursor" not in body
+
+    def test_session_uuid_folders_do_not_consume_the_limit(self, mocks):
+        pool = self._seed(
+            mocks,
+            count=5,
+            extra_keys=[
+                "sessions/8f14e45f-ceea-467a-9f0a-1d2c3b4e5f60/status.json",
+                "sessions/00000000-0000-0000-0000-000000000000/status.json",
+            ],
+        )
+        resp = self._get({"limit": "5"})
+        pool.shutdown(wait=True)
+
+        ids = [g["id"] for g in _body(resp)["galleries"]]
+        assert len(ids) == 5
+        assert all(len(i) == 19 for i in ids)

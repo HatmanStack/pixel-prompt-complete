@@ -45,6 +45,7 @@ import {
   getRecentPrompts,
   getPromptHistory,
   getDownloadUrl,
+  listSessions,
 } from '../../../src/api/client';
 
 // Helper to create a mock Response
@@ -619,6 +620,26 @@ describe('error code contract', () => {
     await expect(generateSession('a cat')).rejects.toMatchObject({
       status: 403,
       code: 'AGE_VERIFICATION_REQUIRED',
+    });
+  });
+
+  describe('listSessions', () => {
+    it('sends no query string when no limit is given', async () => {
+      const fetchSpy = vi.fn().mockResolvedValue(mockResponse({ galleries: [], total: 0 }));
+      global.fetch = fetchSpy as unknown as typeof fetch;
+
+      await listSessions();
+
+      expect(fetchSpy.mock.calls[0][0]).toBe('https://api.test.com/gallery/list');
+    });
+
+    it('passes the requested page size through to the backend', async () => {
+      const fetchSpy = vi.fn().mockResolvedValue(mockResponse({ galleries: [], total: 0 }));
+      global.fetch = fetchSpy as unknown as typeof fetch;
+
+      await listSessions(20);
+
+      expect(fetchSpy.mock.calls[0][0]).toBe('https://api.test.com/gallery/list?limit=20');
     });
   });
 

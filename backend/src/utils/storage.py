@@ -211,18 +211,42 @@ class ImageStorage:
         data.pop("output", None)
         return data
 
-    def list_galleries(self) -> List[str]:
+    def list_galleries(
+        self,
+        limit: Optional[int] = None,
+        cursor: Optional[str] = None,
+    ) -> List[str]:
         """
-        List all gallery folders (target timestamps) from the sessions prefix.
+        List gallery folders (target timestamps) from the sessions prefix,
+        newest first.
 
         Filters out non-gallery folders (e.g. session UUID folders) by matching
         the timestamp pattern YYYY-MM-DD-HH-MM-SS.
+
+        Args:
+            limit: Return at most this many folders. None returns all of them.
+            cursor: A gallery id to page from. Folders lexicographically LESS
+                than it are returned — the order is newest-first and the names
+                are timestamps, so lexicographic order is chronological order.
+                Strictly less, so the folder the caller paged from is not
+                re-rendered on the next page.
 
         Returns:
             List of gallery folder names (target timestamps)
 
         Raises:
             ClientError: If the S3 operation fails (e.g., IAM, throttling)
+
+        Cost note. This still pages the ENTIRE ``sessions/`` prefix even when
+        ``limit`` is small, and that is deliberate rather than an oversight:
+        S3 returns ``CommonPrefixes`` in ascending order, so the newest N are
+        on the LAST page, which S3 cannot hand back directly. The LIST itself
+        is cheap and paginated at 1000 prefixes; what was expensive was the
+        per-folder fan-out the caller did afterwards, and ``limit`` is what
+        bounds that. The residual cost is O(sessions in the retention window)
+        and it does still grow. Removing it needs a DynamoDB gallery index
+        written at session creation, which is a schema change and is
+        deliberately out of scope here.
         """
         try:
             galleries = []
@@ -251,6 +275,11 @@ class ImageStorage:
 
             # Sort by timestamp (newest first)
             galleries.sort(reverse=True)
+
+            if cursor:
+                galleries = [g for g in galleries if g < cursor]
+            if limit is not None:
+                galleries = galleries[:limit]
 
             return galleries
 

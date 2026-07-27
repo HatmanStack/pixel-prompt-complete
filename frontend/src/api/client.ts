@@ -325,10 +325,15 @@ export async function iterateMultiple(
 }
 
 /**
- * List all sessions in gallery
+ * List a page of gallery sessions, newest first.
+ *
+ * `limit` is optional on purpose: the backend clamps it to 1..50 and defaults
+ * it to 20, so the bound is the server's guarantee rather than this client's
+ * good behaviour.
  */
-export async function listSessions(): Promise<SessionGalleryListResponse> {
-  return apiFetch<SessionGalleryListResponse>(API_ROUTES.GALLERY_LIST, {
+export async function listSessions(limit?: number): Promise<SessionGalleryListResponse> {
+  const query = limit === undefined ? '' : `?limit=${limit}`;
+  return apiFetch<SessionGalleryListResponse>(`${API_ROUTES.GALLERY_LIST}${query}`, {
     method: 'GET',
   });
 }

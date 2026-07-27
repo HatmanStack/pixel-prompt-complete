@@ -6,6 +6,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { listSessions, getSessionDetail } from '@/api/client';
 
+/**
+ * How many galleries the browser asks for. The backend clamps to 1..50 and
+ * defaults to 20 on its own, so this is a preference, not the bound.
+ */
+const GALLERY_PAGE_SIZE = 20;
+
 interface GalleryItem {
   id: string;
   timestamp: string;
@@ -56,7 +62,7 @@ function useGallery(): UseGalleryReturn {
     setError(null);
 
     try {
-      const response = await listSessions();
+      const response = await listSessions(GALLERY_PAGE_SIZE);
 
       // Map API response to GalleryItem using CloudFront preview URLs
       const galleriesWithPreviews = (response.galleries || []).map((gallery): GalleryItem => ({
