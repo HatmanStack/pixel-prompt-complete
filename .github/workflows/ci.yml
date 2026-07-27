@@ -36,6 +36,14 @@ jobs:
               # thing it gates is a job that silently does not run.
               - 'tests/**'
               - 'ruff.toml'
+              # The backend job's behaviour also lives outside backend/ now:
+              # pytest.ini and .coveragerc carry the markers and the 80% floor,
+              # and the job shells out to `make lock-check`. Editing any of
+              # them without this would change what the gate does while
+              # skipping the gate.
+              - 'pytest.ini'
+              - '.coveragerc'
+              - 'Makefile'
 
   frontend:
     name: Frontend Lint & Tests
@@ -93,17 +101,9 @@ jobs:
         run: |
           uv pip install --system -r backend/requirements-lock.txt
           uv pip install --system -e "backend/.[dev]"
-      # Compiled INTO the committed path on purpose: uv reads an existing output
-      # file as a preference set, so unrelated upstream releases do not move the
-      # pins and only a real requirements.txt change fails this step. Compiling
-      # to a scratch path instead would re-resolve from scratch and go red the
-      # first time any transitive dependency published a version.
-      #
-      # Only the pin lines are compared. The `# via` provenance annotations
-      # differ between uv versions (verified: 0.11.7 attributes distro to
-      # google-genai where the previous run did not) and setup-uv installs
-      # whatever is current, so diffing the comments would fail on uv's release
-      # schedule rather than on this repository's dependencies.
+      # The target, not a copy of its lines -- see the Makefile for why it
+      # compiles into the committed path and compares pin lines only. A check
+      # written twice is a check that disagrees with itself.
       - name: Check the lockfile is current
         run: make lock-check
       - name: Lint
