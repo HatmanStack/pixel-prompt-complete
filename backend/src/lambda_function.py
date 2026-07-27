@@ -707,6 +707,270 @@ def lambda_handler(event: LambdaEvent, context: LambdaContext) -> ApiResponse:
         return response(500, {"error": "Internal server error"})
 
 
+def run_generation(payload: dict[str, Any]) -> dict[str, Any]:
+    """Perform the provider dispatch for an already-created session.
+
+    Called synchronously by handle_generate when GENERATE_ASYNC is false,
+    and by the asynchronous worker branch of lambda_handler otherwise.
+    Everything that must happen before the caller is answered -- spend
+    ceilings, tier, CAPTCHA, age gate, quota, per-model slot reservation,
+    session creation -- has already happened by the time this runs.
+
+    `payload` carries only JSON-serialisable values because in async mode it
+    crosses an Invoke boundary. Returns the per-model results map, including
+    the skipped entries the request path computed, so synchronous mode can
+    return it to the caller verbatim.
+    """
+    session_id: str = payload["sessionId"]
+    prompt: str = payload["prompt"]
+    model_names: list[str] = payload["modelNames"]
+    skipped_models: dict[str, Any] = payload.get("skipped") or {}
+    visibility: str = payload["visibility"]
+    correlation_id: str | None = payload.get("correlationId")
+
+    # A MINIMAL TierContext, not a real identity. Only two fields are
+    # load-bearing here: `_refund_credits` reads `.tier` and `.user_id`, and
+    # `_cost_meter.record_models` reads the same two. Everything else is
+    # filler and must never be used for an authorization decision -- in
+    # particular `is_authenticated=False` is a placeholder, not a claim about
+    # the caller, who was already authenticated in the request path.
+    # None when the request had no tier context at all, which both consumers
+    # already handle.
+    tier_ctx: TierContext | None = None
+    if payload.get("tier") is not None:
+        tier_ctx = TierContext(
+            tier=payload["tier"],
+            user_id=payload.get("userId") or "",
+            email=None,
+            is_authenticated=False,
+            guest_token_id=None,
+            issue_guest_cookie=False,
+        )
+
+    results: dict[str, Any] = {}
+
+    # Resolved from get_enabled_models(), not config.get_model(): the request
+    # path picked these names out of exactly that list, so this is the same
+    # source of truth. config.get_model raises ValueError for a model that is
+    # not enabled, which would abandon the whole dispatch over one model.
+    #
+    # A name can only fail to resolve here if the worker container's
+    # configuration differs from the request container's -- a deploy that
+    # changes a *_ENABLED variable while requests are in flight. That was
+    # impossible before this refactor, because the ModelConfig objects were
+    # carried in memory rather than rebuilt from a name. It becomes possible
+    # the moment the dispatch can cross an invocation boundary, so the model
+    # is marked failed on the session: leaving its column pending would strand
+    # the session short of a terminal status and the client would poll until
+    # it gave up.
+    enabled_by_name = {m.name: m for m in get_enabled_models()}
+    models_to_dispatch = [enabled_by_name[name] for name in model_names if name in enabled_by_name]
+    for _missing in [name for name in model_names if name not in enabled_by_name]:
+        StructuredLogger.error(
+            "Model was reserved for dispatch but is not enabled in this container",
+            correlation_id=correlation_id,
+            sessionId=session_id,
+            model=_missing,
+        )
+        results[_missing] = {"status": "error", "error": "Model is not enabled"}
+        try:
+            _handle_failed_result(
+                session_id,
+                _missing,
+                session_manager.add_iteration(session_id, _missing, prompt),
+                "Model is not enabled",
+            )
+        except Exception as e:
+            StructuredLogger.warning(
+                f"Could not mark unresolved model as failed: {e}",
+                correlation_id=correlation_id,
+                sessionId=session_id,
+                model=_missing,
+            )
+
+    # Adapt prompt per model (single LLM call, ~4x cheaper than per-model calls)
+    adapted_prompts = prompt_enhancer.adapt_per_model(
+        prompt, model_names, correlation_id=correlation_id
+    )
+
+    # Re-filter the rewritten prompts. The user's prompt was checked at
+    # validation, but what actually reaches the provider is this LLM
+    # rewrite — an unfiltered channel between the check and the call. The
+    # rewrite can introduce blocked terms the original never contained,
+    # either because the model elaborated in an unwanted direction or
+    # because the original was crafted to survive the filter and steer the
+    # rewrite. Checking only the input leaves the output unexamined.
+    #
+    # Falls back to the (already-checked) original rather than failing the
+    # request: one model's rewrite going astray should not deny the user
+    # the other three.
+    for _model_name, _adapted in list(adapted_prompts.items()):
+        if _adapted != prompt and content_filter.check_prompt(_adapted):
+            StructuredLogger.warning(
+                "Adapted prompt failed the content filter; falling back to the original",
+                correlation_id=correlation_id,
+                model=_model_name,
+            )
+            adapted_prompts[_model_name] = prompt
+
+    target = datetime.now(timezone.utc).strftime("%Y-%m-%d-%H-%M-%S")
+
+    def generate_for_model(model_config):
+        model_name = model_config.name
+        start_time = time.time()
+        iteration_index = None
+
+        try:
+            model_prompt = adapted_prompts.get(model_name, prompt)
+            iteration_index = session_manager.add_iteration(
+                session_id, model_name, prompt, adapted_prompt=model_prompt
+            )
+
+            handler = get_handler(model_config.provider)
+            config_dict = get_model_config_dict(model_config)
+            result = handler(config_dict, model_prompt, {})
+
+            duration = time.time() - start_time
+
+            if result["status"] == "success":
+                info = _handle_successful_result(
+                    session_id,
+                    model_name,
+                    prompt,
+                    result,
+                    iteration_index,
+                    target,
+                    duration,
+                    visibility,
+                    context_prompt=prompt,
+                )
+                return model_name, {
+                    "status": "completed",
+                    "imageKey": info["image_key"],
+                    "imageUrl": info["image_url"],
+                    "iteration": iteration_index,
+                    "duration": duration,
+                }
+            else:
+                error_msg = sanitize_error_message(result.get("error", "Unknown error"))
+                _handle_failed_result(session_id, model_name, iteration_index, error_msg)
+                return model_name, {
+                    "status": "error",
+                    "error": error_msg,
+                    "iteration": iteration_index,
+                }
+
+        except Exception as e:
+            sanitized = sanitize_error_message(e)
+            if iteration_index is not None:
+                try:
+                    _handle_failed_result(session_id, model_name, iteration_index, sanitized)
+                except Exception as fail_err:
+                    StructuredLogger.warning(
+                        f"Failed to mark iteration as failed: {fail_err}",
+                        correlation_id=correlation_id,
+                    )
+            return model_name, {"status": "error", "error": sanitized}
+
+    # Include skipped models in results
+    results.update(skipped_models)
+
+    # Execute in parallel using module-level executor
+    futures = {_executor.submit(generate_for_model, model): model for model in models_to_dispatch}
+    future_timeout = config.generate_dispatch_budget_seconds
+    try:
+        for future in as_completed(futures, timeout=future_timeout):
+            try:
+                model_name, result = future.result()
+                results[model_name] = result
+            except Exception as e:
+                model_name = futures[future].name
+                sanitized = sanitize_error_message(e)
+                StructuredLogger.error(
+                    f"Thread pool failure for {model_name}: {sanitized}",
+                    correlation_id=correlation_id,
+                )
+                results[model_name] = {"status": "error", "error": sanitized}
+    except TimeoutError:
+        # Cancel what can still be cancelled. A future that has already
+        # started cannot be stopped -- the provider call is blocking I/O
+        # inside a worker thread -- so this only helps when there are more
+        # models than workers. The real defence is that every provider
+        # bounds its own call below this budget, so nothing should still
+        # be running by the time we get here. Nova was unbounded until
+        # this change, which is exactly how work outlived the budget,
+        # completed, and was billed after the user was told it failed.
+        # Counted from the futures themselves, not from len(results):
+        # `results` already holds the skipped models, which were never
+        # dispatched, so subtracting it undercounts by that many and can
+        # go negative -- silencing the log in exactly the case it exists
+        # for (models capped, one real call still burning money).
+        cancelled = sum(1 for f in futures if f.cancel())
+        still_running = sum(1 for f in futures if not f.cancelled() and not f.done())
+        if still_running > 0:
+            StructuredLogger.error(
+                "Dispatch budget expired with provider calls still running; "
+                "they will complete and be billed",
+                correlation_id=correlation_id,
+                stillRunning=still_running,
+                cancelled=cancelled,
+            )
+
+        # Mark any models that didn't complete in time
+        for future, model_cfg in futures.items():
+            model_name = model_cfg.name
+            if model_name not in results:
+                StructuredLogger.error(
+                    f"Model {model_name} timed out after {future_timeout}s",
+                    correlation_id=correlation_id,
+                )
+                results[model_name] = {
+                    "status": "error",
+                    "error": f"Model timed out after {future_timeout}s",
+                }
+
+    # Nothing generated at all: the user paid for a result they did not
+    # get. Skipped models do not count as attempts, so an all-skipped
+    # request refunds too.
+    produced = [
+        r
+        for name, r in results.items()
+        if name not in skipped_models and r.get("status") != "error"
+    ]
+    if not produced:
+        _refund_credits(tier_ctx, "generate", correlation_id)
+
+    # Meter what this request cost in dollars. Every dispatched model is
+    # metered, including ones that errored or timed out: the provider
+    # performed the work and bills for it regardless of whether we managed
+    # to return it to the user (see the as_completed timeout above, which
+    # does not cancel in-flight futures). For a spend ceiling, over-counting
+    # is the safe direction — under-counting means unbounded spend.
+    _cost_meter.record_models(
+        model_names=[m.name for m in models_to_dispatch],
+        operation="generate",
+        tier=tier_ctx.tier if tier_ctx else "anon",
+        user_id=tier_ctx.user_id if tier_ctx else None,
+        # Only bill for the adaptation when one actually happened. The
+        # enhancer short-circuits to the raw prompt with no LLM call when
+        # PROMPT_MODEL_API_KEY is unset — a supported open-source setup —
+        # and booking phantom spend there would corrupt the cost data this
+        # meter exists to gather.
+        include_enhance=prompt_enhancer.is_available,
+    )
+
+    # Emitted regardless of auth: knowing which provider is slow or
+    # failing has nothing to do with whether the caller logged in.
+    for mname, mresult in results.items():
+        if mname in skipped_models:
+            continue
+        dur = mresult.get("duration", 0) * 1000  # seconds to ms
+        is_err = mresult.get("status") == "error"
+        emit_request_metric("/generate", mname, dur, is_err)
+
+    return results
+
+
 def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> ApiResponse:
     """
     POST /generate - Create new session and generate initial images.
@@ -749,7 +1013,10 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
                         "reason": "admin_disabled",
                     }
                     continue
-                # Per-model cost ceiling check
+                # Per-model cost ceiling check. This is a RESERVATION and it
+                # stays in the request path: consuming the slot after the
+                # caller has been answered would let concurrent requests
+                # overdraw the cap.
                 if _model_counter_service.consume_model_slot(model.name, now_ts):
                     models_to_dispatch.append(model)
                 else:
@@ -775,31 +1042,6 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
             return response(429, error_responses.model_cost_ceiling())
 
         enabled_model_names = [m.name for m in models_to_dispatch]
-
-        # Adapt prompt per model (single LLM call, ~4x cheaper than per-model calls)
-        adapted_prompts = prompt_enhancer.adapt_per_model(
-            prompt, enabled_model_names, correlation_id=correlation_id
-        )
-
-        # Re-filter the rewritten prompts. The user's prompt was checked at
-        # validation, but what actually reaches the provider is this LLM
-        # rewrite — an unfiltered channel between the check and the call. The
-        # rewrite can introduce blocked terms the original never contained,
-        # either because the model elaborated in an unwanted direction or
-        # because the original was crafted to survive the filter and steer the
-        # rewrite. Checking only the input leaves the output unexamined.
-        #
-        # Falls back to the (already-checked) original rather than failing the
-        # request: one model's rewrite going astray should not deny the user
-        # the other three.
-        for _model_name, _adapted in list(adapted_prompts.items()):
-            if _adapted != prompt and content_filter.check_prompt(_adapted):
-                StructuredLogger.warning(
-                    "Adapted prompt failed the content filter; falling back to the original",
-                    correlation_id=correlation_id,
-                    model=_model_name,
-                )
-                adapted_prompts[_model_name] = prompt
 
         # Create session
         visibility = _visibility_for_tier(validated.tier.tier if validated.tier else None)
@@ -835,164 +1077,22 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
             models=enabled_model_names,
         )
 
-        results = {}
-        target = datetime.now(timezone.utc).strftime("%Y-%m-%d-%H-%M-%S")
-
-        def generate_for_model(model_config):
-            model_name = model_config.name
-            start_time = time.time()
-            iteration_index = None
-
-            try:
-                model_prompt = adapted_prompts.get(model_name, prompt)
-                iteration_index = session_manager.add_iteration(
-                    session_id, model_name, prompt, adapted_prompt=model_prompt
-                )
-
-                handler = get_handler(model_config.provider)
-                config_dict = get_model_config_dict(model_config)
-                result = handler(config_dict, model_prompt, {})
-
-                duration = time.time() - start_time
-
-                if result["status"] == "success":
-                    info = _handle_successful_result(
-                        session_id,
-                        model_name,
-                        prompt,
-                        result,
-                        iteration_index,
-                        target,
-                        duration,
-                        visibility,
-                        context_prompt=prompt,
-                    )
-                    return model_name, {
-                        "status": "completed",
-                        "imageKey": info["image_key"],
-                        "imageUrl": info["image_url"],
-                        "iteration": iteration_index,
-                        "duration": duration,
-                    }
-                else:
-                    error_msg = sanitize_error_message(result.get("error", "Unknown error"))
-                    _handle_failed_result(session_id, model_name, iteration_index, error_msg)
-                    return model_name, {
-                        "status": "error",
-                        "error": error_msg,
-                        "iteration": iteration_index,
-                    }
-
-            except Exception as e:
-                sanitized = sanitize_error_message(e)
-                if iteration_index is not None:
-                    try:
-                        _handle_failed_result(session_id, model_name, iteration_index, sanitized)
-                    except Exception as fail_err:
-                        StructuredLogger.warning(
-                            f"Failed to mark iteration as failed: {fail_err}",
-                            correlation_id=correlation_id,
-                        )
-                return model_name, {"status": "error", "error": sanitized}
-
-        # Include skipped models in results
-        results.update(skipped_models)
-
-        # Execute in parallel using module-level executor
-        futures = {
-            _executor.submit(generate_for_model, model): model for model in models_to_dispatch
+        # Everything below this line is provider work, and none of it is
+        # allowed to depend on the HTTP event. JSON-serialisable only: in
+        # asynchronous mode this crosses an Invoke boundary.
+        worker_payload: dict[str, Any] = {
+            "source": "generate_worker",
+            "sessionId": session_id,
+            "prompt": prompt,
+            "modelNames": enabled_model_names,
+            "skipped": skipped_models,
+            "visibility": visibility,
+            "tier": validated.tier.tier if validated.tier else None,
+            "userId": validated.tier.user_id if validated.tier else None,
+            "correlationId": correlation_id,
         }
-        future_timeout = config.generate_dispatch_budget_seconds
-        try:
-            for future in as_completed(futures, timeout=future_timeout):
-                try:
-                    model_name, result = future.result()
-                    results[model_name] = result
-                except Exception as e:
-                    model_name = futures[future].name
-                    sanitized = sanitize_error_message(e)
-                    StructuredLogger.error(
-                        f"Thread pool failure for {model_name}: {sanitized}",
-                        correlation_id=correlation_id,
-                    )
-                    results[model_name] = {"status": "error", "error": sanitized}
-        except TimeoutError:
-            # Cancel what can still be cancelled. A future that has already
-            # started cannot be stopped -- the provider call is blocking I/O
-            # inside a worker thread -- so this only helps when there are more
-            # models than workers. The real defence is that every provider
-            # bounds its own call below this budget, so nothing should still
-            # be running by the time we get here. Nova was unbounded until
-            # this change, which is exactly how work outlived the budget,
-            # completed, and was billed after the user was told it failed.
-            # Counted from the futures themselves, not from len(results):
-            # `results` already holds the skipped models, which were never
-            # dispatched, so subtracting it undercounts by that many and can
-            # go negative -- silencing the log in exactly the case it exists
-            # for (models capped, one real call still burning money).
-            cancelled = sum(1 for f in futures if f.cancel())
-            still_running = sum(1 for f in futures if not f.cancelled() and not f.done())
-            if still_running > 0:
-                StructuredLogger.error(
-                    "Dispatch budget expired with provider calls still running; "
-                    "they will complete and be billed",
-                    correlation_id=correlation_id,
-                    stillRunning=still_running,
-                    cancelled=cancelled,
-                )
 
-            # Mark any models that didn't complete in time
-            for future, model_cfg in futures.items():
-                model_name = model_cfg.name
-                if model_name not in results:
-                    StructuredLogger.error(
-                        f"Model {model_name} timed out after {future_timeout}s",
-                        correlation_id=correlation_id,
-                    )
-                    results[model_name] = {
-                        "status": "error",
-                        "error": f"Model timed out after {future_timeout}s",
-                    }
-
-        # Nothing generated at all: the user paid for a result they did not
-        # get. Skipped models do not count as attempts, so an all-skipped
-        # request refunds too.
-        produced = [
-            r
-            for name, r in results.items()
-            if name not in skipped_models and r.get("status") != "error"
-        ]
-        if not produced:
-            _refund_credits(validated.tier, "generate", correlation_id)
-
-        # Meter what this request cost in dollars. Every dispatched model is
-        # metered, including ones that errored or timed out: the provider
-        # performed the work and bills for it regardless of whether we managed
-        # to return it to the user (see the as_completed timeout above, which
-        # does not cancel in-flight futures). For a spend ceiling, over-counting
-        # is the safe direction — under-counting means unbounded spend.
-        _cost_meter.record_models(
-            model_names=[m.name for m in models_to_dispatch],
-            operation="generate",
-            tier=validated.tier.tier if validated.tier else "anon",
-            user_id=validated.tier.user_id if validated.tier else None,
-            # Only bill for the adaptation when one actually happened. The
-            # enhancer short-circuits to the raw prompt with no LLM call when
-            # PROMPT_MODEL_API_KEY is unset — a supported open-source setup —
-            # and booking phantom spend there would corrupt the cost data this
-            # meter exists to gather.
-            include_enhance=prompt_enhancer.is_available,
-        )
-
-        # Emitted regardless of auth: knowing which provider is slow or
-        # failing has nothing to do with whether the caller logged in.
-        for mname, mresult in results.items():
-            if mname in skipped_models:
-                continue
-            dur = mresult.get("duration", 0) * 1000  # seconds to ms
-            is_err = mresult.get("status") == "error"
-            emit_request_metric("/generate", mname, dur, is_err)
-
+        # Computed in the request path because the worker cannot set cookies.
         set_cookie = None
         if (
             validated.tier
@@ -1003,6 +1103,9 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
             set_cookie = _guest_service.set_cookie_header(
                 validated.tier.new_guest_token, config.guest_window_seconds
             )
+
+        results = run_generation(worker_payload)
+
         # Return the finished session, not just per-model outcomes. Every
         # future has already been awaited above, so this state is final —
         # the client previously discarded this response, built empty
