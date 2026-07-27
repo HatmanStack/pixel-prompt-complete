@@ -44,7 +44,7 @@ from models.providers import (
     get_outpaint_handler,
     sanitize_error_message,
 )
-from ops.cost_meter import CostMeter
+from ops.cost_meter import CostMeter, UnreadableSpendTotal
 from ops.metrics import emit_quota_rejection, emit_request_metric, emit_request_metrics
 from ops.model_counters import ModelCounterService
 from prompts.repository import PromptHistoryRepository
@@ -154,10 +154,14 @@ class ValidatedRequest:
 def _daily_spend_exceeded(now: int | None = None) -> bool:
     """True when today's metered spend has reached the configured ceiling.
 
-    Fails OPEN on a read error: if the spend accumulator is unreadable we
-    cannot prove the budget is blown, and hard-failing every billable request
-    on a transient DynamoDB blip would be a self-inflicted outage. The read
-    error is logged so the gap is visible.
+    Fails OPEN on a STORE error: if DynamoDB is unreachable we cannot prove
+    the budget is blown, and hard-failing every billable request on a
+    transient blip would be a self-inflicted outage. The read error is logged
+    so the gap is visible.
+
+    Fails CLOSED on ``UnreadableSpendTotal`` -- a successful read whose total
+    is not a number. That is permanent rather than transient, so failing open
+    would leave the ceiling switched off indefinitely by a stray attribute.
 
     This is check-then-act, not an atomic reservation: the spend write happens
     after the provider call, so concurrent requests can all read an
@@ -177,6 +181,12 @@ def _daily_spend_exceeded(now: int | None = None) -> bool:
         return False
     try:
         spend = _cost_meter.get_daily_spend(now=now)
+    except UnreadableSpendTotal as e:
+        # Fails CLOSED, unlike the store error below. The read succeeded and
+        # the number is corrupt, which is permanent: failing open here leaves
+        # the ceiling off until someone reads the logs.
+        StructuredLogger.error(f"Spend accumulator is unreadable, refusing request: {e}")
+        return True
     except Exception as e:
         StructuredLogger.error(f"Spend ceiling check failed, allowing request: {e}")
         return False
@@ -189,14 +199,18 @@ def _monthly_spend_exceeded(now: int | None = None) -> bool:
     The daily ceiling bounds a bad day; this bounds a bad month. Without it,
     sustained traffic at just under the daily limit runs to roughly 30x it.
 
-    Fails open on a read error for the same reason as the daily check: an
-    unreadable counter is not evidence the budget is blown.
+    Fails open on a store error for the same reason as the daily check: an
+    unreachable counter is not evidence the budget is blown. Fails closed on
+    a corrupt total, for the reason given there.
     """
     ceiling = config.monthly_spend_ceiling_usd_micros
     if ceiling <= 0:
         return False
     try:
         spend = _cost_meter.get_monthly_spend(now=now)
+    except UnreadableSpendTotal as e:
+        StructuredLogger.error(f"Monthly accumulator is unreadable, refusing request: {e}")
+        return True
     except Exception as e:
         StructuredLogger.error(f"Monthly ceiling check failed, allowing request: {e}")
         return False
@@ -216,6 +230,9 @@ def _enhance_spend_exceeded(now: int | None = None) -> bool:
         return False
     try:
         spend = _cost_meter.get_daily_spend(now=now)
+    except UnreadableSpendTotal as e:
+        StructuredLogger.error(f"Spend accumulator is unreadable, refusing enhance: {e}")
+        return True
     except Exception as e:
         StructuredLogger.error(f"Enhance ceiling check failed, allowing request: {e}")
         return False

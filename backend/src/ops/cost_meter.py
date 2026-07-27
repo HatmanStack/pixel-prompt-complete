@@ -39,6 +39,27 @@ from utils.logger import StructuredLogger
 # which is a poor look for a cost-control feature.
 SPEND_ITEM_TTL_SECONDS = 400 * 86400
 
+# Bookkeeping attributes on a spend item that are not money.
+_NON_SPEND_ATTRIBUTES = frozenset({"userId", "updatedAt", "ttl"})
+
+# The attributes a ceiling actually evaluates. A corrupt value here cannot be
+# skipped: reporting 0 for an unreadable total tells a guard whose whole job
+# is to notice spend that there was none.
+CEILING_ATTRIBUTES = frozenset({"totalMicros", "enhanceMicros"})
+
+
+class UnreadableSpendTotal(Exception):
+    """A spend item was read successfully but a ceiling attribute is not a number.
+
+    Deliberately distinct from a store error, because the two want opposite
+    policies. A DynamoDB failure is transient, and failing open on it is
+    argued in the ceiling helpers in ``lambda_function``: hard-failing every
+    billable request on a blip would be a self-inflicted outage. A malformed
+    attribute is permanent -- failing open there means the ceiling stays off
+    until a human reads the logs, which is exactly the failure this exception
+    exists to separate out.
+    """
+
 
 def _day_key(now: int) -> str:
     """UTC date bucket. UTC, not local, so the ceiling resets predictably."""
@@ -183,10 +204,43 @@ class CostMeter:
         return self._read_spend(monthly_spend_item_key(now))
 
     def _read_spend(self, key: str) -> dict[str, Any]:
+        """Read a spend accumulator, coercing defensively.
+
+        This used to be ``int(v)`` over every attribute except the three
+        excluded below. Any non-numeric attribute on a ``spend#`` item raised
+        ``ValueError``, which the three ceiling helpers catch and **fail
+        open** -- so the last guard against an unbounded provider bill could
+        be switched off by an attribute nobody was reading, and the symptom
+        was a log line rather than an outage.
+
+        An attribute the ceilings do not read is skipped with a WARNING: the
+        guard's job is to bound spend, and a corrupt sibling must not be able
+        to disable it. An attribute a ceiling *does* read raises
+        ``UnreadableSpendTotal``, which is deliberately not the same thing as
+        a store error -- see that class's docstring.
+        """
         item = self._repo.get_user(key)
         if not item:
             return {"totalMicros": 0}
-        return {k: int(v) for k, v in item.items() if k not in ("userId", "updatedAt", "ttl")}
+
+        spend: dict[str, Any] = {}
+        for attribute, value in item.items():
+            if attribute in _NON_SPEND_ATTRIBUTES:
+                continue
+            try:
+                spend[attribute] = int(value)
+            except (TypeError, ValueError) as e:
+                if attribute in CEILING_ATTRIBUTES:
+                    raise UnreadableSpendTotal(
+                        f"{key}.{attribute} is not a number: {value!r}"
+                    ) from e
+                StructuredLogger.warning(
+                    "Skipping a non-numeric attribute on a spend item; the "
+                    "ceiling is evaluated from the remaining fields",
+                    item=key,
+                    attribute=attribute,
+                )
+        return spend
 
 
 def reconcile_monthly_spend(repo: Any, now: int) -> dict[str, int]:

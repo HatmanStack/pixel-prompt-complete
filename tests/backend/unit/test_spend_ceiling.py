@@ -594,3 +594,64 @@ def test_reconciliation_does_not_reach_into_the_previous_month():
         assert result["expected"] == 10_000, "pulled in a previous month's spend"
     finally:
         ctx.stop()
+
+
+# ---------------------------------------------------------------------------
+# A corrupt spend item fails CLOSED; a store outage still fails OPEN.
+#
+# The two are different failures and had one policy. A DynamoDB error is
+# transient, and failing open on it is argued in the helpers' docstrings. A
+# malformed attribute is permanent: failing open there means the ceiling is
+# off until a human reads the logs.
+# ---------------------------------------------------------------------------
+
+
+def test_an_unreadable_daily_total_refuses_the_request(monkeypatch):
+    import lambda_function as lf
+    from ops.cost_meter import UnreadableSpendTotal
+
+    def _boom(**_kwargs):
+        raise UnreadableSpendTotal("totalMicros is not a number")
+
+    monkeypatch.setattr(lf._cost_meter, "get_daily_spend", _boom)
+    assert lf._daily_spend_exceeded(now=1784980800) is True
+
+
+def test_an_unreadable_monthly_total_refuses_the_request(monkeypatch):
+    import lambda_function as lf
+    from ops.cost_meter import UnreadableSpendTotal
+
+    def _boom(**_kwargs):
+        raise UnreadableSpendTotal("totalMicros is not a number")
+
+    monkeypatch.setattr(lf._cost_meter, "get_monthly_spend", _boom)
+    assert lf._monthly_spend_exceeded(now=1784980800) is True
+
+
+def test_an_unreadable_enhance_total_refuses_the_request(monkeypatch):
+    import lambda_function as lf
+    from ops.cost_meter import UnreadableSpendTotal
+
+    def _boom(**_kwargs):
+        raise UnreadableSpendTotal("enhanceMicros is not a number")
+
+    monkeypatch.setattr(lf._cost_meter, "get_daily_spend", _boom)
+    assert lf._enhance_spend_exceeded(now=1784980800) is True
+
+
+def test_a_store_error_still_fails_open(monkeypatch):
+    """The documented policy for a transient DynamoDB failure is unchanged.
+
+    This is the assertion that stops the fail-closed case above being widened
+    into a self-inflicted outage on a blip.
+    """
+    import lambda_function as lf
+
+    def _boom(**_kwargs):
+        raise RuntimeError("dynamodb unavailable")
+
+    monkeypatch.setattr(lf._cost_meter, "get_daily_spend", _boom)
+    monkeypatch.setattr(lf._cost_meter, "get_monthly_spend", _boom)
+    assert lf._daily_spend_exceeded(now=1784980800) is False
+    assert lf._monthly_spend_exceeded(now=1784980800) is False
+    assert lf._enhance_spend_exceeded(now=1784980800) is False
