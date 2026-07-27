@@ -12,7 +12,6 @@ Covers:
 from __future__ import annotations
 
 import json
-import time
 from unittest.mock import patch
 
 import boto3
@@ -87,7 +86,6 @@ class TestHandleAdminModelsList:
         from admin.models import handle_admin_models_list
 
         event = _make_admin_event()
-        now = int(time.time())
         result = handle_admin_models_list(event, model_counter, "corr-1")
         assert result["statusCode"] == 200
         body = json.loads(result["body"])

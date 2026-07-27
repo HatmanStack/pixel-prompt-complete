@@ -153,8 +153,9 @@ class TestCreateExpansionMask:
 
     def test_returns_base64_when_specified(self, expansion_data):
         """create_expansion_mask() should return base64 when specified."""
-        from utils.outpaint import create_expansion_mask
         import base64
+
+        from utils.outpaint import create_expansion_mask
 
         result = create_expansion_mask(1024, 1024, expansion_data, mask_format='base64')
 
@@ -170,8 +171,9 @@ class TestPadImageWithTransparency:
     @pytest.fixture
     def sample_image_bytes(self):
         """Create sample PNG image bytes."""
-        from PIL import Image
         from io import BytesIO
+
+        from PIL import Image
 
         img = Image.new('RGB', (100, 100), color='red')
         buffer = BytesIO()
@@ -201,9 +203,11 @@ class TestPadImageWithTransparency:
 
     def test_output_has_correct_dimensions(self, sample_image_bytes, expansion_data):
         """Padded image should have correct dimensions."""
-        from utils.outpaint import pad_image_with_transparency
-        from PIL import Image
         from io import BytesIO
+
+        from PIL import Image
+
+        from utils.outpaint import pad_image_with_transparency
 
         result = pad_image_with_transparency(sample_image_bytes, expansion_data)
 
@@ -217,9 +221,11 @@ class TestGetImageDimensions:
 
     def test_returns_width_height_tuple(self):
         """get_image_dimensions() should return (width, height) tuple."""
-        from utils.outpaint import get_image_dimensions
-        from PIL import Image
         from io import BytesIO
+
+        from PIL import Image
+
+        from utils.outpaint import get_image_dimensions
 
         # Create test image
         img = Image.new('RGB', (640, 480), color='blue')

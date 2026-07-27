@@ -3,10 +3,9 @@ Tests for generate endpoint resilience — future.result() error handling and ti
 """
 
 import json
+import os
 from concurrent.futures import TimeoutError
 from unittest.mock import MagicMock, patch
-
-import os
 
 import boto3
 import pytest

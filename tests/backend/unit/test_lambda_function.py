@@ -5,9 +5,8 @@ Mocks all module-level singletons to avoid real AWS calls.
 """
 
 import json
-from unittest.mock import MagicMock, patch
-
 import os
+from unittest.mock import MagicMock, patch
 
 import boto3
 import pytest
@@ -636,6 +635,9 @@ class TestAdminRouting:
                 _make_event(method="GET", path="/admin/users"), None
             )
             mock_route.assert_called_once()
+            # The binding was discarded, so nothing checked that the router's
+            # response is what the caller gets back.
+            assert resp["statusCode"] == 200
 
     def test_admin_models_list_routes(self, mocks):
         lambda_handler = _get_lambda_handler()

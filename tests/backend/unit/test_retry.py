@@ -10,15 +10,14 @@ asserting is the behaviour the lock must not change, which is cache identity.
 Same reasoning as the moto rule in the plan's Phase-0.
 """
 
-import pytest
-import time
 from unittest.mock import Mock, patch
-from botocore.exceptions import ClientError, BotoCoreError
+
+import pytest
+from botocore.exceptions import BotoCoreError, ClientError
+
 from utils.retry import (
-    retry_with_backoff,
     is_retryable_error,
-    RETRYABLE_S3_ERRORS,
-    PERMANENT_S3_ERRORS
+    retry_with_backoff,
 )
 
 

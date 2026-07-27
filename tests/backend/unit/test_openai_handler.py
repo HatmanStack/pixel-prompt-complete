@@ -12,6 +12,7 @@ from models.providers.openai_provider import (
     iterate_openai,
     outpaint_openai,
 )
+
 from .fixtures.api_responses import SAMPLE_IMAGE_BASE64, SAMPLE_IMAGE_CONTENT
 
 
@@ -82,8 +83,9 @@ def test_iterate_openai_uses_gpt_image_1(openai_config):
 
 def test_outpaint_openai_uses_gpt_image_1(openai_config):
     """Critical ADR-5 test: outpaint must use gpt-image-1 even when config says dall-e-3."""
-    from PIL import Image
     from io import BytesIO
+
+    from PIL import Image
 
     img = Image.new("RGB", (1024, 1024), (255, 255, 255))
     buf = BytesIO()

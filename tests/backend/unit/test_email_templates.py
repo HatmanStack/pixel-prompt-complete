@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import re
 
-import pytest
-
 
 def _has_no_html_tags(text: str) -> bool:
     """Return True if text contains no HTML tags."""

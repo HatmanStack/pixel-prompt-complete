@@ -6,9 +6,10 @@ Set API_ENDPOINT environment variable before running.
 """
 
 import os
+import uuid
+
 import pytest
 import requests
-import uuid
 
 # Load API endpoint from environment
 API_ENDPOINT = os.environ.get('API_ENDPOINT', '')

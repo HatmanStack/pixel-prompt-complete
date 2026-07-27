@@ -9,6 +9,7 @@ from models.providers.gemini import (
     iterate_gemini,
     outpaint_gemini,
 )
+
 from .fixtures.api_responses import SAMPLE_IMAGE_BASE64, SAMPLE_IMAGE_CONTENT
 
 

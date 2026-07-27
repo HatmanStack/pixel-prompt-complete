@@ -441,6 +441,12 @@ def test_outpaint_firefly_bounds_its_whole_chain_by_the_budget_it_was_given():
     assert result["status"] == "success", result
     timeouts = [r.timeout for r in m.request_history]
     assert len(timeouts) == c.FIREFLY_SEQUENTIAL_CALLS
+    # Per call, not only in aggregate -- the sum can be right while an
+    # individual call is over budget and another under. The iterate and
+    # generate counterparts both assert this; outpaint computed `expected`
+    # and dropped it, which is what the widened ruff scope surfaced.
+    assert timeouts[0] == c.FIREFLY_TOKEN_TIMEOUT
+    assert timeouts[1:] == [expected] * (c.FIREFLY_SEQUENTIAL_CALLS - 1)
     assert sum(timeouts) <= budget
     # Anchor the declared worst case to the timeouts actually issued. Without
     # this, firefly_worst_case_seconds is checked only against its own
@@ -503,7 +509,7 @@ def _recorder(seen):
 def test_refinement_hands_the_provider_the_synchronous_budget():
     """/iterate is answered inside the HTTP request, so 60s cannot be its bound."""
     import json
-    from unittest.mock import MagicMock, patch
+    from unittest.mock import patch
 
     import config
     from users.quota import QuotaResult

@@ -2,11 +2,14 @@
 Unit tests for storage utilities
 """
 
-import pytest
 import json
 from unittest.mock import patch
+
+import pytest
 from botocore.exceptions import ClientError
+
 from utils.storage import ImageStorage
+
 from .fixtures.api_responses import SAMPLE_IMAGE_BASE64
 
 

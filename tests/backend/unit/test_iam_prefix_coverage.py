@@ -18,6 +18,7 @@ H1). No runtime test could have caught it; only a template test can.
 import pathlib
 
 import yaml
+
 from utils.storage import WRITTEN_PREFIXES
 
 TEMPLATE = pathlib.Path(__file__).resolve().parents[3] / "backend" / "template.yaml"

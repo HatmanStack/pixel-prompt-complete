@@ -15,9 +15,10 @@ os.environ.setdefault("AUTH_ENABLED", "false")
 # test_age_gate.py turns it back on explicitly and owns the wiring assertions.
 os.environ.setdefault("AGE_GATE_ENABLED", "false")
 
+import boto3
 import pytest
 from moto import mock_aws
-import boto3
+
 
 def _reset_handler_singletons():
     """Clear module-level client caches to ensure test isolation."""

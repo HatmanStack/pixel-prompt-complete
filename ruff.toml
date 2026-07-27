@@ -1,0 +1,24 @@
+# Ruff configuration for the Python outside backend/.
+#
+# `tests/` (the bulk of this repository's Python) had no ruff configuration
+# above it at all, so a `ruff check tests/` run from the repository root fell
+# back to ruff's built-in defaults: line-length 88 instead of 100, and the
+# E4/E7/E9/F subset instead of E/F/W/I. The test tree was being held to a
+# different standard than the source tree, quietly.
+#
+# `extend` rather than a copy: backend/pyproject.toml stays the single place
+# the rule set is chosen, so the two cannot drift. Files under backend/ keep
+# resolving to backend/pyproject.toml directly -- ruff uses the nearest
+# ancestor config -- and this file governs tests/ only.
+#
+# Passing --config backend/pyproject.toml would have been the shorter fix and
+# it is wrong: --config makes the *current directory* the project root, so
+# isort stops recognising config, utils, models and ops as first-party and
+# demands they be merged into the third-party import block. Measured: it turns
+# a clean backend/src/ into 21 I001 findings.
+extend = "backend/pyproject.toml"
+
+# The backend is imported as a flat package tree from backend/src (tests run
+# with PYTHONPATH=backend/src), so that is what makes `import config` and
+# `from ops.metrics import ...` first-party here.
+src = ["backend/src", "."]

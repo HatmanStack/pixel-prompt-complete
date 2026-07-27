@@ -23,6 +23,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from botocore.exceptions import ClientError
+
 from jobs.manager import MAX_RETRIES, ConcurrencyError, SessionManager
 
 _READ_ETAG = '"etag-from-get-object"'

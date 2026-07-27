@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import importlib
 import os
 import time
-from decimal import Decimal
 from unittest.mock import patch
 
 import boto3
@@ -185,7 +183,6 @@ class TestHandleDailySnapshot:
         handle_daily_snapshot({}, None, repo=repo)
         # Second call should not overwrite
         # Modify the model counter to verify no overwrite
-        now = int(time.time())
         table.update_item(
             Key={"userId": "model#gemini"},
             UpdateExpression="SET dailyCount = :c",

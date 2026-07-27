@@ -25,6 +25,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 from google.genai import types
+
 from models.providers.gemini import iterate_gemini, outpaint_gemini
 
 _PIXEL = b"\x89PNG\r\n\x1a\n-not-a-real-png"

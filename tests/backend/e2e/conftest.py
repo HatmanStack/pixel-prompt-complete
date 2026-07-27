@@ -13,7 +13,6 @@ still exercises the whole path -- it is the transport that is stubbed out, not
 the work.
 """
 
-import json
 import os
 import uuid
 from unittest.mock import patch

@@ -10,10 +10,9 @@ Prerequisites:
 """
 
 import os
+
 import pytest
 import requests
-import time
-import json
 
 # Load API endpoint from environment
 API_ENDPOINT = os.environ.get('API_ENDPOINT', '')
