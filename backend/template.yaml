@@ -734,6 +734,16 @@ Resources:
               Effect: Allow
               Action: ses:SendEmail
               Resource: "*"
+            # The literal !Sub form is required. A !GetAtt on this
+            # function's own Arn would be a circular dependency -- the policy
+            # is attached to that same function -- and the stack would not
+            # deploy. The literal form works because FunctionName above is
+            # itself !Sub '${AWS::StackName}-function'; if that ever changes,
+            # this must change with it.
+            - Sid: SelfInvokeForGeneration
+              Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${AWS::StackName}-function"
       Events:
         # The integration timeout is stated explicitly on the three routes
         # that can do provider work. 30000ms is an AWS hard cap on HTTP API

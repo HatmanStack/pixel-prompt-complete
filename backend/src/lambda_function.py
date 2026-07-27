@@ -6,6 +6,7 @@ iteration, outpainting, and session status.
 
 import base64
 import json
+import os
 import re
 import time
 import traceback
@@ -16,6 +17,7 @@ from typing import Any
 from uuid import uuid4
 
 import boto3
+from botocore.config import Config as BotoConfig
 
 import config
 from api.enhance import PromptEnhancer
@@ -109,6 +111,34 @@ prompt_enhancer = PromptEnhancer()
 # Separate pools prevent gallery metadata fetches from starving generation threads.
 _executor = ThreadPoolExecutor(max_workers=generate_thread_workers)
 _gallery_executor = ThreadPoolExecutor(max_workers=4)
+
+# Lambda client for the asynchronous /generate self-invoke. Lazily built so a
+# unit test without moto never constructs one at import.
+_lambda_client = None
+
+# The Invoke that hands work to the worker is itself on the request path, so it
+# is bounded for the same reason the CloudWatch client is (ops/metrics.py): an
+# unbounded call would put the request back inside the gateway ceiling it
+# exists to escape. Two attempts, not more -- a retried Event invocation that
+# both attempts deliver would generate the images twice.
+_INVOKE_CONNECT_TIMEOUT_SECONDS = 2
+_INVOKE_READ_TIMEOUT_SECONDS = 5
+_INVOKE_MAX_ATTEMPTS = 2
+
+
+def _get_lambda_client():
+    """Return a lazily-initialized Lambda client with bounded timeouts."""
+    global _lambda_client
+    if _lambda_client is None:
+        _lambda_client = boto3.client(
+            "lambda",
+            config=BotoConfig(
+                connect_timeout=_INVOKE_CONNECT_TIMEOUT_SECONDS,
+                read_timeout=_INVOKE_READ_TIMEOUT_SECONDS,
+                retries={"mode": "standard", "total_max_attempts": _INVOKE_MAX_ATTEMPTS},
+            ),
+        )
+    return _lambda_client
 
 
 @dataclass
@@ -632,6 +662,25 @@ def lambda_handler(event: LambdaEvent, context: LambdaContext) -> ApiResponse:
 
         return handle_daily_snapshot(event, context, repo=_user_repo)
 
+    # Asynchronous /generate worker. Must come before extract_correlation_id
+    # and the path parsing below, both of which assume an HTTP event.
+    if event.get("source") == "generate_worker":
+        try:
+            run_generation(event)
+        except Exception as e:
+            # Deliberately not re-raised. Every per-model failure is already
+            # recorded on the session, so raising would add an unexplained
+            # invocation error -- and a platform-chosen retry that would
+            # generate and bill the images a second time -- on top of a session
+            # the client can already read the truth from.
+            StructuredLogger.error(
+                f"Generate worker failed: {e}",
+                correlation_id=event.get("correlationId"),
+                sessionId=event.get("sessionId"),
+                traceback=traceback.format_exc(),
+            )
+        return {"statusCode": 200}
+
     correlation_id = extract_correlation_id(event)
 
     path = event.get("rawPath", event.get("path", ""))
@@ -705,6 +754,36 @@ def lambda_handler(event: LambdaEvent, context: LambdaContext) -> ApiResponse:
             traceback=traceback.format_exc(),
         )
         return response(500, {"error": "Internal server error"})
+
+
+def _dispatch_generation_async(payload: dict[str, Any], correlation_id: str | None = None) -> bool:
+    """Hand the provider dispatch to a worker invocation. True when accepted.
+
+    Returns False on ANY failure -- AWS_LAMBDA_FUNCTION_NAME absent, the
+    lambda:InvokeFunction grant missing, the account throttling -- and the
+    caller then runs the dispatch inline.
+
+    That fallback is load-bearing. A deploy whose IAM grant did not land
+    degrades to the pre-async behaviour (a slow request that may 504) rather
+    than to sessions that are created, answered 202, and never worked on.
+    AWS_LAMBDA_FUNCTION_NAME is set by the Lambda runtime; outside Lambda it is
+    absent, which is exactly when falling back is right.
+    """
+    try:
+        function_name = os.environ["AWS_LAMBDA_FUNCTION_NAME"]
+        _get_lambda_client().invoke(
+            FunctionName=function_name,
+            InvocationType="Event",
+            Payload=json.dumps(payload).encode(),
+        )
+        return True
+    except Exception as e:
+        StructuredLogger.error(
+            f"Async generate dispatch failed, running inline instead: {e}",
+            correlation_id=correlation_id,
+            sessionId=payload.get("sessionId"),
+        )
+        return False
 
 
 def run_generation(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1104,6 +1183,30 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
                 validated.tier.new_guest_token, config.guest_window_seconds
             )
 
+        if config.generate_async and _dispatch_generation_async(worker_payload, correlation_id):
+            # No `session` key, deliberately. GenerationPanel's `else` branch
+            # builds a placeholder session and hands over to useSessionPolling,
+            # which is the path the client already took whenever a session was
+            # not attached -- so this needed no frontend change.
+            #
+            # Skipped entries keep their existing {"status": "skipped",
+            # "reason": ...} shape: a skipped model never becomes a session
+            # iteration, so this response is the only place the cap and
+            # admin-disable signals exist.
+            return response(
+                202,
+                {
+                    "sessionId": session_id,
+                    "prompt": prompt,
+                    "models": {
+                        **skipped_models,
+                        **{name: {"status": "pending"} for name in enabled_model_names},
+                    },
+                },
+                set_cookie=set_cookie,
+            )
+
+        # Synchronous mode, or an Invoke that did not land.
         results = run_generation(worker_payload)
 
         # Return the finished session, not just per-model outcomes. Every

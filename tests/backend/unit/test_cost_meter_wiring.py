@@ -17,6 +17,15 @@ import pytest
 def _patch_env(monkeypatch):
     monkeypatch.setenv("S3_BUCKET", "test-bucket")
     monkeypatch.setenv("CLOUDFRONT_DOMAIN", "test.cloudfront.net")
+    # This module exercises the dispatch loop, not the transport.
+    # GENERATE_ASYNC defaults true, which makes /generate answer 202 before any
+    # provider runs -- and before the cost meter these tests are about. Patched
+    # on the config module rather than set in the environment because config
+    # reads the variable once at import. The asynchronous path is covered in
+    # tests/backend/unit/test_generate_async_dispatch.py.
+    import config
+
+    monkeypatch.setattr(config, "generate_async", False)
 
 
 def _make_event(prompt="test prompt"):
