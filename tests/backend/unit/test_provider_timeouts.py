@@ -38,7 +38,6 @@ def _synchronous_dispatch(monkeypatch):
     monkeypatch.setattr(config, "generate_async", False)
 
 
-
 def test_bedrock_client_has_bounded_timeouts():
     import utils.clients as c
 
@@ -174,8 +173,12 @@ def test_running_calls_are_reported_when_models_were_also_skipped():
     ):
         mock_repo.get_model_runtime_config.return_value = None
         mock_tier.return_value = TierContext(
-            tier="paid", user_id="u1", email=None,
-            is_authenticated=True, guest_token_id=None, issue_guest_cookie=False,
+            tier="paid",
+            user_id="u1",
+            email=None,
+            is_authenticated=True,
+            guest_token_id=None,
+            issue_guest_cookie=False,
         )
         mock_quota.return_value = QuotaResult(allowed=True, reason=None, reset_at=0)
         mock_cf.check_prompt.return_value = False
@@ -220,7 +223,9 @@ def test_sync_budget_fits_inside_the_gateway_ceiling():
     """
     import config
 
-    assert config.sync_dispatch_budget_seconds < config.gateway_integration_timeout_seconds
+    assert (
+        config.sync_dispatch_budget_seconds < config.gateway_integration_timeout_seconds
+    )
     assert config.sync_dispatch_budget_seconds > 0
 
 
@@ -362,7 +367,10 @@ def _mock_the_firefly_chain(m, generate_url):
 
     m.post(firefly_mod._TOKEN_URL, json={"access_token": "t"})
     m.post(firefly_mod._STORAGE_URL, json={"images": [{"id": "upload-1"}]})
-    m.post(generate_url, json={"outputs": [{"image": {"url": "https://img.example/x.png"}}]})
+    m.post(
+        generate_url,
+        json={"outputs": [{"image": {"url": "https://img.example/x.png"}}]},
+    )
     m.get("https://img.example/x.png", content=b"\x89PNG-not-really")
 
 
@@ -482,7 +490,12 @@ def _stub_model_config():
 def _recorder(seen):
     def _handler(model_config, *_args, **_kwargs):
         seen.append(model_config)
-        return {"status": "success", "image": "aGk=", "model": "m", "provider": "google_gemini"}
+        return {
+            "status": "success",
+            "image": "aGk=",
+            "model": "m",
+            "provider": "google_gemini",
+        }
 
     return _handler
 
@@ -502,7 +515,9 @@ def test_refinement_hands_the_provider_the_synchronous_budget():
         "models": {
             "gemini": {
                 "iterationCount": 1,
-                "iterations": [{"index": 0, "status": "completed", "imageKey": "k.png"}],
+                "iterations": [
+                    {"index": 0, "status": "completed", "imageKey": "k.png"}
+                ],
             }
         },
     }
@@ -518,9 +533,10 @@ def test_refinement_hands_the_provider_the_synchronous_budget():
         patch("lambda_function.image_storage") as mock_storage,
         patch("lambda_function.context_manager"),
         patch("lambda_function.get_iterate_handler", return_value=_recorder(seen)),
-        patch("lambda_function._handle_successful_result", return_value={
-            "image_key": "k", "image_url": "u"
-        }),
+        patch(
+            "lambda_function._handle_successful_result",
+            return_value={"image_key": "k", "image_url": "u"},
+        ),
         patch("lambda_function._cost_meter"),
         patch("lambda_function.emit_request_metric"),
         patch("lambda_function._user_repo"),
@@ -567,9 +583,10 @@ def test_generation_dispatch_keeps_the_larger_asynchronous_budget():
         patch("lambda_function.content_filter") as mock_cf,
         patch("lambda_function.session_manager") as mock_sm,
         patch("lambda_function.get_handler", return_value=_recorder(seen)),
-        patch("lambda_function._handle_successful_result", return_value={
-            "image_key": "k", "image_url": "u"
-        }),
+        patch(
+            "lambda_function._handle_successful_result",
+            return_value={"image_key": "k", "image_url": "u"},
+        ),
         patch("lambda_function._cost_meter"),
         patch("ops.metrics._get_cw_client"),
         patch("lambda_function._user_repo", MagicMock()),
@@ -620,7 +637,267 @@ def test_openai_client_is_built_with_the_derived_timeout_and_no_hidden_retries()
     kwargs = mock_openai.call_args.kwargs
     assert kwargs["max_retries"] == c.OPENAI_MAX_ATTEMPTS - 1
     assert kwargs["timeout"] == c.openai_call_timeout(budget)
+    assert c.openai_worst_case_seconds(
+        budget
+    ) >= c.OPENAI_MAX_ATTEMPTS * c.openai_call_timeout(budget)
+
+
+# ---------------------------------------------------------------------------
+# Every provider must HAND its derived timeout to its client.
+#
+# The worst-case functions above call gemini_call_timeout / openai_call_timeout
+# / bedrock_read_timeout directly, so they keep passing even if a provider
+# module stops calling them. That is the Firefly defect restated: it was never
+# a missing function, it was an existing provider not passing its bound to its
+# client. Reverting Gemini, OpenAI and Nova to the module-level
+# api_client_timeout left the whole backend suite green until these landed.
+#
+# Asserting on the timeout the client factory received is asserting on the
+# contract, for the same reason the Firefly chain tests give: a blocking call
+# that cannot be cancelled costs exactly its timeout in the worst case, so the
+# timeout IS the bound. There is no later observable to assert on instead --
+# by the time it matters the request has already outlived the gateway.
+# ---------------------------------------------------------------------------
+
+
+def test_the_two_budgets_differ_so_the_wiring_tests_can_tell_them_apart():
+    """Guard against every test below passing vacuously.
+
+    They all distinguish "the derived value" from "the module-level default".
+    If a config change ever made those equal, the reverts these tests exist to
+    catch would become invisible again and nothing would say so.
+    """
+    import config
+    import utils.clients as c
+
+    sync = config.sync_dispatch_budget_seconds
+    assert sync != config.api_client_timeout
+    assert c.gemini_call_timeout(sync) != config.api_client_timeout
+    assert c.openai_call_timeout(sync) != config.api_client_timeout
+    assert c.bedrock_read_timeout(sync) != c.bedrock_read_timeout(
+        config.api_client_timeout
+    )
+
+
+def _provider_config(provider, budget=None, **extra):
+    cfg = {"provider": provider, "id": "test-model", "api_key": "k", **extra}
+    if budget is not None:
+        cfg["timeout"] = budget
+    return cfg
+
+
+# ---------------------------------------------------------------------------
+# Gemini
+# ---------------------------------------------------------------------------
+
+
+def _gemini_response():
+    from unittest.mock import Mock
+
+    part = Mock()
+    part.inline_data = Mock()
+    part.inline_data.data = b"png-bytes"
+    candidate = Mock()
+    candidate.content.parts = [part]
+    response = Mock()
+    response.candidates = [candidate]
+    return response
+
+
+def _drive_gemini(entry, cfg):
+    """Run one Gemini entry point and return what the client factory was handed."""
+    import base64
+    from unittest.mock import patch
+
+    import models.providers.gemini as gemini_mod
+
+    source = base64.b64encode(b"source").decode()
+    # types is patched for the same reason test_iterate_handlers.py patches
+    # it: iterate_gemini and outpaint_gemini call types.Part.from_text()
+    # POSITIONALLY, and the installed google-genai signature is
+    # `from_text(*, text)`. That is a real latent bug, it predates this phase
+    # (identical at 52f2583) and it is out of scope here -- flagged in the
+    # phase report. It is unrelated to the timeout this test is about.
+    with (
+        patch.object(gemini_mod, "_get_genai_client") as factory,
+        patch.object(gemini_mod, "types"),
+    ):
+        factory.return_value.models.generate_content.return_value = _gemini_response()
+        if entry == "generate":
+            result = gemini_mod.handle_google_gemini(cfg, "a cat", {})
+        elif entry == "iterate":
+            result = gemini_mod.iterate_gemini(cfg, source, "bluer", [])
+        else:
+            result = gemini_mod.outpaint_gemini(cfg, source, "16:9", "more sky")
+
+    assert result["status"] == "success", result
+    return factory.call_args.kwargs["timeout"]
+
+
+@pytest.mark.parametrize("entry", ["generate", "iterate", "outpaint"])
+def test_gemini_hands_its_client_the_derived_refinement_timeout(entry):
+    """Reverting any of gemini.py's three call sites to api_client_timeout
+    would put a 60s bound under a 29s gateway ceiling."""
+    import config
+    import utils.clients as c
+
+    budget = config.sync_dispatch_budget_seconds
+    assert _drive_gemini(entry, _provider_config("google_gemini", budget)) == (
+        c.gemini_call_timeout(budget)
+    )
+
+
+def test_gemini_falls_back_to_the_generate_timeout_when_no_budget_is_supplied():
+    """/generate runs in the worker with 900s and no gateway in front of it."""
+    import config
+
+    assert _drive_gemini("generate", _provider_config("google_gemini")) == (
+        config.api_client_timeout
+    )
+
+
+# ---------------------------------------------------------------------------
+# OpenAI -- patched at the SDK constructor, so this covers the provider, the
+# cached factory and the forwarding between them in one assertion.
+# ---------------------------------------------------------------------------
+
+
+def _openai_response():
+    from unittest.mock import Mock
+
+    datum = Mock()
+    datum.b64_json = "aGk="
+    response = Mock()
+    response.data = [datum]
+    return response
+
+
+def _drive_openai(entry, cfg):
+    """Run one OpenAI entry point and return the timeout the SDK was built with."""
+    import base64
+    from unittest.mock import patch
+
+    import requests_mock
+
+    import models.providers.openai_provider as openai_mod
+    import utils.clients as c
+
+    c._openai_clients.clear()
+    source = base64.b64encode(_png_bytes(512, 512)).decode()
+
+    with patch("utils.clients.OpenAI") as sdk, requests_mock.Mocker() as m:
+        client = sdk.return_value
+        client.images.edit.return_value = _openai_response()
+        generated = _openai_response()
+        generated.data[0].url = "https://img.example/o.png"
+        client.images.generate.return_value = generated
+        m.get("https://img.example/o.png", content=b"png-bytes")
+
+        if entry == "generate":
+            result = openai_mod.handle_openai(cfg, "a cat", {})
+        elif entry == "iterate":
+            result = openai_mod.iterate_openai(cfg, source, "bluer", [])
+        else:
+            result = openai_mod.outpaint_openai(cfg, source, "16:9", "more sky")
+
+    assert result["status"] == "success", result
+    return sdk.call_args.kwargs["timeout"]
+
+
+@pytest.mark.parametrize("entry", ["generate", "iterate", "outpaint"])
+def test_openai_builds_its_client_with_the_derived_refinement_timeout(entry):
+    """Dropping `timeout=` from any of openai_provider.py's three
+    _get_openai_client calls silently restores the 60s default."""
+    import config
+    import utils.clients as c
+
+    budget = config.sync_dispatch_budget_seconds
+    assert _drive_openai(entry, _provider_config("openai", budget)) == (
+        c.openai_call_timeout(budget)
+    )
+
+
+def test_openai_falls_back_to_the_generate_timeout_when_no_budget_is_supplied():
+    import config
+    import utils.clients as c
+
+    assert _drive_openai("generate", _provider_config("openai")) == (
+        c.openai_call_timeout(config.api_client_timeout)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Nova
+# ---------------------------------------------------------------------------
+
+
+def _drive_nova(entry, cfg):
+    """Run one Nova entry point and return the budget the client factory got."""
+    import io
+    import json
+    from unittest.mock import patch
+
+    import models.providers.nova as nova_mod
+
+    payload = json.dumps({"images": ["aGk="]}).encode()
+    with patch.object(nova_mod, "get_bedrock_client") as factory:
+        factory.return_value.invoke_model.return_value = {"body": io.BytesIO(payload)}
+        if entry == "generate":
+            result = nova_mod.handle_nova(cfg, "a cat", {})
+        elif entry == "iterate":
+            result = nova_mod.iterate_nova(cfg, "aGk=", "bluer", [])
+        else:
+            result = nova_mod.outpaint_nova(
+                cfg, _png_bytes(512, 512), "16:9", "more sky"
+            )
+
+    assert result["status"] == "success", result
+    return factory.call_args.kwargs["budget"]
+
+
+@pytest.mark.parametrize("entry", ["generate", "iterate", "outpaint"])
+def test_nova_hands_its_client_the_derived_refinement_budget(entry):
+    """Dropping `budget=` from _invoke_nova's get_bedrock_client call takes
+    Nova's worst case from 25s to 69s, against a 29s ceiling."""
+    import config
+
+    assert _drive_nova(
+        entry, _provider_config("bedrock_nova", config.sync_dispatch_budget_seconds)
+    ) == (config.sync_dispatch_budget_seconds)
+
+
+def test_nova_falls_back_to_the_generate_budget_when_none_is_supplied():
+    import config
+
     assert (
-        c.openai_worst_case_seconds(budget)
-        >= c.OPENAI_MAX_ATTEMPTS * c.openai_call_timeout(budget)
+        _drive_nova("generate", _provider_config("bedrock_nova"))
+        == config.api_client_timeout
+    )
+
+
+def test_the_bedrock_cache_is_keyed_on_the_budget_not_only_the_region():
+    """The invariant get_bedrock_client's docstring states, now held by a test.
+
+    Without the budget in the key, the first caller's client is returned to
+    every later one: a /generate warms the cache with a 70s-budget client and
+    the next /iterate is handed it, bounded for a ceiling that does not apply.
+    """
+    import config
+    import utils.clients as c
+
+    c._bedrock_clients.clear()
+    sync = c.get_bedrock_client("us-west-2", budget=config.sync_dispatch_budget_seconds)
+    generate = c.get_bedrock_client("us-west-2", budget=config.api_client_timeout)
+
+    assert sync is not generate
+    assert sync.meta.config.read_timeout == c.bedrock_read_timeout(
+        config.sync_dispatch_budget_seconds
+    )
+    assert generate.meta.config.read_timeout == c.bedrock_read_timeout(
+        config.api_client_timeout
+    )
+    # Same region, same budget still reuses the connection pool.
+    assert (
+        c.get_bedrock_client("us-west-2", budget=config.sync_dispatch_budget_seconds)
+        is sync
     )
