@@ -966,6 +966,13 @@ Resources:
           - GET
           - POST
           - OPTIONS
+        # The gateway overrides the integration's CORS headers, so the
+        # Access-Control-Expose-Headers the Lambda sets does not survive on its
+        # own. Retry-After is not CORS-safelisted: without this a browser reads
+        # null for it and the backoff hint is unreadable cross-origin.
+        ExposeHeaders:
+          - Retry-After
+          - X-Correlation-ID
         MaxAge: 86400
         AllowCredentials: true
       DefaultRouteSettings:

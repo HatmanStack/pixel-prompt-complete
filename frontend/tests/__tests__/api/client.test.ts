@@ -229,6 +229,13 @@ describe('API Client', () => {
 
   // =============================================
   // Retry-After is honoured on retryable GETs
+  //
+  // Scope, stated plainly: no response the backend can currently return both
+  // carries Retry-After and is retryable. The quota 429s carry it but 429 is
+  // never retried, and the spend-ceiling 503 carries it but that guard only
+  // runs on POST paths, which are no longer retried either. These tests pin
+  // client behaviour for the day a retryable GET sheds load with a header --
+  // they are not evidence of a live path. Recorded as a follow-up.
   // =============================================
   describe('Retry-After header', () => {
     it('waits the header interval instead of the exponential backoff', async () => {

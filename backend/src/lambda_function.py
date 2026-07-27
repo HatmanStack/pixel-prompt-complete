@@ -280,6 +280,19 @@ def _enforce_quota_safe(tier_ctx: TierContext, endpoint_kind: str, now: int) -> 
         return QuotaResult(allowed=True, reason=None, reset_at=0, usage={})
 
 
+def _seconds_until_reset(reset_at: int, now: int) -> int | None:
+    """Seconds a rejected caller must wait for their window to reset.
+
+    Returns None when the quota layer reported no usable reset instant — the
+    fail-open path returns ``reset_at=0``, and a stale one is already past.
+    A caller is better served by no Retry-After than by an invented interval
+    it would obey.
+    """
+    if reset_at <= now:
+        return None
+    return reset_at - now
+
+
 def _refund_credits(
     tier_ctx: TierContext | None, endpoint_kind: str, correlation_id: str | None = None
 ) -> None:
@@ -443,18 +456,26 @@ def _parse_and_validate_request(
     # Quota enforcement (after validation so invalid requests don't consume quota)
     if endpoint_kind in ("generate", "refine", "outpaint"):
         # (Guest refine/outpaint was already refused above, before any write.)
-        result = _enforce_quota_safe(tier_ctx, endpoint_kind, int(time.time()))
+        now = int(time.time())
+        result = _enforce_quota_safe(tier_ctx, endpoint_kind, now)
         if not result.allowed:
             # A user hitting a wall and an attacker probing one used to look
             # identical from outside, and a limit set wrongly low produced
             # silent churn instead of a signal.
             emit_quota_rejection(tier_ctx.tier, endpoint_kind, result.reason or "unknown")
+            # Every rolling-window rejection knows when it lifts. Passing it
+            # down is what puts a Retry-After on the wire: error_response only
+            # writes the field when it is given one, so these 429s carried no
+            # backoff hint at all and a client had nothing to act on.
+            retry_after = _seconds_until_reset(result.reset_at, now)
             if result.reason == "suspended":
                 return None, response(403, error_responses.account_suspended())
             if result.reason == "guest_ip":
-                return None, response(429, error_responses.guest_ip_limit())
+                return None, response(429, error_responses.guest_ip_limit(retry_after=retry_after))
             if result.reason == "guest_global":
-                return None, response(429, error_responses.guest_global_limit())
+                return None, response(
+                    429, error_responses.guest_global_limit(retry_after=retry_after)
+                )
             if result.reason == "insufficient_credits":
                 return None, response(
                     402,
@@ -467,7 +488,9 @@ def _parse_and_validate_request(
                 )
             return None, response(
                 429,
-                error_responses.tier_quota_exceeded(tier_ctx.tier, result.reset_at),
+                error_responses.tier_quota_exceeded(
+                    tier_ctx.tier, result.reset_at, retry_after=retry_after
+                ),
             )
 
     return ValidatedRequest(body=body, ip=ip, prompt=prompt, tier=tier_ctx), None
@@ -1889,10 +1912,17 @@ def response(
     """Helper function to create API Gateway response.
 
     ``retryAfter`` in the body is mirrored into a real ``Retry-After`` header.
-    Five error factories compute it — ``daily_spend_ceiling`` to the second —
-    and this is the single choke point every handler returns through, so one
-    check here covers all of them. The body field stays: a client already
-    reading it must keep working, and the two agreeing is the point.
+    Mirroring here rather than at each call site means any response that
+    carries the field gets the header; it does not put the field there. Only a
+    caller that knows when the limit lifts can do that — the quota rejections
+    in ``_parse_and_validate_request`` and ``daily_spend_ceiling``, which
+    computes seconds to UTC midnight. ``model_cost_ceiling`` deliberately has
+    no interval: ``consume_model_slot`` returns a bare bool, so its reset is
+    not in scope at the point of refusal, and a guess would be worse than
+    silence.
+
+    The body field stays: a client already reading it must keep working, and
+    the two agreeing is the point.
     """
     headers = {
         "Content-Type": "application/json",
