@@ -8,14 +8,14 @@ import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 // Mock API client
 const mockGetRecentPrompts = vi.fn();
 const mockGetPromptHistory = vi.fn();
-vi.mock('../../../src/api/client', () => ({
+vi.mock('../../../../src/api/client', () => ({
   getRecentPrompts: (...args: unknown[]) => mockGetRecentPrompts(...args),
   getPromptHistory: (...args: unknown[]) => mockGetPromptHistory(...args),
 }));
 
 // Mock auth store
 let mockIsAuthenticated = false;
-vi.mock('../../../src/stores/useAuthStore', () => ({
+vi.mock('../../../../src/stores/useAuthStore', () => ({
   useAuthStore: Object.assign(
     (selector: (s: Record<string, unknown>) => unknown) =>
       selector({ isAuthenticated: () => mockIsAuthenticated }),
@@ -30,7 +30,7 @@ vi.mock('../../../src/stores/useAuthStore', () => ({
 
 // Mock app store
 const mockSetPrompt = vi.fn();
-vi.mock('../../../src/stores/useAppStore', () => ({
+vi.mock('../../../../src/stores/useAppStore', () => ({
   useAppStore: Object.assign(
     (selector: (s: Record<string, unknown>) => unknown) =>
       selector({ prompt: '' }),
@@ -43,7 +43,7 @@ vi.mock('../../../src/stores/useAppStore', () => ({
   ),
 }));
 
-import { PromptHistory } from '../../../src/components/generation/PromptHistory';
+import { PromptHistory } from '../../../../src/components/generation/PromptHistory';
 
 describe('PromptHistory', () => {
   beforeEach(() => {

@@ -17,19 +17,19 @@ const mockGenerateSession = vi.fn();
 const mockGetSessionStatus = vi.fn();
 const mockShowError = vi.fn();
 
-vi.mock('../../../src/api/client', () => ({
+vi.mock('../../../../src/api/client', () => ({
   generateSession: (...a: unknown[]) => mockGenerateSession(...a),
   getSessionStatus: (...a: unknown[]) => mockGetSessionStatus(...a),
 }));
 
-vi.mock('../../../src/api/config', () => ({
+vi.mock('../../../../src/api/config', () => ({
   CAPTCHA_ENABLED: false,
   TURNSTILE_SITE_KEY: 'k',
   API_BASE_URL: 'https://api.test',
   API_ROUTES: { PRICING: '/pricing' },
 }));
 
-vi.mock('../../../src/stores/useToastStore', () => ({
+vi.mock('../../../../src/stores/useToastStore', () => ({
   useToast: () => ({
     error: mockShowError,
     success: vi.fn(),
@@ -38,51 +38,51 @@ vi.mock('../../../src/stores/useToastStore', () => ({
   }),
 }));
 
-vi.mock('../../../src/hooks/useSound', () => ({
+vi.mock('../../../../src/hooks/useSound', () => ({
   useSound: () => ({ playSound: vi.fn() }),
 }));
 
-vi.mock('../../../src/components/generation/PromptInput', () => ({
+vi.mock('../../../../src/components/generation/PromptInput', () => ({
   __esModule: true,
   default: () => <div />,
 }));
-vi.mock('../../../src/components/generation/PromptEnhancer', () => ({
+vi.mock('../../../../src/components/generation/PromptEnhancer', () => ({
   __esModule: true,
   default: () => <div />,
 }));
-vi.mock('../../../src/components/features/generation/RandomPromptButton', () => ({
+vi.mock('../../../../src/components/generation/RandomPromptButton', () => ({
   __esModule: true,
   default: () => <div />,
 }));
-vi.mock('../../../src/components/generation/GenerateButton', () => ({
+vi.mock('../../../../src/components/generation/GenerateButton', () => ({
   __esModule: true,
   default: ({ onClick }: { onClick: () => void }) => <button onClick={onClick}>Generate</button>,
 }));
-vi.mock('../../../src/components/generation/ModelColumn', () => ({
+vi.mock('../../../../src/components/generation/ModelColumn', () => ({
   ModelColumn: () => <div />,
 }));
-vi.mock('../../../src/components/generation/MultiIterateInput', () => ({
+vi.mock('../../../../src/components/generation/MultiIterateInput', () => ({
   MultiIterateInput: () => <div />,
 }));
-vi.mock('../../../src/components/generation/PromptHistory', () => ({
+vi.mock('../../../../src/components/generation/PromptHistory', () => ({
   PromptHistory: () => <div />,
 }));
-vi.mock('../../../src/components/gallery/GalleryBrowser', () => ({
+vi.mock('../../../../src/components/gallery/GalleryBrowser', () => ({
   __esModule: true,
   default: () => <div />,
 }));
-vi.mock('../../../src/components/features/generation/ImageModal', () => ({
+vi.mock('../../../../src/components/generation/ImageModal', () => ({
   ImageModal: () => <div />,
 }));
-vi.mock('../../../src/components/generation/CompareModal', () => ({
+vi.mock('../../../../src/components/generation/CompareModal', () => ({
   CompareModal: () => <div />,
 }));
-vi.mock('../../../src/components/features/CaptchaWidget', () => ({
+vi.mock('../../../../src/components/gating/CaptchaWidget', () => ({
   CaptchaWidget: () => <div />,
 }));
 
-import { GenerationPanel } from '../../../src/components/generation/GenerationPanel';
-import { useAppStore } from '../../../src/stores/useAppStore';
+import { GenerationPanel } from '../../../../src/components/generation/GenerationPanel';
+import { useAppStore } from '../../../../src/stores/useAppStore';
 
 function ageError() {
   return Object.assign(new Error('AGE_VERIFICATION_REQUIRED'), {

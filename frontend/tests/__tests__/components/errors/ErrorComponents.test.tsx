@@ -4,9 +4,9 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { ErrorBoundary } from '../../../../../src/components/features/errors/ErrorBoundary';
-import { ErrorFallback } from '../../../../../src/components/features/errors/ErrorFallback';
-import { useUIStore } from '../../../../../src/stores/useUIStore';
+import { ErrorBoundary } from '../../../../src/components/errors/ErrorBoundary';
+import { ErrorFallback } from '../../../../src/components/errors/ErrorFallback';
+import { useUIStore } from '../../../../src/stores/useUIStore';
 
 // Mock Audio
 vi.stubGlobal('Audio', vi.fn().mockImplementation(() => ({

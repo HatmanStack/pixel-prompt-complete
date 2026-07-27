@@ -6,14 +6,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, act } from '@testing-library/react';
 
 // Mock config
-vi.mock('../../../src/api/config', () => ({
+vi.mock('../../../../src/api/config', () => ({
   CAPTCHA_ENABLED: true,
   TURNSTILE_SITE_KEY: 'test-site-key',
 }));
 
 // Mock auth store
 const mockIsAuthenticated = vi.fn().mockReturnValue(false);
-vi.mock('../../../src/stores/useAuthStore', () => ({
+vi.mock('../../../../src/stores/useAuthStore', () => ({
   useAuthStore: Object.assign(
     (selector: (state: { isAuthenticated: () => boolean }) => unknown) =>
       selector({ isAuthenticated: mockIsAuthenticated }),
@@ -23,7 +23,7 @@ vi.mock('../../../src/stores/useAuthStore', () => ({
   ),
 }));
 
-import { CaptchaWidget } from '../../../src/components/features/CaptchaWidget';
+import { CaptchaWidget } from '../../../../src/components/gating/CaptchaWidget';
 
 describe('CaptchaWidget', () => {
   let mockTurnstileRender: ReturnType<typeof vi.fn>;

@@ -4,8 +4,8 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { CompareModal } from '../../../src/components/generation/CompareModal';
-import type { Session, ModelName } from '../../../src/types/api';
+import { CompareModal } from '../../../../src/components/generation/CompareModal';
+import type { Session, ModelName } from '../../../../src/types/api';
 
 function createMockSession(
   models: ModelName[] = ['gemini', 'nova'],

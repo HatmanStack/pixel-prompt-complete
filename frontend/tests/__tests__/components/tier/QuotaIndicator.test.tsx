@@ -6,18 +6,18 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
 let AUTH_ENABLED_MOCK = true;
-vi.mock('../../../src/api/config', () => ({
+vi.mock('../../../../src/api/config', () => ({
   get AUTH_ENABLED() {
     return AUTH_ENABLED_MOCK;
   },
 }));
 
 let me: unknown = null;
-vi.mock('../../../src/stores/useBillingStore', () => ({
+vi.mock('../../../../src/stores/useBillingStore', () => ({
   useBillingStore: (selector: (s: { me: unknown }) => unknown) => selector({ me }),
 }));
 
-import { QuotaIndicator } from '../../../src/components/QuotaIndicator';
+import { QuotaIndicator } from '../../../../src/components/tier/QuotaIndicator';
 
 describe('QuotaIndicator', () => {
   beforeEach(() => {

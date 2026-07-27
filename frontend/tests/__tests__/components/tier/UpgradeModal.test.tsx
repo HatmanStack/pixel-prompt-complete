@@ -14,18 +14,18 @@ import userEvent from '@testing-library/user-event';
 const mockFetchPricing = vi.fn();
 const mockStartCheckout = vi.fn();
 
-vi.mock('../../../src/api/pricing', async () => {
-  const actual = await vi.importActual<typeof import('../../../src/api/pricing')>(
-    '../../../src/api/pricing',
+vi.mock('../../../../src/api/pricing', async () => {
+  const actual = await vi.importActual<typeof import('../../../../src/api/pricing')>(
+    '../../../../src/api/pricing',
   );
   return { ...actual, fetchPricing: () => mockFetchPricing() };
 });
 
-vi.mock('../../../src/api/billing', () => ({
+vi.mock('../../../../src/api/billing', () => ({
   startCheckout: () => mockStartCheckout(),
 }));
 
-import { UpgradeModal } from '../../../src/components/UpgradeModal';
+import { UpgradeModal } from '../../../../src/components/tier/UpgradeModal';
 
 const PRICING = {
   currency: 'usd',

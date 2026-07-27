@@ -11,12 +11,12 @@ import { renderHook, waitFor } from '@testing-library/react';
 
 const mockGetSessionStatus = vi.fn();
 
-vi.mock('../../../src/api/client', () => ({
+vi.mock('../../../../src/api/client', () => ({
   getSessionStatus: (...args: unknown[]) => mockGetSessionStatus(...args),
 }));
 
-import { useSessionPolling } from '../../../src/hooks/useSessionPolling';
-import { useAppStore } from '../../../src/stores/useAppStore';
+import { useSessionPolling } from '../../../../src/hooks/useSessionPolling';
+import { useAppStore } from '../../../../src/stores/useAppStore';
 
 describe('session polling', () => {
   beforeEach(() => {

@@ -52,7 +52,7 @@ vi.mock('../../../../src/components/generation/PromptEnhancer', () => ({
   __esModule: true,
   default: () => <div data-testid="prompt-enhancer" />,
 }));
-vi.mock('../../../../src/components/features/generation/RandomPromptButton', () => ({
+vi.mock('../../../../src/components/generation/RandomPromptButton', () => ({
   __esModule: true,
   default: () => <div data-testid="random-prompt" />,
 }));
@@ -77,13 +77,13 @@ vi.mock('../../../../src/components/gallery/GalleryBrowser', () => ({
   __esModule: true,
   default: () => <div data-testid="gallery" />,
 }));
-vi.mock('../../../../src/components/features/generation/ImageModal', () => ({
+vi.mock('../../../../src/components/generation/ImageModal', () => ({
   ImageModal: () => <div />,
 }));
 vi.mock('../../../../src/components/generation/CompareModal', () => ({
   CompareModal: () => <div />,
 }));
-vi.mock('../../../../src/components/features/CaptchaWidget', () => ({
+vi.mock('../../../../src/components/gating/CaptchaWidget', () => ({
   CaptchaWidget: () => <div data-testid="captcha" />,
 }));
 

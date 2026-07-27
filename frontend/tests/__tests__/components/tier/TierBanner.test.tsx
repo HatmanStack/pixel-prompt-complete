@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
 let AUTH_ENABLED_MOCK = true;
-vi.mock('../../../src/api/config', () => ({
+vi.mock('../../../../src/api/config', () => ({
   get AUTH_ENABLED() {
     return AUTH_ENABLED_MOCK;
   },
@@ -14,21 +14,21 @@ vi.mock('../../../src/api/config', () => ({
 }));
 
 let authed = false;
-vi.mock('../../../src/stores/useAuthStore', () => ({
+vi.mock('../../../../src/stores/useAuthStore', () => ({
   useAuthStore: (selector: (s: { isAuthenticated: () => boolean }) => unknown) =>
     selector({ isAuthenticated: () => authed }),
 }));
 
 let me: unknown = null;
-vi.mock('../../../src/stores/useBillingStore', () => ({
+vi.mock('../../../../src/stores/useBillingStore', () => ({
   useBillingStore: (selector: (s: { me: unknown }) => unknown) => selector({ me }),
 }));
 
-vi.mock('../../../src/components/UpgradeModal', () => ({
+vi.mock('../../../../src/components/tier/UpgradeModal', () => ({
   UpgradeModal: () => <div data-testid="upgrade-modal" />,
 }));
 
-import { TierBanner } from '../../../src/components/TierBanner';
+import { TierBanner } from '../../../../src/components/tier/TierBanner';
 
 describe('TierBanner', () => {
   beforeEach(() => {

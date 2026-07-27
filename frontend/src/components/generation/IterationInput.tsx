@@ -6,7 +6,7 @@
 import { useState, type FC, type KeyboardEvent } from 'react';
 import { useIteration } from '@/hooks/useIteration';
 import { MAX_ITERATIONS } from '@/config/constants';
-import { QuotaIndicator } from '@/components/QuotaIndicator';
+import { QuotaIndicator } from '@/components/tier/QuotaIndicator';
 import type { ModelName } from '@/types';
 
 interface IterationInputProps {
