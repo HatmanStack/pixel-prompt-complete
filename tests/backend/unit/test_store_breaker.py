@@ -14,6 +14,7 @@ machine, and that it never fires while the store is healthy.
 
 from __future__ import annotations
 
+import contextlib
 import os
 
 import pytest
@@ -367,7 +368,137 @@ def test_a_healthy_guard_records_a_success_that_closes_the_breaker():
     for _ in range(20):
         store_breaker.record_store_result(False)
 
-    with patch.object(lf._cost_meter, "get_daily_spend", return_value={"totalMicros": 0}):
+    with patch.object(
+        lf._cost_meter, "get_daily_spend", return_value={"totalMicros": 0}
+    ):
         lf._daily_spend_exceeded(now=1784980800)
 
     assert store_breaker.state()["consecutiveFailures"] == 0
+
+
+# ---------------------------------------------------------------------------
+# The seventh site, per BLOCK rather than as one unit.
+#
+# _drive_cost_meter above exercises all three wired `except` blocks in one
+# CostMeter.record call, so removing record_store_result(False) from any ONE
+# of them still leaves consecutiveFailures >= 1 and that row passes. Commit
+# 16a8d05's body claimed otherwise; this is what makes the claim true.
+#
+# The final counter cannot answer "did THIS block record its failure?" when
+# the blocks after it succeed -- their True resets the count to zero. So these
+# observe each report as it is made. Reporting the failure IS the contract of
+# a fail-open site; there is no later state to read instead, which is the
+# whole reason the breaker needs the site to speak up.
+# ---------------------------------------------------------------------------
+
+_SPEND_NOW = 1784980800  # 2026-07-25T12:00:00Z, fixed so bucketing is stable
+
+
+@contextlib.contextmanager
+def _recorded_store_results():
+    """Tally every record_store_result call, still applying it for real."""
+    from unittest.mock import patch
+
+    from ops import store_breaker
+
+    seen: list[bool] = []
+    real = store_breaker.record_store_result
+
+    def spy(ok: bool) -> None:
+        seen.append(ok)
+        real(ok)
+
+    with patch.object(store_breaker, "record_store_result", spy):
+        yield seen
+
+
+def _record_with_only(failing_key: str) -> None:
+    """Run CostMeter.record with exactly one of its three writes failing."""
+    from unittest.mock import MagicMock
+
+    from ops.cost_meter import CostMeter
+
+    repo = MagicMock()
+
+    def add_counters(key, *_args, **_kwargs):
+        if key == failing_key:
+            raise _Boom("dynamodb partition")
+        return None
+
+    repo.add_counters.side_effect = add_counters
+    CostMeter(repo).record(
+        costs={"gemini": 39000}, tier="anon", user_id="u1", now=_SPEND_NOW
+    )
+
+
+def _cost_meter_blocks():
+    from ops.cost_meter import monthly_spend_item_key, spend_item_key
+
+    return [
+        ("daily accumulator", spend_item_key(_SPEND_NOW)),
+        ("monthly accumulator", monthly_spend_item_key(_SPEND_NOW)),
+        ("per-user spend", "u1"),
+    ]
+
+
+@pytest.mark.parametrize("block,failing_key", _cost_meter_blocks())
+def test_each_cost_meter_write_records_its_own_store_failure(block, failing_key):
+    from ops import store_breaker
+
+    store_breaker.reset()
+    with _recorded_store_results() as seen:
+        _record_with_only(failing_key)
+
+    assert False in seen, (
+        f"the {block} write swallowed a store error without recording it"
+    )
+
+
+def test_a_cost_meter_write_that_succeeds_records_a_success():
+    """The counterpart: all three writes land, so all three report True."""
+    from unittest.mock import MagicMock
+
+    from ops import store_breaker
+    from ops.cost_meter import CostMeter
+
+    store_breaker.reset()
+    repo = MagicMock()
+    repo.add_counters.return_value = None
+
+    with _recorded_store_results() as seen:
+        CostMeter(repo).record(
+            costs={"gemini": 39000}, tier="anon", user_id="u1", now=_SPEND_NOW
+        )
+
+    assert seen == [True, True, True]
+    assert False not in seen
+
+
+def test_the_cloudwatch_mirror_reports_nothing_either_way():
+    """Deliberate, and asserted so it is not read as an omission.
+
+    A PutMetricData failure is a telemetry outage, not a store outage.
+    Counting it towards a breaker that sheds /generate would shed generations
+    because metrics were throttled -- the self-inflicted outage the whole
+    fail-open policy exists to avoid. Phase-5 Task 9 lists this block among
+    the sites to wire; it is the task being imprecise.
+    """
+    from unittest.mock import MagicMock, patch
+
+    from ops import store_breaker
+    from ops.cost_meter import CostMeter
+
+    store_breaker.reset()
+    repo = MagicMock()
+    repo.add_counters.return_value = None
+
+    with patch(
+        "ops.metrics.emit_spend_metric", side_effect=_Boom("cloudwatch throttled")
+    ):
+        with _recorded_store_results() as seen:
+            CostMeter(repo).record(
+                costs={"gemini": 39000}, tier="anon", user_id="u1", now=_SPEND_NOW
+            )
+
+    # Three DynamoDB writes succeeded; the CloudWatch failure added nothing.
+    assert seen == [True, True, True]
