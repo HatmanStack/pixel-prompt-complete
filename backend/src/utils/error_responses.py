@@ -221,9 +221,7 @@ def daily_spend_ceiling(**kwargs) -> Dict[str, Any]:
     ceiling.
     """
     now = datetime.now(timezone.utc)
-    tomorrow = (now + timedelta(days=1)).replace(
-        hour=0, minute=0, second=0, microsecond=0
-    )
+    tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     kwargs.setdefault("retry_after", int((tomorrow - now).total_seconds()))
     return error_response(
         status_code=503,

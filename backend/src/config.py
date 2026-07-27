@@ -183,9 +183,7 @@ free_credit_period_seconds = _safe_int("FREE_CREDIT_PERIOD_SECONDS", 2592000)  #
 # Fallback renewal window for a paid user whose Stripe period we do not have
 # (webhook missed, or subscription predates period persistence). Used only as
 # a floor so a paying customer is never left with zero credits.
-paid_credit_fallback_period_seconds = _safe_int(
-    "PAID_CREDIT_FALLBACK_PERIOD_SECONDS", 2592000
-)
+paid_credit_fallback_period_seconds = _safe_int("PAID_CREDIT_FALLBACK_PERIOD_SECONDS", 2592000)
 
 # Master switch. Off keeps the legacy call-counting quotas, so the ledger can
 # be rolled out and rolled back without a redeploy of the old code path.
@@ -397,9 +395,9 @@ MODEL_DAILY_CAPS: dict[str, int] = {
 # config change, not a code change, which is the whole point of the table.
 # ---------------------------------------------------------------------------
 _DEFAULT_MODEL_COSTS_USD_MICROS: dict[str, int] = {
-    "gemini": 39000,   # $0.039
-    "nova": 40000,     # $0.040
-    "openai": 40000,   # $0.040
+    "gemini": 39000,  # $0.039
+    "nova": 40000,  # $0.040
+    "openai": 40000,  # $0.040
     "firefly": 70000,  # $0.070 (credit-based; least certain of the four)
 }
 
@@ -453,9 +451,7 @@ global_daily_spend_ceiling_usd_micros = _safe_int(
 # Deliberately 20x the daily figure, not 30x, so a busy day is not throttled
 # for being busy while a single day still cannot consume the month. Set to 0
 # to disable, consciously.
-monthly_spend_ceiling_usd_micros = _safe_int(
-    "MONTHLY_SPEND_CEILING_USD_MICROS", 500_000_000
-)
+monthly_spend_ceiling_usd_micros = _safe_int("MONTHLY_SPEND_CEILING_USD_MICROS", 500_000_000)
 
 # Sub-ceiling for /enhance specifically, in micro-dollars. Default $5/day.
 #

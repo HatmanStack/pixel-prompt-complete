@@ -791,9 +791,7 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
         # Create session
         visibility = _visibility_for_tier(validated.tier.tier if validated.tier else None)
         owner_id = (
-            validated.tier.user_id
-            if validated.tier and validated.tier.is_authenticated
-            else None
+            validated.tier.user_id if validated.tier and validated.tier.is_authenticated else None
         )
         session_id = session_manager.create_session(
             prompt,

@@ -71,9 +71,7 @@ def enforce_quota(
                     "windowStart",
                     config.guest_ip_window_seconds,
                 )
-                return QuotaResult(
-                    allowed=False, reason="guest_ip", reset_at=reset, usage=usage
-                )
+                return QuotaResult(allowed=False, reason="guest_ip", reset_at=reset, usage=usage)
 
         # Per-guest next so denied guests don't consume the global pool.
         assert ctx.guest_token_id is not None
@@ -271,9 +269,7 @@ def _enforce_anon(
     key = f"anon#{ctx.ip_hash}"
 
     try:
-        ok, item = repo.increment_anon(
-            key, counter, limit, config.anon_window_seconds, now
-        )
+        ok, item = repo.increment_anon(key, counter, limit, config.anon_window_seconds, now)
     except Exception as e:
         # Fail OPEN on a store error, matching the spend ceiling. An
         # unreachable counter is not evidence the caller is over limit, and
