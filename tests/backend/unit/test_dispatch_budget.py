@@ -33,11 +33,12 @@ import yaml
 TEMPLATE = pathlib.Path(__file__).resolve().parents[3] / "backend" / "template.yaml"
 
 # Tags whose values this test does not read, mapped to None exactly as
-# tests/backend/unit/test_observability.py does. TimeoutInMillis is a plain
-# integer scalar, so nothing here needs a value-preserving constructor.
+# tests/backend/unit/test_observability.py does. `!Sub` is deliberately NOT in
+# this list: FunctionName and the self-invoke resource ARN are both `!Sub`
+# scalars, and under the blanket None constructor they would load as None and
+# the drift test below would assert nothing at all.
 _UNREAD_TAGS = (
     "!Ref",
-    "!Sub",
     "!GetAtt",
     "!Equals",
     "!If",
@@ -62,6 +63,26 @@ class _Loader(yaml.SafeLoader):
     pass
 
 
+def _sub_scalar(loader, node):
+    """Preserve the text of a `!Sub` scalar.
+
+    Same constructor tests/backend/unit/test_iam_prefix_coverage.py registers,
+    and for the same reason: that file needed it to read a policy resource, and
+    so does the self-invoke grant test here.
+
+    `!Sub` also has a two-element sequence form (`[template, {vars}]`). The
+    template does not use it; raise rather than return None if that ever
+    changes, so the failure is loud instead of vacuous.
+    """
+    if not isinstance(node, yaml.ScalarNode):
+        raise TypeError(
+            "!Sub sequence form found in template.yaml; this loader only "
+            "handles the scalar form and would silently drop the value"
+        )
+    return loader.construct_scalar(node)
+
+
+_Loader.add_constructor("!Sub", _sub_scalar)
 for _tag in _UNREAD_TAGS:
     _Loader.add_constructor(_tag, lambda loader, node: None)
 
@@ -237,3 +258,87 @@ def test_generate_async_defaults_to_true():
         config = _reload_config()
 
         assert config.generate_async is True
+
+
+# ---- The self-invoke grant must not drift from FunctionName ----
+#
+# The async dispatch invokes os.environ["AWS_LAMBDA_FUNCTION_NAME"], which is
+# whatever the deployed function is actually called. The IAM grant names the
+# function through a separate template string. Nothing but a human currently
+# keeps the two in step, and neither moto nor MiniStack enforces IAM -- the
+# same reason test_iam_prefix_coverage.py exists one commit earlier.
+#
+# Severity is lower than the Phase 2 grant this pattern was built for:
+# _dispatch_generation_async returns False on any exception and the handler
+# runs the dispatch inline, so a broken grant degrades to pre-async behaviour
+# rather than failing the request. That is why this is four assertions on a
+# parsed file and not a redesign.
+
+
+def _function_properties() -> dict:
+    doc = yaml.load(TEMPLATE.read_text(), Loader=_Loader)
+    return doc["Resources"]["PixelPromptFunction"]["Properties"]
+
+
+def _self_invoke_statement() -> dict:
+    """The SelfInvokeForGeneration statement from the inline policy."""
+    for policy in _function_properties()["Policies"]:
+        if not isinstance(policy, dict):
+            continue
+        for statement in policy.get("Statement", []):
+            if statement.get("Sid") == "SelfInvokeForGeneration":
+                return statement
+
+    raise AssertionError(
+        "no policy statement with Sid SelfInvokeForGeneration in template.yaml -- "
+        "the async /generate dispatch has no permission to invoke the worker"
+    )
+
+
+def test_the_loader_preserves_sub_scalars():
+    """Guard the guard: a loader that drops !Sub makes the tests below vacuous."""
+    function_name = _function_properties()["FunctionName"]
+    resource = _self_invoke_statement()["Resource"]
+
+    for value, label in ((function_name, "FunctionName"), (resource, "the grant resource")):
+        assert isinstance(value, str) and value, (
+            f"{label} did not load as a string -- the !Sub constructor is "
+            "dropping values and these tests prove nothing"
+        )
+
+
+def test_the_self_invoke_grant_targets_the_function_it_is_attached_to():
+    """The one assertion that fails when FunctionName changes and the grant does not.
+
+    The template comment above the statement says "if that ever changes, this
+    must change with it". This is what enforces that sentence.
+    """
+    function_name = _function_properties()["FunctionName"]
+    resource = _self_invoke_statement()["Resource"]
+
+    assert resource.endswith(f":function:{function_name}"), (
+        f"SelfInvokeForGeneration grants {resource!r}, which does not name the "
+        f"function this template deploys ({function_name!r}) -- every worker "
+        "Invoke would be AccessDenied and every /generate would silently fall "
+        "back to the inline path the async dispatch exists to escape"
+    )
+
+
+def test_the_self_invoke_grant_allows_only_invocation():
+    action = _self_invoke_statement()["Action"]
+    actions = action if isinstance(action, list) else [action]
+
+    assert actions == ["lambda:InvokeFunction"], (
+        f"SelfInvokeForGeneration allows {actions}; the dispatch needs exactly "
+        "lambda:InvokeFunction and nothing else"
+    )
+
+
+def test_the_self_invoke_grant_is_scoped_to_one_function():
+    """A wildcard would let the role invoke every function in the account."""
+    statement = _self_invoke_statement()
+    resource = statement["Resource"]
+
+    assert statement["Effect"] == "Allow"
+    assert isinstance(resource, str), "a list of resources is broader than this grant needs"
+    assert "*" not in resource, f"SelfInvokeForGeneration grants {resource!r}, which is unscoped"
