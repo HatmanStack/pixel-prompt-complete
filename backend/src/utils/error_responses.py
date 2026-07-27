@@ -9,7 +9,6 @@ from typing import Any, Dict, Optional
 
 
 def error_response(
-    status_code: int,
     error_code: str,
     message: str,
     details: Optional[str] = None,
@@ -20,7 +19,6 @@ def error_response(
     Create standardized error response.
 
     Args:
-        status_code: HTTP status code
         error_code: Error code identifier (e.g., "RATE_LIMIT_EXCEEDED")
         message: User-friendly error message
         details: Optional detailed error information
@@ -53,7 +51,6 @@ def rate_limit_exceeded(retry_after: int, limit_type: str = "requests", **kwargs
     minutes = (retry_after + 59) // 60  # Round up to nearest minute
 
     return error_response(
-        status_code=429,
         error_code="RATE_LIMIT_EXCEEDED",
         message=f"Rate limit exceeded. Please try again in {minutes} minute{'s' if minutes != 1 else ''}.",
         details=f"Too many {limit_type}. Please wait and try again.",
@@ -64,18 +61,15 @@ def rate_limit_exceeded(retry_after: int, limit_type: str = "requests", **kwargs
 
 def internal_server_error(message: str = "Internal server error", **kwargs) -> Dict[str, Any]:
     """500 Internal Server Error"""
-    return error_response(
-        status_code=500, error_code="INTERNAL_SERVER_ERROR", message=message, **kwargs
-    )
+    return error_response(error_code="INTERNAL_SERVER_ERROR", message=message, **kwargs)
 
 
 # Specific application errors
 
 
 def inappropriate_content(**kwargs) -> Dict[str, Any]:
-    """Content filtered for inappropriate content"""
+    """400 Content filtered for inappropriate content"""
     return error_response(
-        status_code=400,
         error_code="INAPPROPRIATE_CONTENT",
         message="Your prompt contains inappropriate content and cannot be processed.",
         details="Please revise your prompt to remove inappropriate content.",
@@ -84,9 +78,8 @@ def inappropriate_content(**kwargs) -> Dict[str, Any]:
 
 
 def prompt_required(**kwargs) -> Dict[str, Any]:
-    """Prompt is required"""
+    """400 Prompt is required"""
     return error_response(
-        status_code=400,
         error_code="PROMPT_REQUIRED",
         message="Prompt is required",
         details="Please provide a text prompt to generate images.",
@@ -95,9 +88,8 @@ def prompt_required(**kwargs) -> Dict[str, Any]:
 
 
 def prompt_too_long(max_length: int = 1000, **kwargs) -> Dict[str, Any]:
-    """Prompt exceeds maximum length"""
+    """400 Prompt exceeds maximum length"""
     return error_response(
-        status_code=400,
         error_code="PROMPT_TOO_LONG",
         message=f"Prompt is too long (maximum {max_length} characters)",
         details=f"Please shorten your prompt to {max_length} characters or less.",
@@ -109,7 +101,6 @@ def prompt_too_long(max_length: int = 1000, **kwargs) -> Dict[str, Any]:
 def auth_required(**kwargs) -> Dict[str, Any]:
     """401 Authentication required."""
     return error_response(
-        status_code=401,
         error_code="AUTH_REQUIRED",
         message="Authentication required",
         **kwargs,
@@ -119,7 +110,6 @@ def auth_required(**kwargs) -> Dict[str, Any]:
 def tier_quota_exceeded(tier: str, reset_at: int, **kwargs) -> Dict[str, Any]:
     """429 Quota exceeded for a tier."""
     return error_response(
-        status_code=429,
         error_code="TIER_QUOTA_EXCEEDED",
         message=f"Quota exceeded for {tier} tier",
         tier=tier,
@@ -138,7 +128,6 @@ def insufficient_credits(
     (429) or to prompt the user to upgrade or wait for renewal (402).
     """
     return error_response(
-        status_code=402,
         error_code="INSUFFICIENT_CREDITS",
         message=(
             f"Not enough credits remaining on the {tier} plan. "
@@ -155,7 +144,6 @@ def insufficient_credits(
 def subscription_required(**kwargs) -> Dict[str, Any]:
     """402 Paid subscription required."""
     return error_response(
-        status_code=402,
         error_code="SUBSCRIPTION_REQUIRED",
         message="Paid subscription required",
         **kwargs,
@@ -165,7 +153,6 @@ def subscription_required(**kwargs) -> Dict[str, Any]:
 def guest_ip_limit(**kwargs) -> Dict[str, Any]:
     """429 Too many guest generations from one source address."""
     return error_response(
-        status_code=429,
         error_code="GUEST_IP_LIMIT",
         message="Too many guest generations from this network. Please sign in.",
         **kwargs,
@@ -175,7 +162,6 @@ def guest_ip_limit(**kwargs) -> Dict[str, Any]:
 def guest_global_limit(**kwargs) -> Dict[str, Any]:
     """429 Global guest traffic limit reached."""
     return error_response(
-        status_code=429,
         error_code="GUEST_GLOBAL_LIMIT",
         message="Guest traffic limit reached, please sign in",
         **kwargs,
@@ -183,9 +169,8 @@ def guest_global_limit(**kwargs) -> Dict[str, Any]:
 
 
 def invalid_json(**kwargs) -> Dict[str, Any]:
-    """Invalid JSON in request body"""
+    """400 Invalid JSON in request body"""
     return error_response(
-        status_code=400,
         error_code="INVALID_JSON",
         message="Invalid JSON in request body",
         details="The request body contains invalid JSON. Please check the format and try again.",
@@ -196,7 +181,6 @@ def invalid_json(**kwargs) -> Dict[str, Any]:
 def account_suspended(**kwargs) -> Dict[str, Any]:
     """403 Account suspended."""
     return error_response(
-        status_code=403,
         error_code="ACCOUNT_SUSPENDED",
         message="Your account has been suspended. Contact support for assistance.",
         **kwargs,
@@ -206,7 +190,6 @@ def account_suspended(**kwargs) -> Dict[str, Any]:
 def model_cost_ceiling(**kwargs) -> Dict[str, Any]:
     """429 All models have reached their daily generation cap."""
     return error_response(
-        status_code=429,
         error_code="MODEL_COST_CEILING",
         message="All models have reached their daily generation cap. Please try again tomorrow.",
         **kwargs,
@@ -224,7 +207,6 @@ def daily_spend_ceiling(**kwargs) -> Dict[str, Any]:
     tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     kwargs.setdefault("retry_after", int((tomorrow - now).total_seconds()))
     return error_response(
-        status_code=503,
         error_code="DAILY_SPEND_CEILING",
         message=(
             "Service is temporarily unavailable: the daily generation budget "
@@ -235,14 +217,13 @@ def daily_spend_ceiling(**kwargs) -> Dict[str, Any]:
 
 
 def age_verification_required(**kwargs) -> Dict[str, Any]:
-    """Caller has not affirmed they are 18 or older.
+    """403 Caller has not affirmed they are 18 or older.
 
     Also returned when the affirmation store is unreachable. Being unable to
     recall that someone answered is a reason to ask again, not a reason to
     refuse them or to wave them through.
     """
     return error_response(
-        status_code=403,
         error_code="AGE_VERIFICATION_REQUIRED",
         message="You must confirm you are 18 or older to use this service.",
         **kwargs,
@@ -252,7 +233,6 @@ def age_verification_required(**kwargs) -> Dict[str, Any]:
 def captcha_required(**kwargs) -> Dict[str, Any]:
     """403 CAPTCHA verification required."""
     return error_response(
-        status_code=403,
         error_code="CAPTCHA_REQUIRED",
         message="CAPTCHA verification required",
         **kwargs,
@@ -262,7 +242,6 @@ def captcha_required(**kwargs) -> Dict[str, Any]:
 def captcha_failed(**kwargs) -> Dict[str, Any]:
     """403 CAPTCHA verification failed."""
     return error_response(
-        status_code=403,
         error_code="CAPTCHA_FAILED",
         message="CAPTCHA verification failed. Please try again.",
         **kwargs,
@@ -272,7 +251,6 @@ def captcha_failed(**kwargs) -> Dict[str, Any]:
 def admin_required(**kwargs) -> Dict[str, Any]:
     """403 Admin access required."""
     return error_response(
-        status_code=403,
         error_code="ADMIN_REQUIRED",
         message="Admin access required",
         **kwargs,
@@ -282,7 +260,6 @@ def admin_required(**kwargs) -> Dict[str, Any]:
 def admin_disabled(**kwargs) -> Dict[str, Any]:
     """501 Admin features are disabled."""
     return error_response(
-        status_code=501,
         error_code="ADMIN_DISABLED",
         message="Admin features are disabled",
         **kwargs,
