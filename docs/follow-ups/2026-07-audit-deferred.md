@@ -344,10 +344,17 @@ count exceeded. Neither was silenced with `any`: there are zero `any` in
 
 ### 22. Empty the mypy override list
 
-**Finding.** `mypy` runs in CI behind a per-module
-`[[tool.mypy.overrides]] ignore_errors = true` list. That is the design — a
-gate that runs beats a strict config that does not — and the list is a ratchet:
-modules come off it, never onto it.
+**Finding.** `mypy` runs in CI behind a per-module `[[tool.mypy.overrides]]`
+list in `backend/pyproject.toml`. That is the design — a gate that runs beats a
+strict config that does not — and the list is a ratchet: modules come off it,
+never onto it.
+
+**Not a blanket ignore.** No entry uses `ignore_errors`. Each names the error
+codes that module reports today via `disable_error_code`, so a **new** class of
+error in a listed module still fails the build. ADR-A3 planned
+`ignore_errors = true`; Phase 6 shipped something stricter, and
+`backend/pyproject.toml:56-60` records why. Do not read this entry as saying
+the listed modules are unchecked.
 
 **Why deferred.** By construction. Fixing all of it before adding the gate
 would have delayed the gate that prevents regression.
