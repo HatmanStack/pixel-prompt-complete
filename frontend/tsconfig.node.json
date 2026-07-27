@@ -1,11 +1,25 @@
 {
+  /* The build configuration. tsconfig.json includes only "src" and "tests",
+     so everything here was outside the project and `tsc --noEmit` never saw
+     it -- including the manualChunks(id: string) callback in vite.config.ts,
+     which decides how the bundle is split.
+
+     This file existed already and was included by nothing: no "references"
+     in tsconfig.json and no second invocation in the typecheck script. The
+     package.json typecheck script now runs both projects. */
   "compilerOptions": {
-    "composite": true,
     "skipLibCheck": true,
     "module": "ESNext",
     "moduleResolution": "bundler",
     "allowSyntheticDefaultImports": true,
+    "types": ["node"],
+    /* The two config files are plain JS. allowJs alone would parse them
+       without checking them, which is the shape of gate this phase exists to
+       remove, so checkJs is on. */
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
     "strict": true
   },
-  "include": ["vite.config.ts"]
+  "include": ["vite.config.ts", "eslint.config.js", "postcss.config.js"]
 }

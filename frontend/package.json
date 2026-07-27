@@ -13,7 +13,7 @@
     "test:coverage": "vitest --coverage",
     "test:watch": "vitest --watch",
     "analyze": "vite build && echo 'Bundle analysis saved to dist/stats.html'",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json",
     "format": "prettier --write 'src/**/*.{ts,tsx,js,jsx,css,json}'",
     "format:check": "prettier --check 'src/**/*.{ts,tsx,js,jsx,css,json}'"
   },

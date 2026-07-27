@@ -19,6 +19,21 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
+    /* noUncheckedIndexedAccess: attempted 2026-07-27 and deferred, per
+       ADR-A10, which set the threshold at 30 errors. Measured: 59 -- 16 in
+       src, 43 in tests. Not silenced with `any`: there are zero `any` in
+       src and that is worth more than this flag.
+
+       Where they are, so the next attempt starts with a map rather than a
+       measurement. src: ImageGrid 5, CompareModal 4, seedPrompts 2,
+       UpgradeModal 2, ModelColumn 2, useAuthStore 1. tests:
+       useToastStore.test 16, then GenerationPanel.test and client.test at 4
+       each. The source tree alone is within the threshold, so enabling it
+       for src ahead of tests is a viable route if someone wants one.
+
+       exactOptionalPropertyTypes is deliberately not attempted at all --
+       ADR-A10. */
+    "noUncheckedIndexedAccess": false,
 
     /* Path aliases */
     "baseUrl": ".",

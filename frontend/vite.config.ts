@@ -1,3 +1,8 @@
+/// <reference types="vitest/config" />
+// The reference is what makes the `test` block below type-check: it
+// augments vite's UserConfig with vitest's options. Without it tsc
+// reports "'test' does not exist in type 'UserConfigExport'" -- which
+// nothing saw, because tsconfig.json included only src and tests.
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { visualizer } from 'rollup-plugin-visualizer';
