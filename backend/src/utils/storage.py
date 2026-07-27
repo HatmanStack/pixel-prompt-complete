@@ -17,6 +17,22 @@ from botocore.exceptions import ClientError
 from .logger import StructuredLogger
 from .retry import retry_with_backoff
 
+PUBLIC_PREFIX = "sessions"
+
+# Objects under this prefix are deliberately NOT covered by the CloudFront
+# origin access policy, so they have no unsigned URL. Reaching them requires
+# a presigned URL, which the Lambda only issues after checking ownership.
+PRIVATE_PREFIX = "private"
+
+# Every S3 key prefix this module writes an object under.
+# tests/backend/unit/test_iam_prefix_coverage.py reads this set and asserts the
+# Lambda execution role in backend/template.yaml grants exactly these prefixes.
+# Adding a prefix without adding it here leaves the check unable to see it;
+# adding it here without granting it in the template fails that test. No
+# runtime test can catch the gap, because neither moto nor MiniStack enforces
+# IAM -- which is how private/* shipped ungranted.
+WRITTEN_PREFIXES: frozenset[str] = frozenset({PUBLIC_PREFIX, PRIVATE_PREFIX})
+
 
 class ImageStorage:
     """
@@ -60,11 +76,6 @@ class ImageStorage:
         """
         self.s3.put_object(Bucket=self.bucket, Key=key, Body=body, ContentType=content_type)
 
-    # Objects under this prefix are deliberately NOT covered by the CloudFront
-    # origin access policy, so they have no unsigned URL. Reaching them requires
-    # a presigned URL, which the Lambda only issues after checking ownership.
-    PRIVATE_PREFIX = "private"
-
     def upload_image(
         self,
         base64_image: str,
@@ -93,11 +104,11 @@ class ImageStorage:
         if visibility == "private":
             if not session_id:
                 raise ValueError("session_id is required for private uploads")
-            key = f"{self.PRIVATE_PREFIX}/{session_id}/{normalized_model}{iter_suffix}.png"
+            key = f"{PRIVATE_PREFIX}/{session_id}/{normalized_model}{iter_suffix}.png"
         else:
             timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
             folder = f"{target}-{session_id[:8]}" if session_id else target
-            key = f"sessions/{folder}/{normalized_model}-{timestamp}{iter_suffix}.png"
+            key = f"{PUBLIC_PREFIX}/{folder}/{normalized_model}-{timestamp}{iter_suffix}.png"
 
         self._store_image(base64_image, key)
 
@@ -105,7 +116,7 @@ class ImageStorage:
 
     def is_private_key(self, image_key: str) -> bool:
         """Return True if ``image_key`` has no unsigned URL."""
-        return image_key.startswith(f"{self.PRIVATE_PREFIX}/")
+        return image_key.startswith(f"{PRIVATE_PREFIX}/")
 
     def get_image(self, image_key: str) -> Optional[Dict]:
         """
