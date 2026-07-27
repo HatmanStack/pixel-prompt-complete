@@ -30,9 +30,7 @@ def handle_google_gemini(
 ) -> HandlerResult:
     """Generate an image with Google Gemini."""
     try:
-        client = _get_genai_client(
-            model_config.get("api_key", ""), timeout=api_client_timeout
-        )
+        client = _get_genai_client(model_config.get("api_key", ""), timeout=api_client_timeout)
 
         response = client.models.generate_content(
             model=model_config["id"],
@@ -55,9 +53,7 @@ def iterate_gemini(
 ) -> HandlerResult:
     """Iterate on an image using Gemini multi-turn conversation."""
     try:
-        client = _get_genai_client(
-            model_config.get("api_key", ""), timeout=api_client_timeout
-        )
+        client = _get_genai_client(model_config.get("api_key", ""), timeout=api_client_timeout)
         image_bytes = _decode_source_image(source_image)
         context_prompt = _build_context_prompt(prompt, context)
 
@@ -93,9 +89,7 @@ def outpaint_gemini(
         direction = get_direction_description(preset)
         full_prompt = f"Extend this image {direction}. Fill the extended areas with: {prompt}"
 
-        client = _get_genai_client(
-            model_config.get("api_key", ""), timeout=api_client_timeout
-        )
+        client = _get_genai_client(model_config.get("api_key", ""), timeout=api_client_timeout)
 
         content_parts = [
             types.Part.from_bytes(data=image_bytes, mime_type="image/png"),
