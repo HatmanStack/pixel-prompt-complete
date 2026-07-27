@@ -200,6 +200,57 @@ class UserRepository:
                 continue
         return False, self.get_user(user_id) or {}
 
+    def decrement_counter(
+        self,
+        user_id: str,
+        counter: str,
+        window_field: str,
+        window_seconds: int,
+        now: int,
+    ) -> bool:
+        """Give one unit of a rolling-window counter back.
+
+        The counterpart to :meth:`_atomic_increment`, for a request that
+        consumed quota and produced nothing. Returns ``True`` when a unit was
+        actually returned, ``False`` when there was nothing to return.
+
+        A SINGLE conditional UpdateItem, and both halves of the condition are
+        load-bearing:
+
+        * ``{counter} > 0`` — a counter that is already at zero has nothing to
+          give back, and ``ADD -1`` would drive it negative, which reads as
+          extra allowance on the next check.
+        * ``{window_field} > now - window_seconds`` — **this is the one that
+          matters.** A window that has already rolled over has handed the
+          caller a fresh allowance; taking a unit off the new window's counter
+          would be a free extra call stacked on top of it. Refunding is meant
+          to make someone whole for the window they lost it in, not to credit
+          them in a window they never spent it in.
+
+        ``ConditionalCheckFailedException`` covers both cases plus "no such
+        record", and all three mean the same thing here — nothing to refund —
+        so it is reported, not raised. Any other ``ClientError`` (throttling,
+        access denial) propagates: that is a store failure, not an empty
+        counter, and the caller logs it.
+        """
+        try:
+            self._table.update_item(
+                Key={"userId": user_id},
+                UpdateExpression=f"SET updatedAt = :now ADD {counter} :minus_one",
+                ConditionExpression=(f"{counter} > :zero AND {window_field} > :stale"),
+                ExpressionAttributeValues={
+                    ":minus_one": -1,
+                    ":zero": 0,
+                    ":now": now,
+                    ":stale": now - window_seconds,
+                },
+            )
+            return True
+        except ClientError as e:
+            if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
+                raise
+            return False
+
     def increment_generate(
         self, user_id: str, window_seconds: int, limit: int, now: int
     ) -> tuple[bool, dict]:

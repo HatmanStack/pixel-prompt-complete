@@ -323,16 +323,47 @@ def _seconds_until_reset(reset_at: int, now: int) -> int | None:
     return reset_at - now
 
 
-def _refund_credits(
+# Which counter ``enforce_quota`` incremented, per (tier, endpoint). Mirrors
+# users/quota.py; the third element names the config attribute holding that
+# bucket's window length, read at call time so a reloaded config is honoured.
+#
+# ``guest`` is absent DELIBERATELY, not by omission. A guest identity is
+# honour-system — dropping the cookie mints a new one, which is exactly why
+# users/quota.py meters guests against their source IP as well — so refunding
+# a guest is an unlimited retry for anyone who wants one.
+#
+# ``paid``/``generate`` is absent because paid generation is not counted at
+# all; users/quota.py returns allowed=True for it unconditionally.
+_REFUND_COUNTERS: dict[tuple[str, str], tuple[str, str, str]] = {
+    ("free", "generate"): ("generateCount", "windowStart", "free_window_seconds"),
+    ("free", "refine"): ("refineCount", "windowStart", "free_window_seconds"),
+    ("free", "outpaint"): ("refineCount", "windowStart", "free_window_seconds"),
+    ("paid", "refine"): ("dailyCount", "dailyResetAt", "paid_window_seconds"),
+    ("paid", "outpaint"): ("dailyCount", "dailyResetAt", "paid_window_seconds"),
+    ("anon", "generate"): ("generateCount", "windowStart", "anon_window_seconds"),
+    ("anon", "refine"): ("refineCount", "windowStart", "anon_window_seconds"),
+    ("anon", "outpaint"): ("refineCount", "windowStart", "anon_window_seconds"),
+}
+
+
+def _refund_usage(
     tier_ctx: TierContext | None, endpoint_kind: str, correlation_id: str | None = None
 ) -> None:
-    """Return credits for a request that produced nothing.
+    """Return what a request consumed when it produced nothing.
+
+    There are two quota systems and this has to serve both. With
+    ``CREDITS_ENABLED`` the charge is a credit debit; without it — the shipped
+    default — ``enforce_quota`` consumes the tier's call counter *as* the
+    check, so that counter is what a failed request has to give back. Refunding
+    only the ledger meant the entire mechanism was inert in a default deploy,
+    and a free user with ``FREE_GENERATE_LIMIT=1`` lost their hour to a
+    provider outage with no recourse.
 
     Credits are debited before dispatch, which is required: reserving after
     the provider call would let concurrent requests overdraw. The consequence
     is that a request charged up front but yielding no image has taken the
     user's money for nothing — worst on /generate, the most expensive action
-    in the ledger.
+    in the ledger. The call counter has the same shape and the same problem.
 
     Refunding only on TOTAL failure is deliberate. A partial result is still a
     result: the product's premise is comparing models, and pro-rating would
@@ -344,27 +375,56 @@ def _refund_credits(
 
     INVARIANT: every path that returns non-2xx after quota enforcement must
     call this exactly once. The early-exit paths (no models enabled, every
-    model capped, bad session reference, missing source image) are the easiest
-    to miss precisely because they never reach a provider — no cost was
-    incurred, so charging for them is the least defensible case of all.
+    model capped, model disabled at runtime, bad session reference, missing
+    source image) are the easiest to miss precisely because they never reach a
+    provider — no cost was incurred, so charging for them is the least
+    defensible case of all.
     """
-    if not config.credits_enabled or tier_ctx is None:
+    if tier_ctx is None:
         return
-    if tier_ctx.tier not in ("free", "paid"):
+
+    if config.credits_enabled:
+        if tier_ctx.tier not in ("free", "paid"):
+            return
+        amount = config.credit_cost(endpoint_kind)
+        if amount <= 0:
+            return
+        try:
+            _user_repo.grant_credits(tier_ctx.user_id, amount)
+            StructuredLogger.info(
+                f"Refunded {amount} centi-credits for a failed {endpoint_kind}",
+                correlation_id=correlation_id,
+                userId=tier_ctx.user_id,
+            )
+        except Exception as e:
+            StructuredLogger.error(
+                f"Failed to refund credits for {endpoint_kind}: {e}",
+                correlation_id=correlation_id,
+                userId=tier_ctx.user_id,
+            )
         return
-    amount = config.credit_cost(endpoint_kind)
-    if amount <= 0:
+
+    mapping = _REFUND_COUNTERS.get((tier_ctx.tier, endpoint_kind))
+    if mapping is None:
         return
+    counter, window_field, window_attr = mapping
     try:
-        _user_repo.grant_credits(tier_ctx.user_id, amount)
-        StructuredLogger.info(
-            f"Refunded {amount} centi-credits for a failed {endpoint_kind}",
-            correlation_id=correlation_id,
-            userId=tier_ctx.user_id,
+        refunded = _user_repo.decrement_counter(
+            tier_ctx.user_id,
+            counter,
+            window_field,
+            getattr(config, window_attr),
+            int(time.time()),
         )
+        if refunded:
+            StructuredLogger.info(
+                f"Refunded one {counter} for a failed {endpoint_kind}",
+                correlation_id=correlation_id,
+                userId=tier_ctx.user_id,
+            )
     except Exception as e:
         StructuredLogger.error(
-            f"Failed to refund credits for {endpoint_kind}: {e}",
+            f"Failed to refund {counter} for {endpoint_kind}: {e}",
             correlation_id=correlation_id,
             userId=tier_ctx.user_id,
         )
@@ -808,7 +868,7 @@ def run_generation(payload: dict[str, Any]) -> dict[str, Any]:
     correlation_id: str | None = payload.get("correlationId")
 
     # A MINIMAL TierContext, not a real identity. Only two fields are
-    # load-bearing here: `_refund_credits` reads `.tier` and `.user_id`, and
+    # load-bearing here: `_refund_usage` reads `.tier` and `.user_id`, and
     # `_cost_meter.record_models` reads the same two. Everything else is
     # filler and must never be used for an authorization decision -- in
     # particular `is_authenticated=False` is a placeholder, not a claim about
@@ -1017,7 +1077,7 @@ def run_generation(payload: dict[str, Any]) -> dict[str, Any]:
         if name not in skipped_models and r.get("status") != "error"
     ]
     if not produced:
-        _refund_credits(tier_ctx, "generate", correlation_id)
+        _refund_usage(tier_ctx, "generate", correlation_id)
 
     # Meter what this request cost in dollars. Every dispatched model is
     # metered, including ones that errored or timed out: the provider
@@ -1072,7 +1132,7 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
         # Get enabled models
         enabled_models = get_enabled_models()
         if not enabled_models:
-            _refund_credits(validated.tier, "generate", correlation_id)
+            _refund_usage(validated.tier, "generate", correlation_id)
             return response(500, {"error": "No models enabled"})
 
         # Filter models by runtime disable and per-model cost ceiling
@@ -1117,7 +1177,7 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
             skipped_models = {}
 
         if not models_to_dispatch:
-            _refund_credits(validated.tier, "generate", correlation_id)
+            _refund_usage(validated.tier, "generate", correlation_id)
             return response(429, error_responses.model_cost_ceiling())
 
         enabled_model_names = [m.name for m in models_to_dispatch]
@@ -1392,13 +1452,13 @@ def _handle_refinement(
     try:
         refs, err = _validate_refinement_request(validated)
         if err:
-            _refund_credits(validated.tier, refund_kind, correlation_id)
+            _refund_usage(validated.tier, refund_kind, correlation_id)
             return err
         session_id, model_name, model_config = refs
 
         loaded, err = _load_source_image(session_id, model_name, validated.tier)
         if err:
-            _refund_credits(validated.tier, refund_kind, correlation_id)
+            _refund_usage(validated.tier, refund_kind, correlation_id)
             return err
         source_image, iteration_count, visibility = loaded
 
@@ -1431,7 +1491,7 @@ def _handle_refinement(
             )
             slot_ok = True
         if not slot_ok:
-            _refund_credits(validated.tier, refund_kind, correlation_id)
+            _refund_usage(validated.tier, refund_kind, correlation_id)
             return response(429, error_responses.model_cost_ceiling())
 
         config_dict = get_model_config_dict(model_config)
@@ -1511,7 +1571,7 @@ def _handle_refinement(
             error_msg = sanitize_error_message(result.get("error", "Unknown error"))
             _handle_failed_result(session_id, model_name, iteration_index, error_msg)
             # One model, and it failed: the whole request produced nothing.
-            _refund_credits(validated.tier, refund_kind, correlation_id)
+            _refund_usage(validated.tier, refund_kind, correlation_id)
             return response(
                 500,
                 {
@@ -1537,7 +1597,7 @@ def _handle_refinement(
             correlation_id=correlation_id,
             traceback=traceback.format_exc(),
         )
-        _refund_credits(validated.tier, refund_kind, correlation_id)
+        _refund_usage(validated.tier, refund_kind, correlation_id)
         return response(500, error_responses.internal_server_error())
 
 

@@ -381,7 +381,7 @@ def _generate_with_results(future_result, side_effect=None):
         patch("lambda_function.session_manager") as mock_sm,
         patch("lambda_function._executor") as mock_exec,
         patch("lambda_function._cost_meter"),
-        patch("lambda_function._refund_credits") as mock_refund,
+        patch("lambda_function._refund_usage") as mock_refund,
     ):
         mock_repo.get_model_runtime_config.return_value = None
         mock_cf.check_prompt.return_value = False
@@ -443,7 +443,7 @@ def test_refine_refunds_when_the_model_fails():
         patch("lambda_function.context_manager", MagicMock()),
         patch("lambda_function.get_iterate_handler", return_value=handler),
         patch("lambda_function._cost_meter"),
-        patch("lambda_function._refund_credits") as mock_refund,
+        patch("lambda_function._refund_usage") as mock_refund,
     ):
         mock_counter.consume_model_slot.return_value = True
         mock_cf.check_prompt.return_value = False
@@ -487,7 +487,7 @@ def _generate_expecting_early_exit(models, slot_granted=True):
         patch("lambda_function.session_manager"),
         patch("lambda_function._executor"),
         patch("lambda_function._cost_meter"),
-        patch("lambda_function._refund_credits") as mock_refund,
+        patch("lambda_function._refund_usage") as mock_refund,
     ):
         mock_repo.get_model_runtime_config.return_value = None
         mock_cf.check_prompt.return_value = False
@@ -534,7 +534,7 @@ def _refinement_early_exit(validate_err=None, load_err=None, slot_granted=True):
         patch("lambda_function.get_iterate_handler", return_value=ctx["handler"]),
         patch("lambda_function._handle_successful_result", return_value={}),
         patch("lambda_function._cost_meter"),
-        patch("lambda_function._refund_credits") as mock_refund,
+        patch("lambda_function._refund_usage") as mock_refund,
     ):
         mock_counter.consume_model_slot.return_value = slot_granted
         mock_cf.check_prompt.return_value = False
