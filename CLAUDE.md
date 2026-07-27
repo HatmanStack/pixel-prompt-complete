@@ -266,6 +266,7 @@ Prompt enhancement uses separate config: `PROMPT_MODEL_PROVIDER`, `PROMPT_MODEL_
 | `FREE_REFINE_LIMIT`                     | No       | `2`                  | `/iterate` + `/outpaint` calls per free user per window                                                                                                                                                                                                           |
 | `FREE_WINDOW_SECONDS`                   | No       | `3600`               | Free tier rolling window length                                                                                                                                                                                                                                   |
 | `PAID_DAILY_LIMIT`                      | No       | `200`                | Refinement calls per paid user per day (operator-tuned)                                                                                                                                                                                                           |
+| `PAID_DAILY_GENERATE_LIMIT`             | No       | `50`                 | `/generate` calls per paid user per day. Paid generation was previously bounded only by ceilings shared across every user, so one account could consume the organisation's day                                                                                    |
 | `PAID_WINDOW_SECONDS`                   | No       | `86400`              | Paid tier rolling window length                                                                                                                                                                                                                                   |
 | `STRIPE_SECRET_KEY`                     | Yes**    | `""`                 | Stripe API secret key                                                                                                                                                                                                                                             |
 | `STRIPE_WEBHOOK_SECRET`                 | Yes**    | `""`                 | Stripe webhook signing secret                                                                                                                                                                                                                                     |
@@ -286,6 +287,81 @@ Prompt enhancement uses separate config: `PROMPT_MODEL_PROVIDER`, `PROMPT_MODEL_
 | `MODEL_FIREFLY_DAILY_CAP` | No       | `500`   | Daily generation cap for Firefly     |
 
 Cost ceiling checks apply regardless of `AUTH_ENABLED` -- the provider bills for a generation whether or not the caller logged in. Models at their daily cap are skipped during `/generate` (other models still run). If all models are capped, `/generate` returns 429 `MODEL_COST_CEILING`. Also enforced on `/iterate` and `/outpaint`, consumed before dispatch.
+
+**Provider Cost Table** (what a provider call costs _us_, in micro-dollars;
+integers, because these feed DynamoDB atomic counters and float accumulation
+would drift). The twelve per-model names are **constructed dynamically** at
+`config.py:421` as `COST_{MODEL}_{OPERATION}_USD_MICROS`, so grepping the
+source for them finds nothing — this table is the only way to discover them:
+
+| Variable                                 | Required | Default   | Description                                                                                                                                                                                                                                                 |
+| ---------------------------------------- | -------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `COST_GEMINI_GENERATE_USD_MICROS`        | No       | `39000`   | Gemini `/generate` ($0.039)                                                                                                                                                                                                                                 |
+| `COST_GEMINI_REFINE_USD_MICROS`          | No       | `39000`   | Gemini `/iterate`                                                                                                                                                                                                                                           |
+| `COST_GEMINI_OUTPAINT_USD_MICROS`        | No       | `39000`   | Gemini `/outpaint`                                                                                                                                                                                                                                          |
+| `COST_NOVA_GENERATE_USD_MICROS`          | No       | `40000`   | Nova Canvas `/generate` ($0.040)                                                                                                                                                                                                                            |
+| `COST_NOVA_REFINE_USD_MICROS`            | No       | `40000`   | Nova Canvas `/iterate`                                                                                                                                                                                                                                      |
+| `COST_NOVA_OUTPAINT_USD_MICROS`          | No       | `40000`   | Nova Canvas `/outpaint`                                                                                                                                                                                                                                     |
+| `COST_OPENAI_GENERATE_USD_MICROS`        | No       | `40000`   | OpenAI `/generate` ($0.040)                                                                                                                                                                                                                                 |
+| `COST_OPENAI_REFINE_USD_MICROS`          | No       | `40000`   | OpenAI `/iterate` (`gpt-image-1`, priced apart)                                                                                                                                                                                                             |
+| `COST_OPENAI_OUTPAINT_USD_MICROS`        | No       | `40000`   | OpenAI `/outpaint`                                                                                                                                                                                                                                          |
+| `COST_FIREFLY_GENERATE_USD_MICROS`       | No       | `70000`   | Firefly `/generate` ($0.070, least certain)                                                                                                                                                                                                                 |
+| `COST_FIREFLY_REFINE_USD_MICROS`         | No       | `70000`   | Firefly `/iterate`                                                                                                                                                                                                                                          |
+| `COST_FIREFLY_OUTPAINT_USD_MICROS`       | No       | `70000`   | Firefly `/outpaint`                                                                                                                                                                                                                                         |
+| `COST_ENHANCE_USD_MICROS`                | No       | `7000`    | One prompt adaptation, charged once per `/generate` and once per `/enhance`                                                                                                                                                                                 |
+| `ENHANCE_DAILY_SPEND_CEILING_USD_MICROS` | No       | `2000000` | Sub-ceiling for `/enhance` alone ($2/day). `/enhance` is unauthenticated, so metering it only against the shared global budget would let anonymous traffic 503 `/generate` for paying users. `0` disables the sub-ceiling; the global ceiling still applies |
+
+The defaults are seeded from public rate cards, not from measured spend. The
+per-operation values match within a model because an iterate or outpaint call
+generates one image, same as a generate; they are separate variables because
+providers price edits differently.
+
+**None of the fourteen is a SAM parameter or a Lambda environment variable in
+`backend/template.yaml`**, so a deployed stack always gets the defaults above.
+Changing them means adding them to the template.
+
+**Credit Ledger** (`CREDITS_ENABLED`, off by default; the legacy call-counting
+quotas above stay in force while it is off). Credits are stored as integer
+**centi-credits** — 1 credit = 100 — so a refine costing a quarter of a
+generate never needs a float in a DynamoDB counter:
+
+| Variable                              | Required | Default   | Description                                                                                                                         |
+| ------------------------------------- | -------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `CREDITS_ENABLED`                     | No       | `false`   | Master switch. Off keeps the call-counting quotas, so the ledger rolls out and back without redeploying the old path                |
+| `CREDITS_PER_GENERATE`                | No       | `100`     | Centi-credits per `/generate` (1.00 credit)                                                                                         |
+| `CREDITS_PER_REFINE`                  | No       | `25`      | Centi-credits per `/iterate` (0.25 credit)                                                                                          |
+| `CREDITS_PER_OUTPAINT`                | No       | `25`      | Centi-credits per `/outpaint` (0.25 credit)                                                                                         |
+| `FREE_MONTHLY_CREDITS`                | No       | `500`     | Free tier allotment per period (5 credits)                                                                                          |
+| `PAID_MONTHLY_CREDITS`                | No       | `6500`    | Paid tier allotment per period (65 credits)                                                                                         |
+| `FREE_CREDIT_PERIOD_SECONDS`          | No       | `2592000` | Free tier renewal window (30 days). Paid tiers renew on Stripe's own period boundaries, never on a fixed clock                      |
+| `PAID_CREDIT_FALLBACK_PERIOD_SECONDS` | No       | `2592000` | Renewal window for a paid user whose Stripe period is unknown (missed webhook). A floor, so a paying customer is never left at zero |
+| `PAID_PRICE_USD_CENTS`                | No       | `1900`    | Display price served by `GET /pricing` ($19/mo), so a price experiment is a config change rather than a frontend rebuild            |
+| `OVERAGE_USD_CENTS_PER_CREDIT`        | No       | `50`      | Display overage price served by `GET /pricing`                                                                                      |
+
+**Deploy-blocking failure mode.** With `CREDITS_ENABLED=true`, seven of these —
+`CREDITS_PER_GENERATE`, `CREDITS_PER_REFINE`, `CREDITS_PER_OUTPAINT`,
+`FREE_MONTHLY_CREDITS`, `PAID_MONTHLY_CREDITS`, `FREE_CREDIT_PERIOD_SECONDS`,
+`PAID_CREDIT_FALLBACK_PERIOD_SECONDS` — **raise `RuntimeError` at import**
+(`config.py:211-239`) if set to zero or a negative number. `_safe_int` accepts
+those values happily, and a zero action cost would make that action free, which
+is the hole the ledger exists to close. The raise happens during Lambda
+initialisation, so it surfaces as a cold-start error with no request attached
+to it: check the function's init logs, not the API response.
+
+**Spend-Guard Degradation**. Every ceiling above reads one DynamoDB table and
+every guard over it fails **open**, so a single partition opens all of them and
+stops the spend accounting at the same time. These two numbers are the bound
+that needs no table — process-local state in a warm execution environment
+(`backend/src/ops/store_breaker.py`):
+
+| Variable                   | Required | Default | Description                                                                                                                                                                                                                         |
+| -------------------------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `STORE_FAILURE_THRESHOLD`  | No       | `5`     | Consecutive store failures before this container's breaker trips. Consecutive, not a rate: a partition looks like an unbroken run. Above the three or four store calls one `/generate` makes, so one unlucky request cannot trip it |
+| `DEGRADED_DISPATCH_BUDGET` | No       | `20`    | Generations a tripped container may still dispatch before `/generate` sheds with 503 `SPEND_GUARD_DEGRADED`. ~$3.80 per container; with 10 reserved executions, ~$38 fleet-wide                                                     |
+
+The breaker is **per container**, not fleet-wide. That is weaker than a
+distributed breaker and it is the strongest bound available without the
+dependency that is down.
 
 **CAPTCHA (Cloudflare Turnstile)**:
 
@@ -325,33 +401,76 @@ This means open-source mode _does_ read and write DynamoDB -- metering requires 
 | --------------------- | -------- | ------- | ---------------------------------------------------------- |
 | `CORS_ALLOWED_ORIGIN` | No       | `*`     | Allowed CORS origin (set to frontend domain in production) |
 
-**Operational Timeouts**:
+**Dispatch and Operational Timeouts**:
 
-| Variable                  | Required | Default | Description                                                          |
-| ------------------------- | -------- | ------- | -------------------------------------------------------------------- |
-| `API_CLIENT_TIMEOUT`      | No       | `60.0`  | Timeout for AI provider API calls (seconds, float)                   |
-| `IMAGE_DOWNLOAD_TIMEOUT`  | No       | `30`    | Timeout for downloading generated images (seconds)                   |
-| `ENHANCE_TIMEOUT`         | No       | `30.0`  | Timeout for prompt enhancement/adaptation LLM calls (seconds, float) |
-| `GENERATE_THREAD_WORKERS` | No       | `4`     | Number of parallel generation threads                                |
+| Variable                  | Required | Default | Description                                                                                                                                                                                                                                                                                              |
+| ------------------------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GENERATE_ASYNC`          | No       | `true`  | `POST /generate` answers as soon as the session exists and hands provider work to an asynchronous self-invocation. `false` runs the generation inline and returns the full result — the only mode that works where there is no Lambda service to invoke (`sam local start-api`, the MiniStack E2E suite) |
+| `API_CLIENT_TIMEOUT`      | No       | `60.0`  | Timeout for AI provider API calls (seconds, float). **Two budgets derive from it**, so it is not a free-standing knob                                                                                                                                                                                    |
+| `IMAGE_DOWNLOAD_TIMEOUT`  | No       | `30`    | Timeout for downloading generated images (seconds)                                                                                                                                                                                                                                                       |
+| `ENHANCE_TIMEOUT`         | No       | `30.0`  | Timeout for prompt-enhancement LLM calls (seconds, float), **clamped** to `sync_dispatch_budget_seconds` (25.0) — a 30s enhance behind a 29s gateway ceiling cannot succeed at its limit, and the LLM call is billed anyway                                                                              |
+| `GENERATE_THREAD_WORKERS` | No       | `4`     | Number of parallel generation threads                                                                                                                                                                                                                                                                    |
+
+Three derived values, none of them environment variables
+(`backend/src/config.py:526-563`):
+
+- `gateway_integration_timeout_seconds = 29` — a constant. API Gateway HTTP
+  APIs cap the integration timeout at 30s and the quota is **not adjustable**;
+  one second of margin means a doomed request is abandoned by us, with a logged
+  reason, rather than by the gateway with a 504 and no record. It is stated
+  again as `TimeoutInMillis: 29000` on the three POST integrations in
+  `backend/template.yaml`, and `tests/backend/unit/test_dispatch_budget.py`
+  fails if the two drift.
+- `generate_dispatch_budget_seconds = api_client_timeout + 10` — the budget for
+  the asynchronous worker, which has the function's 900s timeout and no gateway
+  in front of it.
+- `sync_dispatch_budget_seconds = gateway_integration_timeout_seconds - 4` —
+  the budget for `/iterate`, `/outpaint` and `/enhance`, which are answered
+  inside the HTTP request. Four seconds are reserved for validation, quota, the
+  session read/write and response assembly.
+
+Every provider bounds its own call under whichever budget applies
+(`backend/src/utils/clients.py`): the dispatch timeout cannot cancel a future
+that has already started, so a provider that outlives the budget still
+generates and bills for the image while the session records it as failed.
+
+`GENERATE_ASYNC` is a SAM parameter and a Lambda environment variable. The
+other four — `API_CLIENT_TIMEOUT`, `IMAGE_DOWNLOAD_TIMEOUT`, `ENHANCE_TIMEOUT`
+and `GENERATE_THREAD_WORKERS` — **are neither**, so a deployed stack always
+gets their defaults; they are settable for `sam local`, tests and direct
+Lambda console edits only.
 
 **Frontend** (Vite, set in `.env` or `.env.local`):
 
-| Variable                    | Required   | Default | Description                   |
-| --------------------------- | ---------- | ------- | ----------------------------- |
-| `VITE_API_ENDPOINT`         | Yes (prod) | --      | API Gateway endpoint URL      |
-| `VITE_AUTH_ENABLED`         | No         | `false` | Enable Cognito auth UI        |
-| `VITE_BILLING_ENABLED`      | No         | `false` | Enable Stripe billing UI      |
-| `VITE_COGNITO_DOMAIN`       | Yes*       | --      | Cognito Hosted UI domain      |
-| `VITE_COGNITO_CLIENT_ID`    | Yes*       | --      | Cognito App Client ID         |
-| `VITE_COGNITO_REDIRECT_URI` | Yes*       | --      | OAuth2 callback URL           |
-| `VITE_COGNITO_LOGOUT_URI`   | Yes*       | --      | Post-logout redirect URL      |
-| `VITE_ADMIN_ENABLED`        | No         | `false` | Enable admin dashboard UI     |
-| `VITE_CAPTCHA_ENABLED`      | No         | `false` | Enable Turnstile CAPTCHA UI   |
-| `VITE_TURNSTILE_SITE_KEY`   | Yes**      | --      | Cloudflare Turnstile site key |
+| Variable                    | Required   | Default | Description                                                                                                                                                                                                                                                 |
+| --------------------------- | ---------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `VITE_API_ENDPOINT`         | Yes (prod) | --      | API Gateway endpoint URL                                                                                                                                                                                                                                    |
+| `VITE_AUTH_ENABLED`         | No         | `false` | Enable Cognito auth UI                                                                                                                                                                                                                                      |
+| `VITE_BILLING_ENABLED`      | No         | `false` | **Declared but not consumed by any component.** `BILLING_ENABLED` (`frontend/src/api/config.ts:44`) is read nowhere; the billing UI is gated by `VITE_AUTH_ENABLED` alone (`TierBanner`, `QuotaIndicator`, `Header`). Kept deliberately rather than deleted |
+| `VITE_COGNITO_DOMAIN`       | Yes*       | --      | Cognito Hosted UI domain                                                                                                                                                                                                                                    |
+| `VITE_COGNITO_CLIENT_ID`    | Yes*       | --      | Cognito App Client ID                                                                                                                                                                                                                                       |
+| `VITE_COGNITO_REDIRECT_URI` | Yes*       | --      | OAuth2 callback URL                                                                                                                                                                                                                                         |
+| `VITE_COGNITO_LOGOUT_URI`   | Yes*       | --      | Post-logout redirect URL                                                                                                                                                                                                                                    |
+| `VITE_ADMIN_ENABLED`        | No         | `false` | Enable admin dashboard UI                                                                                                                                                                                                                                   |
+| `VITE_CAPTCHA_ENABLED`      | No         | `false` | Enable Turnstile CAPTCHA UI                                                                                                                                                                                                                                 |
+| `VITE_TURNSTILE_SITE_KEY`   | Yes**      | --      | Cloudflare Turnstile site key                                                                                                                                                                                                                               |
 
 *Required when `VITE_AUTH_ENABLED=true`. **Required when `VITE_CAPTCHA_ENABLED=true`.
 
-See `backend/.env.example` for a copyable template of backend variables.
+`openBillingPortal` (`frontend/src/api/billing.ts:32`) is likewise reachable
+from no UI, despite `/me` advertising `portalAvailable`. Both are live code
+paths with no entry point, not dead code — noted so nobody assumes the button
+exists.
+
+One further build-time variable is **not** a `VITE_` variable and so is not
+exposed to client code: `ANALYZE=true` (read by `frontend/vite.config.ts:22`)
+adds the Rollup visualizer and writes `dist/stats.html`. `npm run analyze` sets
+it. Left unset, no module graph is written into the deployed directory.
+
+See `backend/.env.example` and `frontend/.env.example` for copyable templates.
+Every variable in the tables above is genuinely read by code, and every default
+matches `backend/src/config.py` — do not add a row for something nothing
+reads.
 
 ### Handler System
 
