@@ -7,7 +7,8 @@
   "scripts": {
     "start": "cd frontend && npm run dev",
     "test": "cd frontend && npx vitest run --passWithNoTests",
-    "test:backend": "cd backend && PYTHONPATH=src pytest ../tests/backend -v --tb=short",
+    "test:backend": "make test-backend",
+    "test:backend:e2e:docker": "make e2e-up && make e2e && make e2e-down",
     "lint": "cd frontend && npm run lint",
     "lint:backend": "uvx ruff@0.15.21 check backend/src/ tests/ backend/scripts/",
     "check": "npm run lint && npm run lint:backend && npm test && npm run test:backend",
