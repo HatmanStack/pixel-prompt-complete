@@ -196,7 +196,7 @@ jobs:
         with:
           node-version: '24'
       - name: Markdownlint
-        run: npx -y markdownlint-cli2 "**/*.md" "#node_modules" "#.claude" "#frontend/node_modules" "#docs/plans" "#.venv"
+        run: make docs-lint
 
   status-check:
     name: All Checks Passed

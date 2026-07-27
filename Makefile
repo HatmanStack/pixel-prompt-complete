@@ -1,4 +1,4 @@
-.PHONY: help install test test-backend lint format build lock-check e2e-up e2e e2e-down check
+.PHONY: help install test test-backend lint docs-lint format build lock-check e2e-up e2e e2e-down check
 
 # Where the Python toolchain lives. `make install` creates backend/.venv and
 # installs into it, so nothing here needs an activated environment; CI installs
@@ -50,6 +50,17 @@ lint: ## Run all linters
 	$(RUFF) format --check backend/src/
 	$(MYPY) --config-file backend/pyproject.toml backend/src/
 
+# The exclusion is `**/.venv*/**`, not `.venv`. CI installs Python with
+# --system so it has no virtualenv, and the old pattern only ever matched one
+# at the repository root -- run the same command locally after `make install`
+# and it lints werkzeug's ICON_LICENSE.md out of backend/.venv/lib/, failing on
+# a bare URL in a vendored file. A gate that only passes on a machine unlike
+# yours is a gate nobody runs before pushing.
+#
+# ci.yml runs this same target rather than a copy of the glob list.
+docs-lint: ## Lint the Markdown, as CI does
+	npx -y markdownlint-cli2 "**/*.md" "#node_modules" "#.claude" "#frontend/node_modules" "#docs/plans" "#**/.venv*/**"
+
 format: ## Format all code (Prettier + ruff format)
 	cd frontend && npx prettier --write 'src/**/*.{ts,tsx,js,jsx,css,json}'
 	$(RUFF) format backend/src/
@@ -91,4 +102,4 @@ e2e: ## Run E2E tests (needs Docker: `make e2e-up` first)
 e2e-down: ## Stop MiniStack
 	docker compose down
 
-check: lint lock-check test build ## Full CI-equivalent check (lint + lockfile + test + build)
+check: lint docs-lint lock-check test build ## Full CI-equivalent check: everything ci.yml runs except the Docker-backed e2e job
