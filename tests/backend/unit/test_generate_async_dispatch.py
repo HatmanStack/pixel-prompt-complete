@@ -32,6 +32,7 @@ happen, so the block cannot pass vacuously by mocking everything into silence.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from concurrent.futures import Future
 from unittest.mock import MagicMock, patch
@@ -321,10 +322,7 @@ def test_sync_mode_invokes_nothing(stack):
 # ---- The worker branch ----
 
 
-def test_the_worker_branch_runs_the_dispatch(stack):
-    """lambda_handler routes a generate_worker event before any HTTP parsing."""
-    import lambda_function
-
+def _worker_event(**overrides):
     payload = {
         "source": "generate_worker",
         "sessionId": "s1",
@@ -336,8 +334,35 @@ def test_the_worker_branch_runs_the_dispatch(stack):
         "userId": "anon#abc",
         "correlationId": "corr-1",
     }
+    payload.update(overrides)
+    return payload
 
-    result = lambda_function.lambda_handler(payload, None)
+
+def _worker_error_logs(caplog, needle):
+    """The structured ERROR records the logger actually emitted, decoded.
+
+    StructuredLogger writes a JSON string to the root logger, so this reads the
+    real emitted record rather than a mock's call arguments. For a branch whose
+    log line is the entire operator signal, the distinction is the whole point.
+    """
+    entries = []
+    for record in caplog.records:
+        if record.levelno != logging.ERROR:
+            continue
+        try:
+            entry = json.loads(record.getMessage())
+        except (ValueError, TypeError):
+            continue
+        if needle in entry.get("message", ""):
+            entries.append(entry)
+    return entries
+
+
+def test_the_worker_branch_runs_the_dispatch(stack):
+    """lambda_handler routes a generate_worker event before any HTTP parsing."""
+    import lambda_function
+
+    result = lambda_function.lambda_handler(_worker_event(), None)
 
     assert result == {"statusCode": 200}
     stack["get_handler"].assert_called_once()
@@ -346,52 +371,108 @@ def test_the_worker_branch_runs_the_dispatch(stack):
     )
 
 
-def test_the_worker_branch_does_not_raise_into_the_runtime(stack):
-    """The per-model failures are already recorded on the session.
+# ---- The worker's failure path ----
+#
+# The exception has to originate ABOVE the executor for this branch to fire.
+# generate_for_model wraps its own body in `except Exception`, so an
+# add_iteration or provider failure is recorded per model and never propagates
+# -- an earlier version of these tests set add_iteration.side_effect and never
+# reached the branch at all. get_enabled_models is the first call
+# run_generation makes that can escape.
 
-    Letting the exception escape turns a diagnosable session into an
-    unexplained invocation error with a retry the platform chooses for us.
+
+def test_a_worker_failure_does_not_raise_into_the_runtime(stack):
+    """Letting it escape would hand Lambda a retry that re-bills every image.
+
+    The session already records what happened per model, so a platform retry
+    buys nothing and costs a second full generation.
     """
     import lambda_function
 
-    stack["session"].add_iteration.side_effect = RuntimeError("s3 down")
+    with patch(
+        "lambda_function.get_enabled_models",
+        side_effect=RuntimeError("config exploded"),
+    ):
+        result = lambda_function.lambda_handler(_worker_event(), None)
 
-    result = lambda_function.lambda_handler(
-        {
-            "source": "generate_worker",
-            "sessionId": "s1",
-            "prompt": "a cat",
-            "modelNames": ["gemini"],
-            "skipped": {},
-            "visibility": "public",
-            "tier": None,
-            "userId": None,
-            "correlationId": None,
-        },
-        None,
-    )
+    assert result == {"statusCode": 200}
 
-    assert result["statusCode"] in (200, 500)
+
+def test_a_worker_failure_emits_the_only_operator_signal_there_is(stack, caplog):
+    """Swallowing the exception is deliberate, and it costs every other signal.
+
+    No Lambda error metric, no statusCode to alarm on, and a session frozen at
+    `pending` until the client's five-minute poll gives up. One ERROR line is
+    all an operator gets, so it is asserted on the record the logger emitted.
+    """
+    import lambda_function
+
+    with (
+        caplog.at_level(logging.ERROR),
+        patch(
+            "lambda_function.get_enabled_models",
+            side_effect=RuntimeError("config exploded"),
+        ),
+    ):
+        lambda_function.lambda_handler(_worker_event(), None)
+
+    entries = _worker_error_logs(caplog, "Generate worker failed")
+    assert len(entries) == 1, "the sole operator signal for a dead worker was not emitted"
+
+
+def test_the_worker_failure_log_identifies_the_session(stack, caplog):
+    """Without the session id the log says a generation died, not which one."""
+    import lambda_function
+
+    with (
+        caplog.at_level(logging.ERROR),
+        patch(
+            "lambda_function.get_enabled_models",
+            side_effect=RuntimeError("config exploded"),
+        ),
+    ):
+        lambda_function.lambda_handler(_worker_event(sessionId="sess-42"), None)
+
+    entry = _worker_error_logs(caplog, "Generate worker failed")[0]
+    assert entry["metadata"]["sessionId"] == "sess-42"
+    assert entry["correlationId"] == "corr-1"
+
+
+def test_the_worker_failure_log_carries_the_traceback(stack, caplog):
+    """The message alone names the exception; only the traceback names the line."""
+    import lambda_function
+
+    with (
+        caplog.at_level(logging.ERROR),
+        patch(
+            "lambda_function.get_enabled_models",
+            side_effect=RuntimeError("config exploded"),
+        ),
+    ):
+        lambda_function.lambda_handler(_worker_event(), None)
+
+    entry = _worker_error_logs(caplog, "Generate worker failed")[0]
+    tb = entry["metadata"]["traceback"]
+    assert "RuntimeError" in tb
+    assert "config exploded" in tb
+    assert "run_generation" in tb
+
+
+def test_a_healthy_worker_logs_no_failure(stack, caplog):
+    """Keeps the three assertions above from passing on an always-on log line."""
+    import lambda_function
+
+    with caplog.at_level(logging.ERROR):
+        lambda_function.lambda_handler(_worker_event(), None)
+
+    assert _worker_error_logs(caplog, "Generate worker failed") == []
 
 
 def test_the_worker_meters_the_spend(stack):
     """The charge follows the provider call, not the HTTP response."""
     import lambda_function
 
-    lambda_function.lambda_handler(
-        {
-            "source": "generate_worker",
-            "sessionId": "s1",
-            "prompt": "a cat",
-            "modelNames": ["gemini"],
-            "skipped": {},
-            "visibility": "public",
-            "tier": "free",
-            "userId": "u1",
-            "correlationId": None,
-        },
-        None,
-    )
+    lambda_function.lambda_handler(_worker_event(tier="free", userId="u1"), None)
 
     assert stack["cost_meter"].record_models.called
     assert stack["cost_meter"].record_models.call_args.kwargs["tier"] == "free"
