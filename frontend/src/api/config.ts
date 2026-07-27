@@ -34,7 +34,7 @@ export const COGNITO_CLIENT_ID: string =
   (import.meta.env.VITE_COGNITO_CLIENT_ID as string | undefined) ?? '';
 export const COGNITO_REDIRECT_URI: string =
   (import.meta.env.VITE_COGNITO_REDIRECT_URI as string | undefined) ?? '';
-export const COGNITO_LOGOUT_URI: string =
+const COGNITO_LOGOUT_URI: string =
   (import.meta.env.VITE_COGNITO_LOGOUT_URI as string | undefined) ?? '';
 
 // Admin and CAPTCHA feature flags
