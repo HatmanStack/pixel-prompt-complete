@@ -5,7 +5,7 @@ boto3==1.43.24
 requests==2.34.2
 
 # Image processing
-Pillow==12.2.0
+Pillow==12.3.0
 
 # AI provider SDKs
 openai==2.46.0
