@@ -256,3 +256,47 @@ def test_paid_daily_refine_limit(repo):
     ]
     assert results.count(True) == 3
     assert results.count(False) == 2
+
+
+def test_a_guest_context_without_a_token_id_is_denied_not_asserted(repo, caplog):
+    """Was a bare `assert ctx.guest_token_id is not None`.
+
+    Under `python -O` the check vanishes entirely and an unidentifiable guest
+    is metered against nothing, which is how a guest bucket becomes unlimited.
+    Without -O it raised AssertionError with no diagnostic, inside a fail-open
+    wrapper, in a function whose every other failure returns a QuotaResult.
+
+    Denying rather than failing open is deliberate: reaching this line means
+    resolve_tier produced a guest context with no token id, which is a bug.
+    """
+    from users.quota import enforce_quota
+    from users.tier import TierContext
+
+    ctx = TierContext(
+        tier="guest",
+        user_id="guest#unknown",
+        email=None,
+        is_authenticated=False,
+        guest_token_id=None,
+        issue_guest_cookie=False,
+    )
+
+    with caplog.at_level("ERROR"):
+        result = enforce_quota(ctx, "generate", repo, now=1000)
+
+    assert result.allowed is False
+    assert result.reason == "guest_identity_missing"
+    assert result.reset_at == 0
+    assert any("guest" in r.getMessage().lower() for r in caplog.records), (
+        "a bug-shaped denial has to be alarmable"
+    )
+
+
+def test_the_quota_module_has_no_bare_asserts():
+    """`python -O` strips them, and a stripped check is not a check."""
+    import inspect
+
+    import users.quota as quota_module
+
+    source = inspect.getsource(quota_module)
+    assert "assert " not in source

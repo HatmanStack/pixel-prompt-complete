@@ -586,6 +586,11 @@ def _parse_and_validate_request(
             retry_after = _seconds_until_reset(result.reset_at, now)
             if result.reason == "suspended":
                 return None, response(403, error_responses.account_suspended())
+            if result.reason == "guest_identity_missing":
+                # 403, not the tier fall-through's 429: nothing here is a rate
+                # limit, so telling the caller to wait for a window to reset is
+                # advice that can never work. Signing in is the way through.
+                return None, response(403, error_responses.auth_required())
             if result.reason == "guest_ip":
                 return None, response(429, error_responses.guest_ip_limit(retry_after=retry_after))
             if result.reason == "guest_global":

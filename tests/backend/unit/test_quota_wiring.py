@@ -262,3 +262,24 @@ def test_paid_generate_under_the_limit_is_unblocked(wired):
             ac.return_value = iter([fut])
             resp = wired.lambda_handler(_ev(), None)
             assert resp["statusCode"] == 200
+
+
+def test_a_guest_without_a_token_id_gets_a_non_500(wired):
+    """The new reason has to map to a status code, or the denial is a 500 the
+    caller cannot act on -- which is what the bare assert produced."""
+    from users.quota import QuotaResult
+
+    with patch.object(
+        wired,
+        "_enforce_quota_safe",
+        return_value=QuotaResult(
+            allowed=False, reason="guest_identity_missing", reset_at=0, usage={}
+        ),
+    ):
+        resp = wired.lambda_handler(_event(body={"prompt": "hi"}), None)
+
+    # 403, not the 429 the tier fall-through would give: nothing about this
+    # is a rate limit, and telling a caller to wait for a window to reset is
+    # advice that can never work. Signing in is the way through.
+    assert resp["statusCode"] == 403
+    assert _body(resp)["error"] == "AUTH_REQUIRED"

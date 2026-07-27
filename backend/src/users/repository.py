@@ -315,10 +315,28 @@ class UserRepository:
         last_key: dict | None = None,
         tier_filter: str | None = None,
         suspended_filter: bool | None = None,
+        max_pages: int = 5,
     ) -> tuple[list[dict], dict | None]:
         """Scan for real user records, excluding synthetic items.
 
-        Returns (items, LastEvaluatedKey_or_None).
+        Returns ``(items, cursor_or_None)``. The cursor is an
+        ``ExclusiveStartKey`` for the next call.
+
+        **The cursor keys off the last item RETURNED, not the last page
+        scanned.** It used to return ``collected[:limit]`` paired with the
+        ``LastEvaluatedKey`` of the page whose surplus items had just been
+        dropped -- so feeding that key back resumed *after* the items that were
+        discarded, and they reached no caller at all. The table's key schema is
+        a single ``userId`` hash (backend/template.yaml), so the key of any
+        item is a complete and valid ``ExclusiveStartKey``.
+
+        ``max_pages`` is a COST bound, not a correctness bound. Synthetic
+        records (``guest#``, ``spend#``, ``anon#``, ...) are filtered
+        client-side and vastly outnumber real users on a live table, so a
+        request for one page of users could otherwise scan the whole thing.
+        Hitting the ceiling returns a short page with the scan's own
+        ``LastEvaluatedKey``; a short page is a normal DynamoDB result and the
+        admin UI already pages.
         """
         filter_parts: list[str] = []
         values: dict[str, Any] = {}
@@ -342,11 +360,12 @@ class UserRepository:
             scan_kwargs["ExclusiveStartKey"] = last_key
 
         # We may need multiple pages to fill `limit` items after filtering
-        # synthetic records, so loop until we have enough or exhaust the table.
+        # synthetic records, so loop until we have enough, exhaust the table,
+        # or hit the page ceiling.
         collected: list[dict] = []
-        out_last_key: dict | None = None
+        page_last_key: dict | None = None
 
-        while True:
+        for _ in range(max_pages):
             resp = self._table.scan(**scan_kwargs)
             for item in resp.get("Items", []):
                 uid = item.get("userId", "")
@@ -354,12 +373,21 @@ class UserRepository:
                     continue
                 collected.append(item)
 
-            out_last_key = resp.get("LastEvaluatedKey")
-            if len(collected) >= limit or not out_last_key:
+            page_last_key = resp.get("LastEvaluatedKey")
+            if len(collected) >= limit or not page_last_key:
                 break
-            scan_kwargs["ExclusiveStartKey"] = out_last_key
+            scan_kwargs["ExclusiveStartKey"] = page_last_key
 
-        return collected[:limit], out_last_key
+        if len(collected) >= limit:
+            page = collected[:limit]
+            # Resume from the last item the caller actually receives, so the
+            # surplus this truncation drops is returned next time rather than
+            # skipped.
+            return page, {"userId": page[-1]["userId"]}
+
+        # Under the limit: either the table is exhausted (no key) or the page
+        # ceiling stopped us early (key present, short page).
+        return collected, page_last_key
 
     # ---------- model runtime config ----------
 
