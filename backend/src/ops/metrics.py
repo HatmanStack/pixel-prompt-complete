@@ -38,6 +38,9 @@ _cw_client = None
 _CW_TIMEOUT_SECONDS = 2
 _CW_MAX_ATTEMPTS = 2
 
+# PutMetricData accepts at most 1,000 datums per request.
+_CW_MAX_DATUMS_PER_CALL = 1000
+
 
 def _get_cw_client():
     """Return a lazily-initialized CloudWatch client with bounded timeouts."""
@@ -54,6 +57,80 @@ def _get_cw_client():
     return _cw_client
 
 
+def _request_datums(
+    endpoint: str,
+    model: str | None,
+    duration_ms: float,
+    is_error: bool,
+) -> list[dict[str, Any]]:
+    """The four datums one request contributes."""
+    dimensions = [{"Name": "Endpoint", "Value": endpoint}]
+    if model is not None:
+        dimensions.append({"Name": "Model", "Value": model})
+
+    return [
+        {
+            "MetricName": "RequestCount",
+            "Value": 1,
+            "Unit": "Count",
+            "Dimensions": dimensions,
+        },
+        {
+            "MetricName": "ErrorCount",
+            "Value": 1 if is_error else 0,
+            "Unit": "Count",
+            "Dimensions": dimensions,
+        },
+        {
+            "MetricName": "Latency",
+            "Value": duration_ms,
+            "Unit": "Milliseconds",
+            "Dimensions": dimensions,
+        },
+        # Undimensioned copy. A CloudWatch alarm cannot sum across
+        # dimension values, so an alarm on "errors across all providers"
+        # has no series to match unless one is published without
+        # dimensions. Same requirement as TotalSpendUsd and
+        # TotalQuotaRejections.
+        {
+            "MetricName": "TotalErrorCount",
+            "Value": 1 if is_error else 0,
+            "Unit": "Count",
+        },
+    ]
+
+
+def emit_request_metrics(entries: list[tuple[str, str | None, float, bool]]) -> None:
+    """Emit per-request metrics for several requests at once. Fire-and-forget.
+
+    ``/generate`` dispatches four models and used to call ``put_metric_data``
+    once per model. Each call is bounded at 2s connect + 2s read x 2 attempts,
+    so four models could add up to ~16 seconds of blocking network time to
+    publish sixteen datums that ``PutMetricData`` accepts in a single request.
+
+    Args:
+        entries: ``(endpoint, model, duration_ms, is_error)`` per request.
+    """
+    if not entries:
+        return
+    try:
+        metric_data: list[dict[str, Any]] = []
+        for endpoint, model, duration_ms, is_error in entries:
+            metric_data.extend(_request_datums(endpoint, model, duration_ms, is_error))
+
+        client = _get_cw_client()
+        # Four models produce sixteen datums and cannot approach the limit.
+        # Chunking anyway: a loop that is correct for any input is shorter to
+        # reason about than one that is correct for four.
+        for start in range(0, len(metric_data), _CW_MAX_DATUMS_PER_CALL):
+            client.put_metric_data(
+                Namespace=_CW_NAMESPACE,
+                MetricData=metric_data[start : start + _CW_MAX_DATUMS_PER_CALL],
+            )
+    except Exception as e:
+        StructuredLogger.error(f"Failed to emit CloudWatch metric: {e}")
+
+
 def emit_request_metric(
     endpoint: str,
     model: str | None,
@@ -62,52 +139,17 @@ def emit_request_metric(
 ) -> None:
     """Emit per-request metrics to CloudWatch. Fire-and-forget.
 
+    Kept because ``_handle_refinement`` legitimately has exactly one request
+    to report. Implemented as a one-element batch so there is a single code
+    path and the two cannot drift.
+
     Args:
         endpoint: API endpoint path (e.g. ``/generate``, ``/iterate``).
         model: Model name if applicable, or None.
         duration_ms: Request duration in milliseconds.
         is_error: Whether the request resulted in an error.
     """
-    try:
-        dimensions = [{"Name": "Endpoint", "Value": endpoint}]
-        if model is not None:
-            dimensions.append({"Name": "Model", "Value": model})
-
-        metric_data = [
-            {
-                "MetricName": "RequestCount",
-                "Value": 1,
-                "Unit": "Count",
-                "Dimensions": dimensions,
-            },
-            {
-                "MetricName": "ErrorCount",
-                "Value": 1 if is_error else 0,
-                "Unit": "Count",
-                "Dimensions": dimensions,
-            },
-            {
-                "MetricName": "Latency",
-                "Value": duration_ms,
-                "Unit": "Milliseconds",
-                "Dimensions": dimensions,
-            },
-            # Undimensioned copy. A CloudWatch alarm cannot sum across
-            # dimension values, so an alarm on "errors across all providers"
-            # has no series to match unless one is published without
-            # dimensions. Same requirement as TotalSpendUsd and
-            # TotalQuotaRejections.
-            {
-                "MetricName": "TotalErrorCount",
-                "Value": 1 if is_error else 0,
-                "Unit": "Count",
-            },
-        ]
-
-        client = _get_cw_client()
-        client.put_metric_data(Namespace=_CW_NAMESPACE, MetricData=metric_data)
-    except Exception as e:
-        StructuredLogger.error(f"Failed to emit CloudWatch metric: {e}")
+    emit_request_metrics([(endpoint, model, duration_ms, is_error)])
 
 
 def emit_spend_metric(usd_micros: int, tier: str) -> None:

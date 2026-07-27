@@ -46,7 +46,7 @@ from models.providers import (
     sanitize_error_message,
 )
 from ops.cost_meter import CostMeter
-from ops.metrics import emit_quota_rejection, emit_request_metric
+from ops.metrics import emit_quota_rejection, emit_request_metric, emit_request_metrics
 from ops.model_counters import ModelCounterService
 from prompts.repository import PromptHistoryRepository
 from users.quota import QuotaResult, enforce_quota
@@ -1131,12 +1131,25 @@ def run_generation(payload: dict[str, Any]) -> dict[str, Any]:
 
     # Emitted regardless of auth: knowing which provider is slow or
     # failing has nothing to do with whether the caller logged in.
-    for mname, mresult in results.items():
-        if mname in skipped_models:
-            continue
-        dur = mresult.get("duration", 0) * 1000  # seconds to ms
-        is_err = mresult.get("status") == "error"
-        emit_request_metric("/generate", mname, dur, is_err)
+    #
+    # One call for the whole dispatch, not one per model. Each put_metric_data
+    # is bounded at 2s connect + 2s read x 2 attempts, so four models was up
+    # to ~16s of blocking network time. The async move took that off the
+    # request path but not out of the reserved concurrency slot or the billed
+    # duration. Skipped models are excluded: they never reached a provider, so
+    # reporting latency for them would report work that did not happen.
+    emit_request_metrics(
+        [
+            (
+                "/generate",
+                mname,
+                mresult.get("duration", 0) * 1000,  # seconds to ms
+                mresult.get("status") == "error",
+            )
+            for mname, mresult in results.items()
+            if mname not in skipped_models
+        ]
+    )
 
     return results
 
