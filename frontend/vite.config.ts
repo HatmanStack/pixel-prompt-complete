@@ -15,12 +15,20 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   plugins: [
     react(),
-    visualizer({
-      filename: './dist/stats.html',
-      open: false,
-      gzipSize: true,
-      brotliSize: true,
-    }),
+    // Opt-in only: `npm run analyze` sets ANALYZE=true. Unconditionally it
+    // wrote a 432 KB dist/stats.html -- a module graph carrying absolute
+    // source paths -- into the directory that gets deployed. The report
+    // belongs to whoever asked for it, not to the CDN.
+    ...(process.env.ANALYZE === 'true'
+      ? [
+          visualizer({
+            filename: './dist/stats.html',
+            open: false,
+            gzipSize: true,
+            brotliSize: true,
+          }),
+        ]
+      : []),
   ],
   resolve: {
     alias: {
@@ -33,7 +41,16 @@ export default defineConfig({
     strictPort: true,
   },
   build: {
-    sourcemap: true,
+    // false, not 'hidden'. Hidden maps are still written to dist/, and there
+    // is no frontend deploy target yet (H40) -- whatever ships will be an
+    // `aws s3 sync dist/`, which would upload them, and a .map next to a
+    // content-hashed .js is guessable without the sourceMappingURL comment.
+    // Nothing consumes them either: the only error reporting is
+    // ErrorBoundary -> POST /log, and it sends React's componentStack
+    // (a component-name tree) rather than minified stack frames, so a map
+    // would not decode anything it sends. Set this to 'hidden' the day an
+    // error tracker with a map-upload step exists.
+    sourcemap: false,
     outDir: 'dist',
     rollupOptions: {
       output: {

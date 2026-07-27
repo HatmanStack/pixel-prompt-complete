@@ -58,6 +58,13 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npx vitest run --coverage
+      # Last, deliberately: a build failure is less informative than a test
+      # failure, so the faster signal comes first. Until now no job anywhere
+      # produced a production bundle, so the Vite/Rollup-specific paths -- the
+      # manualChunks heuristic, PostCSS/Tailwind resolution, the
+      # import.meta.env.PROD branches in api/config.ts -- first ran at deploy
+      # time. `make build` runs the same command.
+      - run: npm run build
 
   backend:
     name: Backend Lint & Tests

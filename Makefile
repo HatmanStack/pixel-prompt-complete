@@ -1,4 +1,4 @@
-.PHONY: help install test lint format e2e-up e2e e2e-down check
+.PHONY: help install test lint format build e2e-up e2e e2e-down check
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -21,6 +21,9 @@ format: ## Format all code (Prettier + ruff format)
 	cd frontend && npx prettier --write 'src/**/*.{ts,tsx,js,jsx,css,json}'
 	ruff format backend/src/
 
+build: ## Build the production frontend bundle, as CI does
+	cd frontend && npm run build
+
 e2e-up: ## Start MiniStack
 	docker compose up -d --wait
 
@@ -30,4 +33,4 @@ e2e: ## Run E2E tests
 e2e-down: ## Stop MiniStack
 	docker compose down
 
-check: lint test ## Full CI-equivalent check (lint + test)
+check: lint test build ## Full CI-equivalent check (lint + test + build)
