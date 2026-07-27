@@ -26,9 +26,9 @@ distro==1.9.0
     # via
     #   google-genai
     #   openai
-google-auth==2.55.0
+google-auth==2.56.2
     # via google-genai
-google-genai==2.8.0
+google-genai==2.14.0
     # via -r backend/src/requirements.txt
 h11==0.16.0
     # via httpcore
@@ -87,7 +87,7 @@ tenacity==9.1.4
     # via google-genai
 tqdm==4.68.1
     # via openai
-typing-extensions==4.15.0
+typing-extensions==4.16.0
     # via
     #   google-genai
     #   openai
