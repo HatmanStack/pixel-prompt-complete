@@ -46,9 +46,10 @@ this decision exists to prevent, with no error until a user clicks refine.
 
 ## Code Governed
 
-- `backend/src/models/providers/openai_provider.py:32` — `_EDIT_MODEL`
-- `backend/src/models/providers/openai_provider.py:97-132` — `iterate_openai`
-- `backend/src/models/providers/openai_provider.py:135-180` — `outpaint_openai`
+- `backend/src/models/providers/openai_provider.py` — `_EDIT_MODEL`,
+  `iterate_openai` and `outpaint_openai`. Symbols, not line numbers: this
+  module is under active change and the ranges an earlier draft cited were
+  already stale by the time that draft was committed
 - `tests/backend/unit/test_openai_handler.py` — two tests configured with
   `dall-e-3` that assert the edit calls go to `gpt-image-1` anyway. They are the
   regression guard: this decision is invisible at runtime until it is wrong.
