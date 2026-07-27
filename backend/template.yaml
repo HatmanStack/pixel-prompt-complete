@@ -699,6 +699,7 @@ Resources:
                 - s3:PutObject
               Resource:
                 - !Sub '${PixelPromptBucket.Arn}/sessions/*'
+                - !Sub '${PixelPromptBucket.Arn}/private/*'
             - Sid: S3ListBucket
               Effect: Allow
               Action: s3:ListBucket
