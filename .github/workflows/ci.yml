@@ -80,6 +80,13 @@ jobs:
           uv pip install --system -e "backend/.[dev]"
       - name: Lint
         run: ruff check backend/src/
+      # --config-file is not optional. mypy discovers config from the current
+      # directory and there is no pyproject.toml at the repository root, so
+      # `mypy backend/src/` alone runs with mypy's defaults -- none of the
+      # strict settings, none of the type-ratchet overrides. Verified: it
+      # reports 80 errors in 17 files that way, against 0 with the config.
+      - name: Type check
+        run: mypy --config-file backend/pyproject.toml backend/src/
       - name: Tests
         run: pytest tests/backend/unit -v --tb=short --cov=backend/src --cov-report=term-missing --cov-fail-under=80
 

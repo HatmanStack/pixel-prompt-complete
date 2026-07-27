@@ -14,6 +14,7 @@ test: ## Run all tests (frontend + backend unit)
 lint: ## Run all linters
 	cd frontend && npm run lint && npm run typecheck && npm run format:check
 	ruff check backend/src/
+	mypy --config-file backend/pyproject.toml backend/src/
 
 format: ## Format all code (Prettier + ruff format)
 	cd frontend && npx prettier --write 'src/**/*.{ts,tsx,js,jsx,css,json}'
