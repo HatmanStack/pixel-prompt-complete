@@ -198,3 +198,111 @@ class TestContentFilterEvasion:
         ]
         for prompt in safe:
             assert content_filter.check_prompt(prompt) is False, f"Clean prompt blocked: {prompt}"
+
+
+# ---------------------------------------------------------------------------
+# Task 5: false positives on a creative image product, and the broken leet map
+# ---------------------------------------------------------------------------
+
+
+class TestBenignCollocations:
+    """"blood moon" is an astronomical event, not gore.
+
+    Six terms -- blood, gore, hate, violent, sexual, offensive -- were
+    word-boundary blocked, so a creative image product rejected "blood
+    orange still life" with INAPPROPRIATE_CONTENT. They are now checked
+    against a short, literal allowlist of benign collocations first.
+    """
+
+    @pytest.mark.parametrize(
+        "prompt",
+        [
+            "a blood moon over the desert",
+            "blood orange still life",
+            "a blood-red sunset",
+            "a diagram of a blood cell",
+            "a blood vessel under a microscope",
+            "a duel fought in cold blood",
+            "a gore-tex jacket in the rain",
+            "an offensive line in a football stadium",
+            "a violent storm over the plains",
+            "sexual dimorphism in tropical birds",
+        ],
+    )
+    def test_benign_collocations_are_not_blocked(self, prompt):
+        assert ContentFilter().check_prompt(prompt) is False, prompt
+
+    def test_the_term_outside_its_collocation_still_blocks(self):
+        """The allowlist exempts the phrase, not the word.
+
+        Without this the allowlist would be an evasion vector: append "blood
+        moon" to anything and the whole prompt is exempt.
+        """
+        cf = ContentFilter()
+        assert cf.check_prompt("a blood moon and blood everywhere") is True
+        assert cf.check_prompt("a gore-tex jacket covered in gore") is True
+
+    def test_unambiguous_terms_have_no_allowlist(self):
+        """Loosening the ambiguous six must not loosen the other thirteen."""
+        cf = ContentFilter()
+        for prompt in (
+            "nude portrait",
+            "naked person on beach",
+            "nsfw content",
+            "explicit adult material",
+            "pornographic imagery",
+            "xxx rated scene",
+            "erotic art",
+            "lewd anime character",
+            "adult content only",
+            "mutilated body",
+            "gruesome injury",
+            "racist imagery",
+            "discriminatory message",
+        ):
+            assert cf.check_prompt(prompt) is True, prompt
+
+
+class TestLeetMapRegression:
+    """_LEET_MAP mapped 5->t and 7->y instead of 5->s and 7->t.
+
+    The normalisation existed to defeat leetspeak evasion and was corrupting
+    the very strings it was meant to catch.
+    """
+
+    def test_n5fw_normalises_to_nsfw_which_the_old_five_to_t_map_turned_into_ntfw(self):
+        assert ContentFilter().check_prompt("n5fw content") is True
+
+    def test_ero7ic_normalises_to_erotic_which_the_old_seven_to_y_map_turned_into_eroyic(self):
+        assert ContentFilter().check_prompt("ero7ic art") is True
+
+    def test_explici7_normalises_to_explicit(self):
+        assert ContentFilter().check_prompt("explici7 material") is True
+
+    def test_the_map_substitutes_the_conventional_letters(self):
+        from utils.content_filter import _normalize_base
+
+        assert _normalize_base("013457@$8") == "oieastasb"
+
+    def test_n5de_does_not_normalise_to_nude_and_is_not_blocked(self):
+        """Asserting the answer the corrected map actually gives, not a guess.
+
+        5 maps to s, so "n5de" becomes "nsde" -- not a keyword. The old map
+        made it "ntde", which was equally not a keyword; this string was never
+        caught and still is not. Recorded so the next reader does not assume
+        it was.
+        """
+        from utils.content_filter import _normalize_base
+
+        assert _normalize_base("n5de") == "nsde"
+        assert ContentFilter().check_prompt("n5de") is False
+
+
+def test_a_hateful_expression_was_already_safe():
+    """Documented as a false positive in the audit; it was not one.
+
+    ``\\bhate\\b`` does not match inside "hateful" -- there is no word
+    boundary between the "e" and the "f". Asserted so the claim is settled
+    rather than repeated.
+    """
+    assert ContentFilter().check_prompt("a hateful expression") is False
