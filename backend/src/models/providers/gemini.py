@@ -76,7 +76,7 @@ def iterate_gemini(
 
         content_parts = [
             types.Part.from_bytes(data=image_bytes, mime_type="image/png"),
-            types.Part.from_text(f"Edit this image: {context_prompt}"),
+            types.Part.from_text(text=f"Edit this image: {context_prompt}"),
         ]
 
         response = client.models.generate_content(
@@ -112,7 +112,7 @@ def outpaint_gemini(
 
         content_parts = [
             types.Part.from_bytes(data=image_bytes, mime_type="image/png"),
-            types.Part.from_text(full_prompt),
+            types.Part.from_text(text=full_prompt),
         ]
 
         response = client.models.generate_content(
