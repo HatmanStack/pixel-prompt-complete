@@ -50,7 +50,27 @@ sam local start-api
 
 ### CI (`.github/workflows/ci.yml`)
 
-Runs on push/PR to main: frontend format check + lint + typecheck + tests (with coverage gate), backend lint + tests (80% coverage gate), E2E tests (MiniStack), docs lint (markdownlint), and a status gate. Backend CI sets `PYTHONPATH=$GITHUB_WORKSPACE/backend/src`.
+Runs on push/PR to main. Five jobs sit behind a `status-check` gate:
+
+| Job                   | Runs when                    | Steps                                                                                                                                                                                                                                         |
+| --------------------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `changes`             | always                       | `dorny/paths-filter`; its two outputs decide whether the other jobs run                                                                                                                                                                       |
+| Frontend Lint & Tests | `changes.frontend == 'true'` | `npm ci`, `npm run format:check`, `npm run lint`, `npm run typecheck`, `npx vitest run --coverage`, `npm run build`                                                                                                                           |
+| Backend Lint & Tests  | `changes.backend == 'true'`  | install from `backend/requirements-lock.txt`, `make lock-check`, `ruff check backend/src/ tests/ backend/scripts/`, `ruff format --check backend/src/`, `mypy --config-file backend/pyproject.toml backend/src/`, `pytest tests/backend/unit` |
+| E2E Tests             | `changes.backend == 'true'`  | MiniStack service container, `pytest tests/backend/e2e -m e2e --no-cov`                                                                                                                                                                       |
+| Documentation Lint    | always                       | `make docs-lint` (markdownlint-cli2)                                                                                                                                                                                                          |
+
+**A skipped job counts as passing.** `status-check` accepts `success` and
+`skipped` alike (`ci.yml:217`), and the `changes` filter matches `frontend/**`
+for the frontend job and `backend/**`, `tests/**`, `ruff.toml`, `pytest.ini`,
+`.coveragerc` and `Makefile` for the backend and E2E jobs. A PR touching none
+of those merges with those jobs **not run**, rather than green. Do not read a
+green `status-check` as "all tests passed on this change".
+
+Backend CI sets `PYTHONPATH=$GITHUB_WORKSPACE/backend/src` and
+`AUTH_ENABLED=false`. Coverage is enabled by `pytest.ini` and the 80% floor
+lives in `.coveragerc`; no invocation passes `--cov-fail-under`. Frontend
+coverage thresholds live in `frontend/vite.config.ts`.
 
 ## Architecture
 
@@ -124,8 +144,8 @@ backend/src/
 | POST   | /admin/users/{userId}/unsuspend                | `handle_admin_unsuspend`     | Admin: unsuspend user                                                    |
 | POST   | /admin/users/{userId}/notify                   | `handle_admin_notify`        | Admin: send notification to user                                         |
 | GET    | /admin/models                                  | `handle_admin_models_list`   | Admin: model status and runtime config                                   |
-| POST   | /admin/models/{modelName}/disable              | `handle_admin_model_disable` | Admin: disable model at runtime                                          |
-| POST   | /admin/models/{modelName}/enable               | `handle_admin_model_enable`  | Admin: enable model at runtime                                           |
+| POST   | /admin/models/{model}/disable                  | `handle_admin_model_disable` | Admin: disable model at runtime                                          |
+| POST   | /admin/models/{model}/enable                   | `handle_admin_model_enable`  | Admin: enable model at runtime                                           |
 | GET    | /admin/metrics                                 | `handle_admin_metrics`       | Admin: usage metrics dashboard                                           |
 | GET    | /admin/revenue                                 | `handle_admin_revenue`       | Admin: revenue metrics (admin group required)                            |
 
@@ -316,8 +336,8 @@ All return `{'status': 'success', 'image': base64_str, ...}` or `{'status': 'err
 ### Session Lifecycle
 
 1. **POST /generate** calls `SessionManager.create_session()` which creates `sessions/{sessionId}/status.json` in S3
-1. `ThreadPoolExecutor(max_workers=4)` runs all enabled models in parallel
-1. Each model: get handler, generate, upload to S3, `complete_iteration()` with optimistic locking (version field)
+1. `ThreadPoolExecutor(max_workers=generate_thread_workers)` runs all enabled models in parallel (`GENERATE_THREAD_WORKERS`, default 4)
+1. Each model: get handler, generate, upload to S3, `complete_iteration()` with optimistic locking on the S3 ETag
 1. **POST /iterate** loads source image from latest iteration, gets rolling 3-entry context from `ContextManager`, calls iterate handler, stores new iteration
 1. **POST /outpaint** is similar to iterate but uses outpaint handler with aspect ratio preset
 1. Max 7 iterations per model per session (`MAX_ITERATIONS` in config.py)
@@ -407,15 +427,20 @@ Same pattern for outpaint: add `outpaint_<provider>()`, register in `_OUTPAINT_H
 - **S3 Lifecycle**: Sessions auto-deleted after 30 days
 - **Iteration Limit**: 7 per model per session (configurable via `MAX_ITERATIONS`)
 - **Context Window**: Rolling 3 iterations maintained per model
-- **Session Locking**: Optimistic locking via version field in status.json (3 retries)
+- **Session Locking**: Optimistic locking on the S3 **ETag**. Every mutation reads `status.json` with its ETag and writes back with `IfMatch=<etag>` via `SessionManager._save_status_if_unmodified`; a losing writer gets `PreconditionFailed` and retries the read-modify-write. `MAX_RETRIES = 8` (`jobs/manager.py:25`). The `version` field on `status.json` is **advisory** — it is incremented and stored but appears in no condition, so it is a debugging aid, not the lock
 - **API Throttling**: 50 req/s steady, 100 burst (HttpApi DefaultRouteSettings)
-- **Ruff Config**: `pyproject.toml` -- line-length 100, rules E/F/W/I, ignore E501
+- **Tool config locations** (there is no repository-root `pyproject.toml`):
+  - `backend/pyproject.toml` — ruff (`line-length 100`, rules E/F/W/I, ignore E501), mypy settings and the type-ratchet overrides, and the `[dev]` extras with their pins. Ruff finds it by walking up from `backend/src`; mypy is passed `--config-file backend/pyproject.toml` explicitly, because without it mypy discovers nothing from the repository root and silently runs with its defaults
+  - `ruff.toml` (repository root) — `extend`s `backend/pyproject.toml` so the Python outside `backend/` (chiefly `tests/`) is held to the same rules
+  - `pytest.ini` (repository root) — markers (`e2e`, `slow`) and `addopts`; this is where pytest actually looks, since every documented invocation runs from the root
+  - `.coveragerc` (repository root) — the 80% `fail_under`, stated once
+  - `frontend/eslint.config.js`, `frontend/tsconfig*.json`, `frontend/vite.config.ts` — the frontend lint, type and coverage config
 - **Frontend**: React 19, Zustand 5, Tailwind CSS 4, Vite 8, Vitest 4
 - **DALL-E 3 iteration**: The `iterate_openai`/`outpaint_openai` handlers use `gpt-image-1` for `images.edit` regardless of `OPENAI_MODEL_ID`, because DALL-E 3 does not support image edits (see ADR-5)
 - **Firefly auth**: OAuth2 access tokens are cached at module level with a 50-minute TTL (Adobe IMS tokens last 24h). Cache is per-container, resets on cold start, protected by `threading.Lock`
 - **Nova Canvas auth**: Uses the Lambda IAM role with `bedrock:InvokeModel` permission (no API key)
 - **Tier storage**: DynamoDB `USERS_TABLE_NAME` (default `pixel-prompt-users`), on-demand billing, TTL-backed guest records. Created by SAM even when `AUTH_ENABLED=false` (empty, no cost)
-- **JWT authorizer**: API Gateway HttpApi built-in JWT authorizer gates `/iterate`, `/outpaint`, `/me`, `/billing/checkout`, `/billing/portal` when `AUTH_ENABLED=true`. Lambda reads claims from `event.requestContext.authorizer.jwt.claims` and never re-verifies signatures
+- **JWT authorizer**: when `AUTH_ENABLED=true` the API Gateway HttpApi built-in JWT authorizer gates **16 routes** — `/iterate`, `/outpaint`, `/me`, `/billing/checkout`, `/billing/portal`, `/prompts/history`, and all ten `/admin/*` routes (`/admin/users`, `/admin/users/{userId}`, its `suspend`/`unsuspend`/`notify` sub-routes, `/admin/models`, `/admin/models/{model}/disable`, `/admin/models/{model}/enable`, `/admin/metrics`, `/admin/revenue`). Each route carries `Auth: !If [AuthEnabledCondition, {Authorizer: CognitoJwt}, {}]`, so with auth off none of them is gated at the gateway and the handlers' own checks are the only ones left. Lambda reads claims from `event.requestContext.authorizer.jwt.claims` and never re-verifies signatures
 
 ## Repository Context
 
