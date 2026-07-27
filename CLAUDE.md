@@ -78,76 +78,106 @@ coverage thresholds live in `frontend/vite.config.ts`.
 
 ```text
 backend/src/
-├── lambda_function.py       # Main handler - routes all API endpoints
-├── config.py                # 4 frozen ModelConfig dataclasses + env var loading
-├── models/
-│   ├── providers/           # Per-provider handler modules
-│   │   ├── __init__.py      # Re-exports get_handler, get_iterate_handler, get_outpaint_handler
-│   │   ├── _common.py       # Shared helpers (decode source image, build context prompt)
-│   │   ├── gemini.py        # handle_google_gemini, iterate_gemini, outpaint_gemini
-│   │   ├── nova.py          # handle_nova, iterate_nova, outpaint_nova (Bedrock)
-│   │   ├── openai_provider.py  # handle_openai, iterate_openai, outpaint_openai
-│   │   └── firefly.py       # handle_firefly, iterate_firefly, outpaint_firefly
-│   └── context.py           # ContextManager: rolling 3-iteration window per model in S3
-├── jobs/
-│   └── manager.py           # SessionManager: S3-based session state with optimistic locking
+├── lambda_function.py       # Every API route, plus the two non-HTTP entry paths
+├── config.py                # 4 frozen ModelConfig dataclasses + all env var loading
+├── admin/                   # Admin API (needs ADMIN_ENABLED, which needs AUTH_ENABLED)
+│   ├── auth.py              # admins-group check; rejections carry CORS headers
+│   ├── metrics.py           # handle_admin_metrics, handle_admin_revenue
+│   ├── models.py            # Runtime model kill switch (list / disable / enable)
+│   └── users.py             # List, detail, suspend, unsuspend, notify
 ├── api/
 │   ├── enhance.py           # PromptEnhancer: LLM-based prompt improvement
-│   └── log.py               # Client-side logging endpoint
+│   ├── log.py               # Client-side logging endpoint
+│   └── pricing.py           # GET /pricing: credit costs and display prices
 ├── auth/
 │   ├── claims.py            # Extract + validate JWT claims from API Gateway event
 │   └── guest_token.py       # HMAC sign/verify guest cookie
 ├── billing/
-│   ├── stripe_client.py     # Cached Stripe client
 │   ├── checkout.py          # /billing/checkout handler
 │   ├── portal.py            # /billing/portal handler
+│   ├── stripe_client.py     # Cached Stripe client
 │   └── webhook.py           # /stripe/webhook handler + event dispatch
+├── jobs/
+│   └── manager.py           # SessionManager: S3 session state, ETag-conditional writes
+├── models/
+│   ├── context.py           # ContextManager: rolling 3-iteration window per model in S3
+│   └── providers/           # Per-provider handler modules
+│       ├── __init__.py      # get_handler, get_iterate_handler, get_outpaint_handler
+│       ├── _common.py       # Shared helpers (decode source image, build context prompt)
+│       ├── firefly.py       # handle_firefly, iterate_firefly, outpaint_firefly
+│       ├── gemini.py        # handle_google_gemini, iterate_gemini, outpaint_gemini
+│       ├── nova.py          # handle_nova, iterate_nova, outpaint_nova (Bedrock)
+│       └── openai_provider.py  # handle_openai, iterate_openai, outpaint_openai
+├── notifications/
+│   ├── sender.py            # Fire-and-forget email dispatch (no-op unless SES_ENABLED)
+│   ├── ses_client.py        # Cached SES client factory
+│   └── templates.py         # HTML + plain-text lifecycle and admin emails
 ├── ops/
-│   ├── model_counters.py    # Per-model cost ceiling logic (ModelCounterService)
-│   └── captcha.py           # Cloudflare Turnstile CAPTCHA verification
+│   ├── captcha.py           # Cloudflare Turnstile CAPTCHA verification
+│   ├── cost_meter.py        # Dollar spend metering; daily, monthly and enhance ceilings
+│   ├── metrics.py           # CloudWatch custom metrics + the daily snapshot handler
+│   ├── model_counters.py    # Per-model daily cap logic (ModelCounterService)
+│   └── store_breaker.py     # Per-container circuit breaker over the quota/spend store
+├── prompts/
+│   └── repository.py        # Prompt history + the GLOBAL#RECENT public feed
 ├── users/
-│   ├── repository.py        # UserRepository: DynamoDB CRUD, atomic quota updates, suspension
 │   ├── quota.py             # Tier-based quota enforcement with suspension check
+│   ├── repository.py        # UserRepository: DynamoDB CRUD, atomic quota and credits
 │   └── tier.py              # resolve_tier(event) -> TierContext
 └── utils/
-    ├── clients.py           # Cached API client factories (OpenAI, Gemini, Bedrock)
-    ├── storage.py           # ImageStorage: S3 upload, CloudFront URLs, gallery listing
+    ├── clients.py           # Cached SDK client factories + per-provider timeout math
     ├── content_filter.py    # ContentFilter: keyword-based pre-filtering
     ├── error_responses.py   # Standardized error response factories
+    ├── http.py              # The single response builder (CORS, Retry-After, cookies)
+    ├── logger.py            # StructuredLogger: JSON CloudWatch logs
+    ├── outpaint.py          # Outpaint aspect-preset utilities
     ├── retry.py             # Exponential backoff decorator
-    ├── outpaint.py          # Outpaint utility functions
-    └── logger.py            # StructuredLogger: JSON CloudWatch logs
+    └── storage.py           # ImageStorage: S3 upload, CloudFront URLs, gallery listing
 ```
+
+Package `__init__.py` files are omitted above, except
+`models/providers/__init__.py`, which holds the three handler registries. Every
+other `.py` file under `backend/src/` has a line.
 
 ### API Endpoints
 
-| Method | Path                                           | Handler                      | Description                                                              |
-| ------ | ---------------------------------------------- | ---------------------------- | ------------------------------------------------------------------------ |
-| POST   | /generate                                      | `handle_generate`            | Create session, generate initial images for all enabled models           |
-| POST   | /iterate                                       | `handle_iterate`             | Refine one model's image (JWT required when `AUTH_ENABLED=true`)         |
-| POST   | /outpaint                                      | `handle_outpaint`            | Expand image to new aspect ratio (JWT required when `AUTH_ENABLED=true`) |
-| GET    | /status/{sessionId}                            | `handle_status`              | Get session state with all model iterations                              |
-| GET    | /download/{sessionId}/{model}/{iterationIndex} | `handle_download`            | Presigned download URL for a generated image                             |
-| POST   | /enhance                                       | `handle_enhance`             | LLM prompt improvement                                                   |
-| GET    | /gallery/list                                  | `handle_gallery_list`        | List galleries with CloudFront preview URLs                              |
-| GET    | /gallery/{sessionId}                           | `handle_gallery_detail`      | Get all images (CloudFront URLs) from a gallery                          |
-| GET    | /prompts/recent                                | `handle_prompts_recent`      | Get recent prompts across sessions                                       |
-| GET    | /prompts/history                               | `handle_prompts_history`     | Get user's prompt history (JWT required)                                 |
-| POST   | /log                                           | `handle_log_endpoint`        | Client error logging                                                     |
-| GET    | /me                                            | `handle_me`                  | User info + tier + current quota (JWT required)                          |
-| POST   | /billing/checkout                              | `handle_billing_checkout`    | Create Stripe Checkout session (JWT required)                            |
-| POST   | /billing/portal                                | `handle_billing_portal`      | Create Stripe Customer Portal session (JWT required)                     |
-| POST   | /stripe/webhook                                | `handle_stripe_webhook`      | Stripe event webhook (signature-verified, no JWT)                        |
-| GET    | /admin/users                                   | `handle_admin_users_list`    | Admin: list users (admin group required)                                 |
-| GET    | /admin/users/{userId}                          | `handle_admin_user_detail`   | Admin: user detail                                                       |
-| POST   | /admin/users/{userId}/suspend                  | `handle_admin_suspend`       | Admin: suspend user                                                      |
-| POST   | /admin/users/{userId}/unsuspend                | `handle_admin_unsuspend`     | Admin: unsuspend user                                                    |
-| POST   | /admin/users/{userId}/notify                   | `handle_admin_notify`        | Admin: send notification to user                                         |
-| GET    | /admin/models                                  | `handle_admin_models_list`   | Admin: model status and runtime config                                   |
-| POST   | /admin/models/{model}/disable                  | `handle_admin_model_disable` | Admin: disable model at runtime                                          |
-| POST   | /admin/models/{model}/enable                   | `handle_admin_model_enable`  | Admin: enable model at runtime                                           |
-| GET    | /admin/metrics                                 | `handle_admin_metrics`       | Admin: usage metrics dashboard                                           |
-| GET    | /admin/revenue                                 | `handle_admin_revenue`       | Admin: revenue metrics (admin group required)                            |
+| Method | Path                                           | Handler                      | Description                                                                                       |
+| ------ | ---------------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------- |
+| POST   | /generate                                      | `handle_generate`            | Create a session and dispatch the enabled models. Asynchronous by default — see Session Lifecycle |
+| POST   | /iterate                                       | `handle_iterate`             | Refine one model's latest image (JWT required when `AUTH_ENABLED=true`)                           |
+| POST   | /outpaint                                      | `handle_outpaint`            | Expand one model's image to a new aspect ratio (JWT required when `AUTH_ENABLED=true`)            |
+| GET    | /status/{sessionId}                            | `handle_status`              | Session state with every model's iterations; 404 to a non-owner of a private session              |
+| GET    | /download/{sessionId}/{model}/{iterationIndex} | `handle_download`            | Presigned download URL for one generated image                                                    |
+| POST   | /enhance                                       | `handle_enhance`             | LLM prompt improvement                                                                            |
+| POST   | /log                                           | `handle_log_endpoint`        | Client error logging                                                                              |
+| GET    | /pricing                                       | `handle_pricing`             | Credit costs, tier allotments and display prices (public, unauthenticated)                        |
+| GET    | /gallery/list                                  | `handle_gallery_list`        | Paginated gallery list with CloudFront preview URLs                                               |
+| GET    | /gallery/{sessionId}                           | `handle_gallery_detail`      | All images (CloudFront URLs) from one gallery folder                                              |
+| GET    | /prompts/recent                                | `handle_prompts_recent`      | Recent prompts from public sessions                                                               |
+| GET    | /prompts/history                               | `handle_prompts_history`     | The caller's own prompt history (JWT required)                                                    |
+| GET    | /me                                            | `handle_me`                  | User info + tier + current quota (JWT required)                                                   |
+| POST   | /billing/checkout                              | `handle_billing_checkout`    | Create Stripe Checkout session (JWT required)                                                     |
+| POST   | /billing/portal                                | `handle_billing_portal`      | Create Stripe Customer Portal session (JWT required)                                              |
+| POST   | /stripe/webhook                                | `handle_stripe_webhook`      | Stripe event webhook (signature-verified, no JWT)                                                 |
+| GET    | /admin/users                                   | `handle_admin_users_list`    | Admin: list users                                                                                 |
+| GET    | /admin/users/{userId}                          | `handle_admin_user_detail`   | Admin: user detail                                                                                |
+| POST   | /admin/users/{userId}/suspend                  | `handle_admin_suspend`       | Admin: suspend user                                                                               |
+| POST   | /admin/users/{userId}/unsuspend                | `handle_admin_unsuspend`     | Admin: unsuspend user                                                                             |
+| POST   | /admin/users/{userId}/notify                   | `handle_admin_notify`        | Admin: send notification to user                                                                  |
+| GET    | /admin/models                                  | `handle_admin_models_list`   | Admin: model status and runtime config                                                            |
+| POST   | /admin/models/{model}/disable                  | `handle_admin_model_disable` | Admin: disable a model at runtime                                                                 |
+| POST   | /admin/models/{model}/enable                   | `handle_admin_model_enable`  | Admin: enable a model at runtime                                                                  |
+| GET    | /admin/metrics                                 | `handle_admin_metrics`       | Admin: usage metrics dashboard                                                                    |
+| GET    | /admin/revenue                                 | `handle_admin_revenue`       | Admin: revenue metrics                                                                            |
+
+This table **is** the router: every branch of `lambda_handler`'s dispatch chain
+and of `_route_admin` has exactly one row, and there are no other routes.
+`OPTIONS` on any path short-circuits to a 200 CORS preflight before the chain.
+Anything else is a 404. Every `/admin/*` handler re-checks the `admins` Cognito
+group itself, so the gateway authorizer is not the only gate.
+
+The Lambda also has **two non-HTTP entry paths**, both checked ahead of the
+router; see Session Lifecycle.
 
 ### Model Configuration (Fixed 4 Models)
 
@@ -371,45 +401,66 @@ other's images. Folders without it predate the change and still list.
 
 TypeScript React app using **Zustand** for state management (not Context API).
 
-**State Stores** (`stores/`):
+**State Stores** (`frontend/src/stores/`, six of them):
 
 - `useAppStore` -- Session state, results, prompt, generation status
 - `useUIStore` -- UI state (modals, panels, view mode, focusedModel for column focus)
 - `useToastStore` -- Toast notification queue
+- `useAuthStore` -- Cognito Hosted UI tokens and identity, persisted to `sessionStorage`
+- `useBillingStore` -- The last `/me` payload: tier, quota window, credits
+- `useAdminStore` -- Admin dashboard users, models, metrics and revenue state
 
-**Key Hooks**:
+**Hooks** (`frontend/src/hooks/`, six of them):
 
-- `useSessionPolling` -- Poll /status/{sessionId} until complete
+- `useSessionPolling` -- Poll `/status/{sessionId}` until the session is terminal
 - `useIteration` -- Manage per-model iteration workflow
 - `useGallery` -- Fetch gallery list
+- `useMePolling` -- Refresh `/me` on mount and whenever the session ID changes
 - `useBreakpoint` -- Responsive breakpoint detection
 - `useSound` -- Sound effects
+
+**Components** (`frontend/src/components/<domain>/`). One organising scheme,
+by domain, with no `features/` or flat-file layer beside it:
+
+| Directory     | Holds                                                                      |
+| ------------- | -------------------------------------------------------------------------- |
+| `admin/`      | The admin dashboard views (users, models, metrics, revenue, notifications) |
+| `common/`     | Header, footer, buttons, modal shell, toasts, loading states               |
+| `errors/`     | `ErrorBoundary`, `ErrorFallback`, and the startup config diagnostic        |
+| `gallery/`    | `GalleryBrowser`, `GalleryPreview` (lazy-loaded as its own chunk)          |
+| `gating/`     | `AgeGateModal`, `CaptchaWidget`                                            |
+| `generation/` | Prompt input, generate button, model columns, iteration and outpaint UI    |
+| `layout/`     | `ResponsiveLayout`, `DesktopLayout`, `MobileLayout`                        |
+| `tier/`       | `TierBanner`, `QuotaIndicator`, `UpgradeModal`                             |
+
+Route-level views live in `frontend/src/pages/` (`Admin`, `AuthCallback`,
+`BillingSuccess`, `BillingCancel`).
 
 **Layout**: `ResponsiveLayout` branches to `DesktopLayout` (4-column model grid with column focus/expand) or `MobileLayout`. Each model gets a `ModelColumn` with `IterationCard` entries and `IterationInput` for refinement.
 
 ## Test Structure
 
-Backend tests live at repo root in `tests/`. Frontend tests live in `frontend/tests/`.
+Backend tests live at the repository root in `tests/`. Frontend tests live in
+`frontend/tests/`. Individual files are deliberately **not** named here: the
+list that used to be here named five of them, one of which never existed.
+Directories are what this section describes.
 
-```text
-tests/backend/unit/                      # Unit tests with moto S3 mocks
-  test_gemini_handler.py                 # Gemini provider tests
-  test_nova_handler.py                   # Nova Canvas (Bedrock) tests
-  test_openai_handler.py                 # OpenAI DALL-E 3 / gpt-image-1 tests
-  test_firefly_handler.py                # Adobe Firefly OAuth2 + generate tests
-  test_gallery_payload.py                # Gallery CloudFront-URL response tests
-  fixtures/                              # Shared API response fixtures
-tests/backend/integration/               # Integration tests (require deployed backend)
-tests/backend/e2e/                       # E2E tests with MiniStack (run via pytest tests/backend/e2e -v -m e2e)
-frontend/tests/__tests__/                # Vitest + React Testing Library
-  api/                                   # API client tests
-  components/                            # Component tests (.tsx)
-  fixtures/                              # Shared test fixtures
-  hooks/                                 # Hook tests
-  stores/                                # Zustand store tests
-  integration/                           # Integration tests
-  utils/                                 # Utility tests
-```
+| Directory                               | Holds                                                                                                                                                                                                                      |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tests/backend/unit/`                   | The whole backend suite — providers, routing, tier, quota, credits, spend, admin, template assertions. `moto` mocks S3 and DynamoDB, single-threaded only. `fixtures/` holds shared API-response and Stripe-event payloads |
+| `tests/backend/e2e/`                    | MiniStack-backed workflow tests, marked `@pytest.mark.e2e`, run with `--no-cov`                                                                                                                                            |
+| `frontend/tests/__tests__/api/`         | API client, config and transport tests                                                                                                                                                                                     |
+| `frontend/tests/__tests__/components/`  | Component tests, mirroring `src/components/<domain>/`                                                                                                                                                                      |
+| `frontend/tests/__tests__/hooks/`       | Hook tests                                                                                                                                                                                                                 |
+| `frontend/tests/__tests__/stores/`      | Zustand store tests                                                                                                                                                                                                        |
+| `frontend/tests/__tests__/pages/`       | Route-level view tests                                                                                                                                                                                                     |
+| `frontend/tests/__tests__/deploy/`      | Assertions over `backend/scripts/deploy.js`                                                                                                                                                                                |
+| `frontend/tests/__tests__/integration/` | Cross-component flows                                                                                                                                                                                                      |
+| `frontend/tests/__tests__/utils/`       | Utility tests                                                                                                                                                                                                              |
+
+`frontend/tests/setupTests.ts` is the Vitest setup file. There is no
+`tests/backend/integration/` directory and no `frontend/tests/__tests__/fixtures/`
+directory; both were removed once nothing ran them.
 
 ## Adding a New Handler Type for Existing Provider
 
