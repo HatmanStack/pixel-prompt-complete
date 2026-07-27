@@ -30,7 +30,6 @@ from config import (
     MAX_ITERATIONS,
     MODELS,
     cloudfront_domain,
-    cors_allowed_origin,
     generate_thread_workers,
     get_enabled_models,
     get_model,
@@ -54,6 +53,7 @@ from users.repository import UserRepository
 from users.tier import TierContext, anon_tier, persist_guest, resolve_tier
 from utils import error_responses
 from utils.content_filter import ContentFilter
+from utils.http import invocation_ack, json_response
 from utils.logger import StructuredLogger
 from utils.storage import ImageStorage
 
@@ -770,7 +770,9 @@ def lambda_handler(event: LambdaEvent, context: LambdaContext) -> ApiResponse:
                 sessionId=event.get("sessionId"),
                 traceback=traceback.format_exc(),
             )
-        return {"statusCode": 200}
+        # Not an HTTP response: the worker is invoked directly, so nothing
+        # reads headers here. See utils.http.invocation_ack.
+        return invocation_ack()
 
     correlation_id = extract_correlation_id(event)
 
@@ -2280,39 +2282,10 @@ def response(
 ) -> ApiResponse:
     """Helper function to create API Gateway response.
 
-    ``retryAfter`` in the body is mirrored into a real ``Retry-After`` header.
-    Mirroring here rather than at each call site means any response that
-    carries the field gets the header; it does not put the field there. Only a
-    caller that knows when the limit lifts can do that — the quota rejections
-    in ``_parse_and_validate_request`` and ``daily_spend_ceiling``, which
-    computes seconds to UTC midnight. ``model_cost_ceiling`` deliberately has
-    no interval: ``consume_model_slot`` returns a bare bool, so its reset is
-    not in scope at the point of refusal, and a guess would be worse than
-    silence.
-
-    The body field stays: a client already reading it must keep working, and
-    the two agreeing is the point.
+    A thin wrapper over ``utils.http.json_response`` -- the header policy,
+    including the ``Retry-After`` mirroring and the rule that a wildcard
+    origin never carries credentials, lives there so admin and billing
+    responses get exactly the same treatment. Kept as a name because ~60 call
+    sites in this module use it and renaming them would bury this change.
     """
-    headers = {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": cors_allowed_origin,
-        "Access-Control-Allow-Credentials": "true",
-        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, X-Correlation-ID",
-        # Without this a browser cannot read Retry-After cross-origin, which
-        # would make emitting it pointless for the only client that has one.
-        "Access-Control-Expose-Headers": "Retry-After, X-Correlation-ID",
-    }
-    retry_after = body.get("retryAfter")
-    # bool is an int subclass, and True would render as "True" — a value no
-    # client can parse into a delay.
-    if isinstance(retry_after, int) and not isinstance(retry_after, bool) and retry_after > 0:
-        headers["Retry-After"] = str(retry_after)
-    resp: ApiResponse = {
-        "statusCode": status_code,
-        "headers": headers,
-        "body": json.dumps(body),
-    }
-    if set_cookie:
-        resp["cookies"] = [set_cookie]
-    return resp
+    return json_response(status_code, body, set_cookie)

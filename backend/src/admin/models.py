@@ -8,22 +8,21 @@ Handles:
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 import config
 from admin.auth import require_admin_request
 from ops.model_counters import ModelCounterService
 from users.repository import UserRepository
+from utils.http import json_response
 
 
 def _response(status_code: int, body: dict[str, Any]) -> dict[str, Any]:
-    """Build an API Gateway response."""
-    return {
-        "statusCode": status_code,
-        "headers": {"Content-Type": "application/json"},
-        "body": json.dumps(body, default=str),
-    }
+    """Build an API Gateway response.
+
+    ``default=str`` because model runtime config carries DynamoDB values.
+    """
+    return json_response(status_code, body, default=str)
 
 
 def _extract_model_name(path: str) -> str:

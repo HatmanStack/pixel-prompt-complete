@@ -8,7 +8,6 @@ update the users table.
 from __future__ import annotations
 
 import base64
-import json
 import traceback
 from typing import Any
 
@@ -19,18 +18,12 @@ from billing.stripe_client import get_stripe
 from notifications import sender as email_sender
 from notifications import templates as email_templates
 from users.repository import UserRepository
+from utils.http import json_response
 from utils.logger import StructuredLogger
 
 
 def _response(status: int, body: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "statusCode": status,
-        "headers": {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": config.cors_allowed_origin,
-        },
-        "body": json.dumps(body),
-    }
+    return json_response(status, body)
 
 
 def _get_sig_header(event: dict[str, Any]) -> str:

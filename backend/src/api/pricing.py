@@ -14,11 +14,11 @@ upgrade modal must render them before a user has an account.
 
 from __future__ import annotations
 
-import json
 import time
 from typing import Any
 
 import config
+from utils.http import json_response
 from utils.logger import StructuredLogger
 
 # Stripe is the authority on what a customer is actually charged. Cached at
@@ -141,13 +141,9 @@ def handle_pricing(
     event: dict[str, Any], correlation_id: str | None = None
 ) -> dict[str, Any]:
     """GET /pricing - public pricing and credit costs."""
-    return {
-        "statusCode": 200,
-        "headers": {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": config.cors_allowed_origin,
-            # Prices change rarely and every client needs them on load.
-            "Cache-Control": "public, max-age=300",
-        },
-        "body": json.dumps(get_pricing()),
-    }
+    return json_response(
+        200,
+        get_pricing(),
+        # Prices change rarely and every client needs them on load.
+        extra_headers={"Cache-Control": "public, max-age=300"},
+    )

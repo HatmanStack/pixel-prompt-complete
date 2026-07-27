@@ -6,13 +6,13 @@ authenticated, and belongs to the ``admins`` Cognito group.
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 import config
 from auth.claims import is_admin
 from users.tier import extract_claims
 from utils.error_responses import admin_disabled, admin_required, auth_required
+from utils.http import json_response
 
 
 def require_admin_request(event: dict[str, Any]) -> tuple[dict | None, dict | None]:
@@ -39,9 +39,12 @@ def require_admin_request(event: dict[str, Any]) -> tuple[dict | None, dict | No
 
 
 def _response(status_code: int, body: dict[str, Any]) -> dict[str, Any]:
-    """Build a minimal API Gateway response."""
-    return {
-        "statusCode": status_code,
-        "headers": {"Content-Type": "application/json"},
-        "body": json.dumps(body),
-    }
+    """Build an API Gateway response.
+
+    This used to send ``{"Content-Type": "application/json"}`` and nothing
+    else, so every rejection here -- 501 disabled, 401 unauthenticated, 403
+    not-an-admin -- reached the browser admin UI as an opaque CORS failure
+    rather than its actual status. An admin locked out by group membership saw
+    the same thing as an admin whose stack had the feature switched off.
+    """
+    return json_response(status_code, body)

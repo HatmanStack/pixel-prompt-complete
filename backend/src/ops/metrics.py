@@ -17,6 +17,7 @@ from botocore.exceptions import ClientError
 
 import config
 from users.repository import UserRepository
+from utils.http import invocation_ack
 from utils.logger import StructuredLogger
 
 _CW_NAMESPACE = "PixelPrompt/Operations"
@@ -345,4 +346,4 @@ def handle_daily_snapshot(
                 raise
 
     StructuredLogger.info(f"Daily snapshot completed for {today}")
-    return {"statusCode": 200, "body": f"Snapshot {today} complete"}
+    return invocation_ack(f"Snapshot {today} complete")

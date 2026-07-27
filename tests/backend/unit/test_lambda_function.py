@@ -433,25 +433,44 @@ class TestCorsHeaders:
         self._check_cors(resp)
 
     def test_cors_origin_configurable(self, mocks):
-        """CORS origin should be configurable via CORS_ALLOWED_ORIGIN env var."""
+        """CORS origin should be configurable via CORS_ALLOWED_ORIGIN env var.
+
+        The origin is read from ``config`` at response-build time now, not
+        captured into ``lambda_function`` at import: it used to be frozen into
+        whichever module imported it first, which is also why admin and
+        billing responses could disagree with this one.
+        """
         lambda_handler = _get_lambda_handler()
         import importlib
-        import lambda_function
 
-        original = lambda_function.cors_allowed_origin
+        import config
+
+        original = config.cors_allowed_origin
         try:
             # Verify the env var wiring: set env, reload config, verify value
             with patch.dict(os.environ, {"CORS_ALLOWED_ORIGIN": "https://example.com"}):
-                import config
                 importlib.reload(config)
                 assert config.cors_allowed_origin == "https://example.com"
 
-            # Verify response() uses the module-level cors_allowed_origin
-            lambda_function.cors_allowed_origin = "https://example.com"
-            resp = lambda_handler(_make_event(method="GET", path="/nope"), None)
-            assert resp["headers"]["Access-Control-Allow-Origin"] == "https://example.com"
+                resp = lambda_handler(_make_event(method="GET", path="/nope"), None)
+                assert resp["headers"]["Access-Control-Allow-Origin"] == "https://example.com"
+                # A named origin is the only case where credentials are legal.
+                assert resp["headers"]["Access-Control-Allow-Credentials"] == "true"
         finally:
-            lambda_function.cors_allowed_origin = original
+            importlib.reload(config)
+            assert config.cors_allowed_origin == original
+
+    def test_wildcard_origin_never_carries_credentials(self, mocks):
+        """The default origin is "*", and the spec forbids it with
+        credentials -- a browser rejects the whole response, so emitting both
+        broke CORS for the client that sends credentials: 'include'."""
+        lambda_handler = _get_lambda_handler()
+        import config
+
+        assert config.cors_allowed_origin == "*"
+        resp = lambda_handler(_make_event(method="GET", path="/nope"), None)
+        assert resp["headers"]["Access-Control-Allow-Origin"] == "*"
+        assert "Access-Control-Allow-Credentials" not in resp["headers"]
 
 
 # ============================================================
