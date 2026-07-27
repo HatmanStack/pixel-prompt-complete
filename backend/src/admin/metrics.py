@@ -57,9 +57,7 @@ def _spend_summary(repo: UserRepository, now: int, days: int) -> dict[str, Any]:
     today_total = int(today.get("totalMicros", 0))
 
     window_total = today_total
-    window: list[dict[str, Any]] = [
-        {"date": _date_str(now), "totalMicros": today_total}
-    ]
+    window: list[dict[str, Any]] = [{"date": _date_str(now), "totalMicros": today_total}]
     for i in range(1, days):
         ts = now - (i * 86400)
         day = meter.get_daily_spend(now=ts)
@@ -80,9 +78,7 @@ def _spend_summary(repo: UserRepository, now: int, days: int) -> dict[str, Any]:
         "monthToDateUsd": round(monthly_total / 1_000_000, 4),
         "monthlyCeilingMicros": monthly_ceiling,
         "monthlyCeilingUsedPct": (
-            round(monthly_total / monthly_ceiling * 100, 1)
-            if monthly_ceiling > 0
-            else None
+            round(monthly_total / monthly_ceiling * 100, 1) if monthly_ceiling > 0 else None
         ),
         "todayUsd": round(today_total / 1_000_000, 4),
         "byModelMicros": per_model,
@@ -96,9 +92,7 @@ def _spend_summary(repo: UserRepository, now: int, days: int) -> dict[str, Any]:
         "windowDays": days,
         "daily": window,
         "dailyCeilingMicros": ceiling,
-        "dailyCeilingUsedPct": (
-            round(today_total / ceiling * 100, 1) if ceiling > 0 else None
-        ),
+        "dailyCeilingUsedPct": (round(today_total / ceiling * 100, 1) if ceiling > 0 else None),
     }
 
 

@@ -83,15 +83,12 @@ def _tiers() -> list[dict[str, Any]]:
     grant would sell something that does not exist.
     """
     stripe_amount = _stripe_price_usd_cents()
-    paid_price = (
-        stripe_amount if stripe_amount is not None else config.paid_price_usd_cents
-    )
+    paid_price = stripe_amount if stripe_amount is not None else config.paid_price_usd_cents
     if stripe_amount is not None and stripe_amount != config.paid_price_usd_cents:
         # Stripe wins — it is what the customer is charged — but a mismatch
         # means the deployed config is lying and should be corrected.
         StructuredLogger.error(
-            "PAID_PRICE_USD_CENTS disagrees with the Stripe price; "
-            "serving the Stripe amount",
+            "PAID_PRICE_USD_CENTS disagrees with the Stripe price; serving the Stripe amount",
             configuredCents=config.paid_price_usd_cents,
             stripeCents=stripe_amount,
         )
@@ -137,9 +134,7 @@ def get_pricing() -> dict[str, Any]:
     }
 
 
-def handle_pricing(
-    event: dict[str, Any], correlation_id: str | None = None
-) -> dict[str, Any]:
+def handle_pricing(event: dict[str, Any], correlation_id: str | None = None) -> dict[str, Any]:
     """GET /pricing - public pricing and credit costs."""
     return json_response(
         200,

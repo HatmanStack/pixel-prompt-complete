@@ -133,9 +133,7 @@ def _billing_period(obj: dict[str, Any]) -> tuple[int | None, int | None]:
     return (int(start) if start else None, int(end) if end else None)
 
 
-def _on_checkout_completed(
-    obj: dict[str, Any], repo: UserRepository, event_type: str
-) -> None:
+def _on_checkout_completed(obj: dict[str, Any], repo: UserRepository, event_type: str) -> None:
     user_id = _user_id_from_object(obj, repo)
     if not user_id:
         _unresolved(obj, event_type)
@@ -151,9 +149,7 @@ def _on_checkout_completed(
     _send_lifecycle_email(repo, user_id, email_templates.welcome_email)
 
 
-def _on_subscription_upsert(
-    obj: dict[str, Any], repo: UserRepository, event_type: str
-) -> None:
+def _on_subscription_upsert(obj: dict[str, Any], repo: UserRepository, event_type: str) -> None:
     user_id = _user_id_from_object(obj, repo)
     if not user_id:
         _unresolved(obj, event_type)
@@ -188,9 +184,7 @@ def _on_subscription_upsert(
         _send_lifecycle_email(repo, user_id, email_templates.subscription_activated_email)
 
 
-def _on_subscription_deleted(
-    obj: dict[str, Any], repo: UserRepository, event_type: str
-) -> None:
+def _on_subscription_deleted(obj: dict[str, Any], repo: UserRepository, event_type: str) -> None:
     user_id = _user_id_from_object(obj, repo)
     if not user_id:
         _unresolved(obj, event_type)
@@ -208,9 +202,7 @@ def _on_subscription_deleted(
     _send_lifecycle_email(repo, user_id, email_templates.subscription_cancelled_email)
 
 
-def _on_payment_failed(
-    obj: dict[str, Any], repo: UserRepository, event_type: str
-) -> None:
+def _on_payment_failed(obj: dict[str, Any], repo: UserRepository, event_type: str) -> None:
     user_id = _user_id_from_object(obj, repo)
     if not user_id:
         _unresolved(obj, event_type)

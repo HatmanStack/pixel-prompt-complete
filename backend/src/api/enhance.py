@@ -92,7 +92,6 @@ Enhance the following prompt:"""
         """
         return bool(self.prompt_model and self.prompt_model.get("api_key"))
 
-
     def adapt_per_model(
         self,
         prompt: str,
@@ -311,8 +310,7 @@ lengths of the same sentence."""
             if short and long_ and short != long_:
                 return short, long_
             StructuredLogger.warning(
-                "Enhance variants unusable (missing or identical); "
-                "returning the original prompt"
+                "Enhance variants unusable (missing or identical); returning the original prompt"
             )
         except Exception as e:
             StructuredLogger.warning(f"Enhance variants failed: {e}")

@@ -11,6 +11,7 @@ from typing import Dict, Tuple, Union
 # Pillow import with fallback
 try:
     from PIL import Image, ImageDraw
+
     HAS_PIL = True
 except ImportError:
     HAS_PIL = False
@@ -18,11 +19,11 @@ except ImportError:
 
 # Supported aspect presets
 ASPECT_PRESETS = {
-    '16:9': (16, 9),
-    '9:16': (9, 16),
-    '1:1': (1, 1),
-    '4:3': (4, 3),
-    'expand_all': None,  # Special case: expand all sides by 50%
+    "16:9": (16, 9),
+    "9:16": (9, 16),
+    "1:1": (1, 1),
+    "4:3": (4, 3),
+    "expand_all": None,  # Special case: expand all sides by 50%
 }
 
 
@@ -49,22 +50,24 @@ def calculate_expansion(width: int, height: int, preset: str) -> Dict:
     """
     # Validate dimensions
     if width <= 0 or height <= 0:
-        raise ValueError(f"Invalid dimensions: width={width}, height={height}. Both must be positive.")
+        raise ValueError(
+            f"Invalid dimensions: width={width}, height={height}. Both must be positive."
+        )
 
     if preset not in ASPECT_PRESETS:
         raise ValueError(f"Invalid preset: {preset}. Valid: {list(ASPECT_PRESETS.keys())}")
 
-    if preset == 'expand_all':
+    if preset == "expand_all":
         # Expand each side by 50%
         expand_h = width // 2
         expand_v = height // 2
         return {
-            'left': expand_h // 2,
-            'right': expand_h - (expand_h // 2),
-            'top': expand_v // 2,
-            'bottom': expand_v - (expand_v // 2),
-            'new_width': width + expand_h,
-            'new_height': height + expand_v,
+            "left": expand_h // 2,
+            "right": expand_h - (expand_h // 2),
+            "top": expand_v // 2,
+            "bottom": expand_v - (expand_v // 2),
+            "new_width": width + expand_h,
+            "new_height": height + expand_v,
         }
 
     target_ratio = ASPECT_PRESETS[preset]
@@ -77,8 +80,12 @@ def calculate_expansion(width: int, height: int, preset: str) -> Dict:
     if abs(current_ratio - target_ratio_value) < 0.01:
         # Already at target ratio
         return {
-            'left': 0, 'right': 0, 'top': 0, 'bottom': 0,
-            'new_width': width, 'new_height': height
+            "left": 0,
+            "right": 0,
+            "top": 0,
+            "bottom": 0,
+            "new_width": width,
+            "new_height": height,
         }
 
     if current_ratio < target_ratio_value:
@@ -97,20 +104,17 @@ def calculate_expansion(width: int, height: int, preset: str) -> Dict:
         new_width = width
 
     return {
-        'left': left,
-        'right': right,
-        'top': top,
-        'bottom': bottom,
-        'new_width': new_width,
-        'new_height': new_height,
+        "left": left,
+        "right": right,
+        "top": top,
+        "bottom": bottom,
+        "new_width": new_width,
+        "new_height": new_height,
     }
 
 
 def create_expansion_mask(
-    width: int,
-    height: int,
-    expansion: Dict,
-    mask_format: str = 'bytes'
+    width: int, height: int, expansion: Dict, mask_format: str = "bytes"
 ) -> Union[bytes, str]:
     """
     Create a binary mask with transparent (white) edges for expansion.
@@ -133,15 +137,15 @@ def create_expansion_mask(
 
     import base64
 
-    new_width = expansion['new_width']
-    new_height = expansion['new_height']
+    new_width = expansion["new_width"]
+    new_height = expansion["new_height"]
 
     # Create white image (areas to fill)
-    mask = Image.new('L', (new_width, new_height), 255)
+    mask = Image.new("L", (new_width, new_height), 255)
 
     # Draw black rectangle where original image is (using ImageDraw for performance)
-    left = expansion['left']
-    top = expansion['top']
+    left = expansion["left"]
+    top = expansion["top"]
     right = left + width - 1  # -1 because rectangle is inclusive
     bottom = top + height - 1
 
@@ -150,19 +154,16 @@ def create_expansion_mask(
 
     # Convert to bytes
     buffer = BytesIO()
-    mask.save(buffer, format='PNG')
+    mask.save(buffer, format="PNG")
     mask_bytes = buffer.getvalue()
 
-    if mask_format == 'base64':
-        return base64.b64encode(mask_bytes).decode('utf-8')
+    if mask_format == "base64":
+        return base64.b64encode(mask_bytes).decode("utf-8")
 
     return mask_bytes
 
 
-def pad_image_with_transparency(
-    image_bytes: bytes,
-    expansion: Dict
-) -> bytes:
+def pad_image_with_transparency(image_bytes: bytes, expansion: Dict) -> bytes:
     """
     Pad an image with transparent pixels for outpainting.
 
@@ -183,23 +184,23 @@ def pad_image_with_transparency(
     original = Image.open(BytesIO(image_bytes))
 
     # Convert to RGBA if needed
-    if original.mode != 'RGBA':
-        original = original.convert('RGBA')
+    if original.mode != "RGBA":
+        original = original.convert("RGBA")
 
-    new_width = expansion['new_width']
-    new_height = expansion['new_height']
+    new_width = expansion["new_width"]
+    new_height = expansion["new_height"]
 
     # Create new transparent image
-    padded = Image.new('RGBA', (new_width, new_height), (0, 0, 0, 0))
+    padded = Image.new("RGBA", (new_width, new_height), (0, 0, 0, 0))
 
     # Paste original image at offset
-    left = expansion['left']
-    top = expansion['top']
+    left = expansion["left"]
+    top = expansion["top"]
     padded.paste(original, (left, top))
 
     # Convert to bytes
     buffer = BytesIO()
-    padded.save(buffer, format='PNG')
+    padded.save(buffer, format="PNG")
     return buffer.getvalue()
 
 
@@ -216,13 +217,13 @@ def get_direction_description(preset: str) -> str:
         Direction description string
     """
     descriptions = {
-        '16:9': 'horizontally to the left and right to create a wider landscape view',
-        '9:16': 'vertically above and below to create a taller portrait view',
-        '1:1': 'to make it square, extending the shorter dimension',
-        '4:3': 'to reach a 4:3 aspect ratio',
-        'expand_all': 'in all directions to show more of the surrounding scene',
+        "16:9": "horizontally to the left and right to create a wider landscape view",
+        "9:16": "vertically above and below to create a taller portrait view",
+        "1:1": "to make it square, extending the shorter dimension",
+        "4:3": "to reach a 4:3 aspect ratio",
+        "expand_all": "in all directions to show more of the surrounding scene",
     }
-    return descriptions.get(preset, 'to expand the scene')
+    return descriptions.get(preset, "to expand the scene")
 
 
 def get_image_dimensions(image_bytes: bytes) -> Tuple[int, int]:
@@ -257,16 +258,16 @@ def get_openai_compatible_size(target_width: int, target_height: int) -> str:
     """
     # OpenAI supported sizes for gpt-image-1
     OPENAI_SIZES = [
-        (1024, 1024),   # Square
-        (1536, 1024),   # Landscape
-        (1024, 1536),   # Portrait
+        (1024, 1024),  # Square
+        (1536, 1024),  # Landscape
+        (1024, 1536),  # Portrait
     ]
 
     target_ratio = target_width / target_height
 
     # Find closest aspect ratio match
     best_size = (1024, 1024)
-    best_diff = float('inf')
+    best_diff = float("inf")
 
     for w, h in OPENAI_SIZES:
         size_ratio = w / h
