@@ -141,11 +141,15 @@ def _daily_spend_exceeded(now: int | None = None) -> bool:
     This is check-then-act, not an atomic reservation: the spend write happens
     after the provider call, so concurrent requests can all read an
     under-ceiling total and all proceed. The overshoot is bounded by Lambda's
-    reserved concurrency (10), i.e. ~10 requests' worth — single-digit dollars
-    at current cost-table values, against a $100 default ceiling. That is a
-    deliberately weaker guarantee than the per-model cap, which reserves
-    atomically via a conditional UpdateItem. Revisit if concurrency is raised
-    substantially or the ceiling is tightened toward the overshoot size.
+    reserved concurrency (10), i.e. ~10 requests' worth. At current cost-table
+    values a four-model /generate plus its prompt adaptation is ~196,000
+    micros, so the worst case is ~$2 against the $25 default ceiling — still
+    single-digit dollars, but ~8% of the ceiling rather than the ~2% it was
+    under the four-times-larger ceiling this paragraph originally assumed.
+    That is a deliberately weaker guarantee than the per-model cap, which
+    reserves atomically via a conditional UpdateItem. The "tightened toward
+    the overshoot size" trigger below has already fired once; revisit again if
+    concurrency is raised substantially or the ceiling is tightened further.
     """
     ceiling = config.global_daily_spend_ceiling_usd_micros
     if ceiling <= 0:

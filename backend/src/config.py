@@ -431,7 +431,7 @@ def model_cost_micros(model_name: str, operation: str) -> int:
 # ---------------------------------------------------------------------------
 # Global daily spend ceiling, in micro-dollars.
 #
-# Defaults to $100/day ON, deliberately. Every other guard in this system is
+# Defaults to $25/day ON, deliberately. Every other guard in this system is
 # conditional on AUTH_ENABLED, which defaults false — so a default deploy had
 # no spend bound of any kind. This one applies unconditionally and is the last
 # thing between a misconfiguration and an unbounded provider bill.
@@ -444,8 +444,8 @@ global_daily_spend_ceiling_usd_micros = _safe_int(
 
 # Hard monthly ceiling, in micro-dollars. Default $500/month.
 #
-# The daily ceiling alone does not bound a month: at $100/day it permitted
-# roughly $3,000 across 30 days. This is the number that actually caps the
+# The daily ceiling alone does not bound a month: at $25/day it permits
+# roughly $750 across 30 days. This is the number that actually caps the
 # invoice while the product is still being figured out.
 #
 # Deliberately 20x the daily figure, not 30x, so a busy day is not throttled
@@ -453,7 +453,7 @@ global_daily_spend_ceiling_usd_micros = _safe_int(
 # to disable, consciously.
 monthly_spend_ceiling_usd_micros = _safe_int("MONTHLY_SPEND_CEILING_USD_MICROS", 500_000_000)
 
-# Sub-ceiling for /enhance specifically, in micro-dollars. Default $5/day.
+# Sub-ceiling for /enhance specifically, in micro-dollars. Default $2/day.
 #
 # /enhance is unauthenticated, captcha-free and unquota'd (closing that is
 # P0-D). Metering it against the shared global budget alone would let anonymous
@@ -463,8 +463,8 @@ monthly_spend_ceiling_usd_micros = _safe_int("MONTHLY_SPEND_CEILING_USD_MICROS",
 #
 # Set to 0 to disable this sub-ceiling (the global one still applies).
 # $2/day, roughly $60/month, about 12% of the monthly budget. At the previous
-# $5/day this unauthenticated endpoint could claim $150/month, 30% of the
-# total, which is not a defensible share for a path with no sign-in.
+# $5 daily figure this unauthenticated endpoint could claim $150/month, 30% of
+# the total, which is not a defensible share for a path with no sign-in.
 enhance_daily_spend_ceiling_usd_micros = _safe_int(
     "ENHANCE_DAILY_SPEND_CEILING_USD_MICROS", 2_000_000
 )
