@@ -69,11 +69,26 @@ export default defineConfig({
       // Ratcheted to just under the current numbers so the coverage added
       // for the generation surface and pages cannot silently regress. Raise
       // these when coverage rises; never lower them to make a build pass.
+      //
+      // Re-measured 2026-07-27 (Phase 6): statements 72.36, branches 65.26,
+      // functions 75.40, lines 73.08. Each floor below is the measured value
+      // rounded DOWN to the whole percent -- rounding up is a build that is
+      // red on arrival.
+      //
+      // No perFile floor, and that is a decision rather than an omission.
+      // Nine files are at 0%: api/billing.ts, api/me.ts, data/seedPrompts.ts,
+      // utils/imageHelpers.ts, and the generation controls IterationInput,
+      // RegenerateInput, OutpaintControls and RandomPromptButton -- plus
+      // admin/AdminNotifications at 4%. Any per-file threshold above zero
+      // fails immediately, so the aggregate is the only honest gate today and
+      // those nine files are where to aim. The two the audit named have both
+      // moved: hooks/useIteration.ts 30.76 -> 44.44 and hooks/useGallery.ts
+      // 0 -> 57.44.
       thresholds: {
-        statements: 65,
-        lines: 65,
-        branches: 60,
-        functions: 68,
+        statements: 72,
+        lines: 73,
+        branches: 65,
+        functions: 75,
       },
     },
   },
