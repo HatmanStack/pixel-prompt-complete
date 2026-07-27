@@ -156,6 +156,16 @@ free_window_seconds = _safe_int("FREE_WINDOW_SECONDS", 3600)
 
 # Paid tier
 paid_daily_limit = _safe_int("PAID_DAILY_LIMIT", 200)
+# Paid generation was previously unbounded — the most expensive operation in
+# the product (four providers per call) was capped only by the global spend
+# ceiling and the per-model caps, both of which are shared across every user,
+# so one account could consume the organisation's entire day.
+#
+# 50 is chosen against the cost table below: ~$0.19 per four-model generation
+# is about $9.50/day per paid account, against a $25 global daily ceiling.
+# High enough that no legitimate subscriber notices, low enough that a single
+# account cannot take the day.
+paid_daily_generate_limit = _safe_int("PAID_DAILY_GENERATE_LIMIT", 50)
 paid_window_seconds = _safe_int("PAID_WINDOW_SECONDS", 86400)
 
 # ---------------------------------------------------------------------------

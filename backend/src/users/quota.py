@@ -172,7 +172,30 @@ def enforce_quota(
 
     # paid
     if endpoint == "generate":
-        return QuotaResult(allowed=True, reason=None, reset_at=0, usage={})
+        # Was unconditionally allowed. Generation runs four providers and is
+        # the most expensive thing the product does; leaving it bounded only
+        # by ceilings shared across all users meant one account could consume
+        # the organisation's entire day. Its own counter, not dailyCount: a
+        # generation and a refinement are priced apart everywhere else.
+        ok, item = repo.increment_daily_generate(
+            ctx.user_id,
+            config.paid_window_seconds,
+            config.paid_daily_generate_limit,
+            now,
+        )
+        usage, reset = _usage(
+            item,
+            "dailyGenerateCount",
+            config.paid_daily_generate_limit,
+            "dailyResetAt",
+            config.paid_window_seconds,
+        )
+        return QuotaResult(
+            allowed=ok,
+            reason=None if ok else "paid_daily_generate",
+            reset_at=reset,
+            usage=usage,
+        )
     ok, item = repo.increment_daily(
         ctx.user_id,
         config.paid_window_seconds,

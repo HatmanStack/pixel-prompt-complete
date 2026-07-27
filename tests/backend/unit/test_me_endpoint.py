@@ -91,7 +91,7 @@ def test_me_paid_tier(wired):
     body = _body(r)
     assert body["tier"] == "paid"
     assert "refine" in body["quota"]
-    assert "generate" not in body["quota"]
+    assert "generate" in body["quota"]
     assert body["billing"]["portalAvailable"] is True
     assert body["billing"]["subscriptionStatus"] == "active"
 
@@ -104,3 +104,40 @@ def test_me_flags_off_returns_501(monkeypatch):
     importlib.reload(lambda_function)
     r = lambda_function.lambda_handler(_event(), None)
     assert r["statusCode"] == 501
+
+
+def test_me_paid_tier_reports_the_generate_quota(wired):
+    """A limit the user cannot see is a limit they experience as a bug."""
+    import config
+
+    wired._user_repo.get_or_create_user("u3")
+    wired._user_repo.set_tier("u3", "paid")
+    wired._user_repo.increment_daily_generate("u3", config.paid_window_seconds, 50, 1000)
+
+    r = wired.lambda_handler(_event(claims={"sub": "u3"}), None)
+
+    quota = _body(r)["quota"]
+    assert quota["generate"]["used"] == 1
+    assert quota["generate"]["limit"] == config.paid_daily_generate_limit
+    assert quota["refine"]["used"] == 0
+
+
+def test_me_paid_generate_counter_resets_with_its_window(wired):
+    """touch_quota_window zeroes dailyCount on a stale window; the new sibling
+    has to travel with it or /me reports a count the quota layer has forgotten."""
+    import time
+
+    now = int(time.time())
+    wired._user_repo.get_or_create_user("u4")
+    wired._user_repo.set_tier("u4", "paid")
+    wired._user_repo._table.update_item(
+        Key={"userId": "u4"},
+        UpdateExpression="SET dailyGenerateCount = :c, dailyCount = :c, dailyResetAt = :old",
+        ExpressionAttributeValues={":c": 7, ":old": now - 90000},
+    )
+
+    r = wired.lambda_handler(_event(claims={"sub": "u4"}), None)
+
+    quota = _body(r)["quota"]
+    assert quota["generate"]["used"] == 0
+    assert quota["refine"]["used"] == 0

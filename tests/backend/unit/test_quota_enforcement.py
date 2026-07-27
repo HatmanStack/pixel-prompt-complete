@@ -20,6 +20,7 @@ def env(monkeypatch):
     monkeypatch.setenv("GUEST_GENERATE_LIMIT", "1")
     monkeypatch.setenv("GUEST_GLOBAL_LIMIT", "5")
     monkeypatch.setenv("PAID_DAILY_LIMIT", "3")
+    monkeypatch.setenv("PAID_DAILY_GENERATE_LIMIT", "2")
     import config
     importlib.reload(config)
     yield
@@ -30,6 +31,7 @@ def env(monkeypatch):
         "GUEST_GENERATE_LIMIT",
         "GUEST_GLOBAL_LIMIT",
         "PAID_DAILY_LIMIT",
+        "PAID_DAILY_GENERATE_LIMIT",
     ):
         monkeypatch.delenv(v, raising=False)
     # AUTH_ENABLED is set, not cleared: it has no default, so reloading
@@ -182,11 +184,67 @@ def test_free_refine_limit(repo):
     assert r3.reason == "free_refine"
 
 
-def test_paid_generate_unlimited(repo):
+def test_paid_generate_is_bounded(repo):
+    """Was unlimited. Four providers per call makes it the priciest operation
+    in the product, and it was bounded only by ceilings shared across every
+    user, so one account could consume the organisation's whole day."""
     from users.quota import enforce_quota
-    for i in range(10):
-        r = enforce_quota(_user_ctx(tier="paid", uid="p1"), "generate", repo, now=1000 + i)
-        assert r.allowed
+    results = [
+        enforce_quota(_user_ctx(tier="paid", uid="p1"), "generate", repo, now=1000 + i)
+        for i in range(4)
+    ]
+    assert [r.allowed for r in results] == [True, True, False, False]
+    assert results[-1].reason == "paid_daily_generate"
+
+
+def test_paid_generate_and_refine_are_separate_counters(repo):
+    """They are priced differently everywhere else; one bucket would make a
+    generation cost the same as a refinement."""
+    from users.quota import enforce_quota
+    for i in range(2):
+        assert enforce_quota(
+            _user_ctx(tier="paid", uid="p1"), "generate", repo, now=1000 + i
+        ).allowed
+    # Generate is now exhausted (limit 2). Refine has its own limit of 3.
+    assert not enforce_quota(
+        _user_ctx(tier="paid", uid="p1"), "generate", repo, now=1010
+    ).allowed
+    for i in range(3):
+        assert enforce_quota(
+            _user_ctx(tier="paid", uid="p1"), "refine", repo, now=1020 + i
+        ).allowed
+
+
+def test_paid_refine_exhaustion_does_not_bind_generate(repo):
+    from users.quota import enforce_quota
+    for i in range(3):
+        enforce_quota(_user_ctx(tier="paid", uid="p1"), "refine", repo, now=1000 + i)
+    assert not enforce_quota(
+        _user_ctx(tier="paid", uid="p1"), "refine", repo, now=1010
+    ).allowed
+    assert enforce_quota(
+        _user_ctx(tier="paid", uid="p1"), "generate", repo, now=1011
+    ).allowed
+
+
+def test_both_daily_counters_zero_together_when_the_window_goes_stale(repo):
+    """They share dailyResetAt. If only one is zeroed on reset, the other is
+    stranded at its limit for as long as the account stays active."""
+    from users.quota import enforce_quota
+    enforce_quota(_user_ctx(tier="paid", uid="p1"), "generate", repo, now=1000)
+    enforce_quota(_user_ctx(tier="paid", uid="p1"), "generate", repo, now=1001)
+    enforce_quota(_user_ctx(tier="paid", uid="p1"), "refine", repo, now=1002)
+    item = repo.get_user("p1")
+    assert int(item["dailyGenerateCount"]) == 2
+    assert int(item["dailyCount"]) == 1
+
+    later = 1000 + 86401
+    assert enforce_quota(
+        _user_ctx(tier="paid", uid="p1"), "generate", repo, now=later
+    ).allowed
+    item = repo.get_user("p1")
+    assert int(item["dailyGenerateCount"]) == 1, "the new window should start at one"
+    assert int(item["dailyCount"]) == 0, "the sibling counter did not reset with it"
 
 
 def test_paid_daily_refine_limit(repo):

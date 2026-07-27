@@ -174,8 +174,59 @@ def test_free_user_exceeds_refine_quota_429(wired):
     assert _body(r3)["error"] == "TIER_QUOTA_EXCEEDED"
 
 
-def test_paid_generate_unlimited(wired):
-    """Paid user hits /generate many times — no quota block."""
+def test_paid_generate_is_bounded_and_maps_to_429(wired):
+    """The new reason has to reach a status code.
+
+    users/quota.py's dead ``guest_per_user`` branch is the cautionary case:
+    a reason string with no handler in lambda_function's reason table is a
+    rejection nobody can act on. ``paid_daily_generate`` falls through to the
+    ``tier_quota_exceeded`` 429, and this asserts that it does.
+    """
+    claims = {"sub": "cog-paid-bound", "email": "p@x.com"}
+    wired._user_repo.get_or_create_user("cog-paid-bound")
+    wired._user_repo.set_tier("cog-paid-bound", "paid")
+    import config
+
+    fake_model = MagicMock(provider="google_gemini")
+    fake_model.name = "gemini"
+    with patch.object(wired, "get_enabled_models", return_value=[fake_model]), \
+         patch.object(wired, "session_manager") as sm, \
+         patch.object(wired, "_executor") as ex, \
+         patch.object(wired, "get_handler") as gh, \
+         patch.object(wired, "get_model_config_dict", return_value={"id": "x"}), \
+         patch.object(wired, "image_storage") as img, \
+         patch.object(wired, "context_manager"), \
+         patch.object(config, "paid_daily_generate_limit", 2), \
+         patch.object(wired, "as_completed") as ac:
+        sm.create_session.return_value = "sess"
+        sm.add_iteration.return_value = 0
+        gh.return_value = lambda c, p, params: {"status": "success", "image": "b"}
+        img.upload_image.return_value = "k"
+        img.get_cloudfront_url.return_value = "u"
+        fut = MagicMock()
+        fut.result.return_value = (
+            "gemini",
+            {"status": "completed", "imageKey": "k", "imageUrl": "u", "iteration": 0, "duration": 0.1},
+        )
+        ex.submit.return_value = fut
+
+        def _ev():
+            e = _event(body={"prompt": "hi"})
+            e["requestContext"]["authorizer"] = {"jwt": {"claims": claims}}
+            return e
+
+        codes = []
+        for _ in range(3):
+            ac.return_value = iter([fut])
+            codes.append(wired.lambda_handler(_ev(), None))
+
+    assert [r["statusCode"] for r in codes] == [200, 200, 429]
+    assert _body(codes[-1])["error"] == "TIER_QUOTA_EXCEEDED"
+    assert _body(codes[-1])["tier"] == "paid"
+
+
+def test_paid_generate_under_the_limit_is_unblocked(wired):
+    """Paid user hits /generate several times under the default limit."""
     claims = {"sub": "cog-paid", "email": "p@x.com"}
     wired._user_repo.get_or_create_user("cog-paid")
     wired._user_repo.set_tier("cog-paid", "paid")

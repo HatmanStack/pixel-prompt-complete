@@ -359,13 +359,11 @@ def _seconds_until_reset(reset_at: int, now: int) -> int | None:
 # honour-system — dropping the cookie mints a new one, which is exactly why
 # users/quota.py meters guests against their source IP as well — so refunding
 # a guest is an unlimited retry for anyone who wants one.
-#
-# ``paid``/``generate`` is absent because paid generation is not counted at
-# all; users/quota.py returns allowed=True for it unconditionally.
 _REFUND_COUNTERS: dict[tuple[str, str], tuple[str, str, str]] = {
     ("free", "generate"): ("generateCount", "windowStart", "free_window_seconds"),
     ("free", "refine"): ("refineCount", "windowStart", "free_window_seconds"),
     ("free", "outpaint"): ("refineCount", "windowStart", "free_window_seconds"),
+    ("paid", "generate"): ("dailyGenerateCount", "dailyResetAt", "paid_window_seconds"),
     ("paid", "refine"): ("dailyCount", "dailyResetAt", "paid_window_seconds"),
     ("paid", "outpaint"): ("dailyCount", "dailyResetAt", "paid_window_seconds"),
     ("anon", "generate"): ("generateCount", "windowStart", "anon_window_seconds"),
@@ -2169,6 +2167,12 @@ def handle_me(event: LambdaEvent, correlation_id: str | None = None) -> ApiRespo
         quota = {
             "windowSeconds": config.paid_window_seconds,
             "windowStart": int(item.get("dailyResetAt", 0) or 0),
+            # Reported since paid generation gained a bound: a limit the user
+            # cannot see is a limit they experience as a bug.
+            "generate": {
+                "used": int(item.get("dailyGenerateCount", 0) or 0),
+                "limit": config.paid_daily_generate_limit,
+            },
             "refine": {
                 "used": int(item.get("dailyCount", 0) or 0),
                 "limit": config.paid_daily_limit,

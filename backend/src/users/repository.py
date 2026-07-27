@@ -125,11 +125,14 @@ class UserRepository:
             window_seconds,
             now,
         )
-        # Also reset the daily quota window (paid users use dailyCount).
+        # Also reset the daily quota window. Paid users have two counters on
+        # this one window — refinement and generation — and both must be
+        # zeroed together, or GET /me reports a count the quota layer has
+        # already forgotten.
         self._reset_if_stale(
             user_id,
             "dailyResetAt",
-            ["dailyCount"],
+            ["dailyCount", "dailyGenerateCount"],
             86400,
             now,
         )
@@ -154,10 +157,15 @@ class UserRepository:
         if create_if_missing:
             self.get_or_create_user(user_id, now=now, ttl=ttl)
 
-        # Determine sibling counters to zero on window reset.
+        # Determine sibling counters to zero on window reset. Every counter
+        # sharing a window field must appear in the other's entry: zeroing one
+        # and not the other leaves the sibling stranded at its limit for as
+        # long as the account keeps the window alive.
         _SIBLING_COUNTERS = {
             ("windowStart", "generateCount"): ["generateCount", "refineCount"],
             ("windowStart", "refineCount"): ["generateCount", "refineCount"],
+            ("dailyResetAt", "dailyCount"): ["dailyCount", "dailyGenerateCount"],
+            ("dailyResetAt", "dailyGenerateCount"): ["dailyCount", "dailyGenerateCount"],
         }
         fields_to_zero = _SIBLING_COUNTERS.get((window_field, counter), [counter])
 
@@ -270,6 +278,21 @@ class UserRepository:
     ) -> tuple[bool, dict]:
         return self._atomic_increment(
             user_id, "dailyCount", "dailyResetAt", window_seconds, limit, now
+        )
+
+    def increment_daily_generate(
+        self, user_id: str, window_seconds: int, limit: int, now: int
+    ) -> tuple[bool, dict]:
+        """Count a paid generation against its own daily bucket.
+
+        Separate from ``dailyCount`` on purpose: a generation runs four
+        providers and a refinement runs one, and they are priced apart
+        everywhere else in this codebase. Sharing a counter would make them
+        cost the same. They share ``dailyResetAt`` so the two reset together —
+        see ``_SIBLING_COUNTERS``.
+        """
+        return self._atomic_increment(
+            user_id, "dailyGenerateCount", "dailyResetAt", window_seconds, limit, now
         )
 
     # ---------- admin scan ----------

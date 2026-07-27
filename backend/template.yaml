@@ -367,6 +367,14 @@ Parameters:
     Default: 200
     Description: Refinements per paid user per day
 
+  PaidDailyGenerateLimit:
+    Type: Number
+    Default: 50
+    Description: >-
+      Generations per paid user per day. Generation runs four providers, so at
+      roughly $0.19 a call 50/day is about $9.50 per account against the $25
+      global daily ceiling.
+
   PaidWindowSeconds:
     Type: Number
     Default: 86400
@@ -663,6 +671,7 @@ Resources:
           FREE_WINDOW_SECONDS: !Ref FreeWindowSeconds
           # Paid tier limits
           PAID_DAILY_LIMIT: !Ref PaidDailyLimit
+          PAID_DAILY_GENERATE_LIMIT: !Ref PaidDailyGenerateLimit
           PAID_WINDOW_SECONDS: !Ref PaidWindowSeconds
           # Stripe
           STRIPE_SECRET_KEY: !Ref StripeSecretKey
