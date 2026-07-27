@@ -20,6 +20,13 @@ request-path work creeping back in.
 
 The Lambda client is a `MagicMock` throughout. `moto`'s Lambda backend is not
 used and should not be: it would test moto's dispatcher, not this code.
+
+The "request path performs no provider work" block at the bottom asserts by
+*category* -- no provider handler, no prompt enhancer, no session read-back, no
+cost meter -- rather than by wall clock. A duration assertion would be flaky on
+a CI runner and would say nothing about the deployed path either way. Each
+category has a synchronous-mode counterpart asserting the same call *does*
+happen, so the block cannot pass vacuously by mocking everything into silence.
 """
 
 from __future__ import annotations
@@ -427,3 +434,78 @@ def test_a_202_still_carries_the_guest_cookie(stack):
 
     assert resp["statusCode"] == 202
     assert resp["cookies"] == ["pp_guest=tok; Path=/"]
+
+
+# ---- The request path performs no provider work ----
+#
+# This is the bound the phase exists to create, and an unasserted bound is a
+# comment. Each assertion below has a GENERATE_ASYNC=false counterpart: if the
+# stubbing ever silences a call in both modes, the counterpart fails and says
+# so.
+
+
+def test_no_provider_handler_factory_is_called_on_the_request_path(stack):
+    import lambda_function
+
+    with (
+        patch.object(lambda_function, "get_iterate_handler") as iterate,
+        patch.object(lambda_function, "get_outpaint_handler") as outpaint,
+    ):
+        _run(async_mode=True)
+
+    stack["get_handler"].assert_not_called()
+    iterate.assert_not_called()
+    outpaint.assert_not_called()
+
+
+def test_the_prompt_enhancer_is_not_called_on_the_request_path(stack):
+    """adapt_per_model is a synchronous gpt-4o call; it moved into the worker."""
+    _run(async_mode=True)
+
+    stack["enhancer"].adapt_per_model.assert_not_called()
+
+
+def test_the_session_is_not_read_back_on_the_request_path(stack):
+    """The 202 carries no session, so there is nothing to read back.
+
+    "At most once" rather than "never": the assertion is about the response no
+    longer re-fetching what it just wrote, not about forbidding a future read
+    that has a reason.
+    """
+    _run(async_mode=True)
+
+    assert stack["session"].get_session.call_count <= 1
+
+
+def test_the_cost_meter_is_not_called_on_the_request_path(stack):
+    """The charge follows the provider call, which now happens in the worker."""
+    _run(async_mode=True)
+
+    stack["cost_meter"].record_models.assert_not_called()
+
+
+# ---- The same four, in the opposite direction ----
+
+
+def test_sync_mode_calls_the_provider_handler(stack):
+    _run(async_mode=False)
+
+    stack["get_handler"].assert_called()
+
+
+def test_sync_mode_calls_the_prompt_enhancer(stack):
+    _run(async_mode=False)
+
+    stack["enhancer"].adapt_per_model.assert_called_once()
+
+
+def test_sync_mode_reads_the_session_back(stack):
+    _run(async_mode=False)
+
+    assert stack["session"].get_session.call_count == 1
+
+
+def test_sync_mode_calls_the_cost_meter(stack):
+    _run(async_mode=False)
+
+    stack["cost_meter"].record_models.assert_called_once()
