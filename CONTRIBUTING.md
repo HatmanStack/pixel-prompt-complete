@@ -49,6 +49,7 @@
 ### Pre-commit Hooks
 
 Husky runs automatically on commit:
+
 - **pre-commit**: lint-staged (Prettier + ESLint for frontend, ruff for backend)
 - **commit-msg**: commitlint (conventional commits)
 
@@ -108,19 +109,19 @@ We use [Conventional Commits](https://www.conventionalcommits.org/). The commit-
 
 ### Types
 
-| Type | When to use |
-|------|-------------|
-| `feat` | New feature |
-| `fix` | Bug fix |
-| `docs` | Documentation only |
-| `style` | Formatting (no code change) |
+| Type       | When to use                             |
+| ---------- | --------------------------------------- |
+| `feat`     | New feature                             |
+| `fix`      | Bug fix                                 |
+| `docs`     | Documentation only                      |
+| `style`    | Formatting (no code change)             |
 | `refactor` | Code change that neither fixes nor adds |
-| `perf` | Performance improvement |
-| `test` | Adding or updating tests |
-| `build` | Build system or dependencies |
-| `ci` | CI configuration |
-| `chore` | Maintenance tasks |
-| `revert` | Reverting a previous commit |
+| `perf`     | Performance improvement                 |
+| `test`     | Adding or updating tests                |
+| `build`    | Build system or dependencies            |
+| `ci`       | CI configuration                        |
+| `chore`    | Maintenance tasks                       |
+| `revert`   | Reverting a previous commit             |
 
 ### Examples
 

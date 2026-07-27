@@ -101,44 +101,44 @@ backend/src/
 
 ### API Endpoints
 
-| Method | Path | Handler | Description |
-|--------|------|---------|-------------|
-| POST | /generate | `handle_generate` | Create session, generate initial images for all enabled models |
-| POST | /iterate | `handle_iterate` | Refine one model's image (JWT required when `AUTH_ENABLED=true`) |
-| POST | /outpaint | `handle_outpaint` | Expand image to new aspect ratio (JWT required when `AUTH_ENABLED=true`) |
-| GET | /status/{sessionId} | `handle_status` | Get session state with all model iterations |
-| GET | /download/{sessionId}/{model}/{iterationIndex} | `handle_download` | Presigned download URL for a generated image |
-| POST | /enhance | `handle_enhance` | LLM prompt improvement |
-| GET | /gallery/list | `handle_gallery_list` | List galleries with CloudFront preview URLs |
-| GET | /gallery/{sessionId} | `handle_gallery_detail` | Get all images (CloudFront URLs) from a gallery |
-| GET | /prompts/recent | `handle_prompts_recent` | Get recent prompts across sessions |
-| GET | /prompts/history | `handle_prompts_history` | Get user's prompt history (JWT required) |
-| POST | /log | `handle_log_endpoint` | Client error logging |
-| GET | /me | `handle_me` | User info + tier + current quota (JWT required) |
-| POST | /billing/checkout | `handle_billing_checkout` | Create Stripe Checkout session (JWT required) |
-| POST | /billing/portal | `handle_billing_portal` | Create Stripe Customer Portal session (JWT required) |
-| POST | /stripe/webhook | `handle_stripe_webhook` | Stripe event webhook (signature-verified, no JWT) |
-| GET | /admin/users | `handle_admin_users_list` | Admin: list users (admin group required) |
-| GET | /admin/users/{userId} | `handle_admin_user_detail` | Admin: user detail |
-| POST | /admin/users/{userId}/suspend | `handle_admin_suspend` | Admin: suspend user |
-| POST | /admin/users/{userId}/unsuspend | `handle_admin_unsuspend` | Admin: unsuspend user |
-| POST | /admin/users/{userId}/notify | `handle_admin_notify` | Admin: send notification to user |
-| GET | /admin/models | `handle_admin_models_list` | Admin: model status and runtime config |
-| POST | /admin/models/{modelName}/disable | `handle_admin_model_disable` | Admin: disable model at runtime |
-| POST | /admin/models/{modelName}/enable | `handle_admin_model_enable` | Admin: enable model at runtime |
-| GET | /admin/metrics | `handle_admin_metrics` | Admin: usage metrics dashboard |
-| GET | /admin/revenue | `handle_admin_revenue` | Admin: revenue metrics (admin group required) |
+| Method | Path                                           | Handler                      | Description                                                              |
+| ------ | ---------------------------------------------- | ---------------------------- | ------------------------------------------------------------------------ |
+| POST   | /generate                                      | `handle_generate`            | Create session, generate initial images for all enabled models           |
+| POST   | /iterate                                       | `handle_iterate`             | Refine one model's image (JWT required when `AUTH_ENABLED=true`)         |
+| POST   | /outpaint                                      | `handle_outpaint`            | Expand image to new aspect ratio (JWT required when `AUTH_ENABLED=true`) |
+| GET    | /status/{sessionId}                            | `handle_status`              | Get session state with all model iterations                              |
+| GET    | /download/{sessionId}/{model}/{iterationIndex} | `handle_download`            | Presigned download URL for a generated image                             |
+| POST   | /enhance                                       | `handle_enhance`             | LLM prompt improvement                                                   |
+| GET    | /gallery/list                                  | `handle_gallery_list`        | List galleries with CloudFront preview URLs                              |
+| GET    | /gallery/{sessionId}                           | `handle_gallery_detail`      | Get all images (CloudFront URLs) from a gallery                          |
+| GET    | /prompts/recent                                | `handle_prompts_recent`      | Get recent prompts across sessions                                       |
+| GET    | /prompts/history                               | `handle_prompts_history`     | Get user's prompt history (JWT required)                                 |
+| POST   | /log                                           | `handle_log_endpoint`        | Client error logging                                                     |
+| GET    | /me                                            | `handle_me`                  | User info + tier + current quota (JWT required)                          |
+| POST   | /billing/checkout                              | `handle_billing_checkout`    | Create Stripe Checkout session (JWT required)                            |
+| POST   | /billing/portal                                | `handle_billing_portal`      | Create Stripe Customer Portal session (JWT required)                     |
+| POST   | /stripe/webhook                                | `handle_stripe_webhook`      | Stripe event webhook (signature-verified, no JWT)                        |
+| GET    | /admin/users                                   | `handle_admin_users_list`    | Admin: list users (admin group required)                                 |
+| GET    | /admin/users/{userId}                          | `handle_admin_user_detail`   | Admin: user detail                                                       |
+| POST   | /admin/users/{userId}/suspend                  | `handle_admin_suspend`       | Admin: suspend user                                                      |
+| POST   | /admin/users/{userId}/unsuspend                | `handle_admin_unsuspend`     | Admin: unsuspend user                                                    |
+| POST   | /admin/users/{userId}/notify                   | `handle_admin_notify`        | Admin: send notification to user                                         |
+| GET    | /admin/models                                  | `handle_admin_models_list`   | Admin: model status and runtime config                                   |
+| POST   | /admin/models/{modelName}/disable              | `handle_admin_model_disable` | Admin: disable model at runtime                                          |
+| POST   | /admin/models/{modelName}/enable               | `handle_admin_model_enable`  | Admin: enable model at runtime                                           |
+| GET    | /admin/metrics                                 | `handle_admin_metrics`       | Admin: usage metrics dashboard                                           |
+| GET    | /admin/revenue                                 | `handle_admin_revenue`       | Admin: revenue metrics (admin group required)                            |
 
 ### Model Configuration (Fixed 4 Models)
 
 Configured via `config.py` dataclasses with enable/disable flags. **Not dynamic** -- always exactly these 4:
 
-| Config Name | Provider | Default Model ID | Env Vars |
-|-------------|----------|-------------------|----------|
-| gemini | google_gemini | gemini-3.1-flash-image-preview | `GEMINI_ENABLED`, `GEMINI_API_KEY`, `GEMINI_MODEL_ID` |
-| nova | bedrock_nova | amazon.nova-canvas-v1:0 | `NOVA_ENABLED`, `NOVA_MODEL_ID` |
-| openai | openai | dall-e-3 | `OPENAI_ENABLED`, `OPENAI_API_KEY`, `OPENAI_MODEL_ID` |
-| firefly | adobe_firefly | firefly-image-5 | `FIREFLY_ENABLED`, `FIREFLY_CLIENT_ID`, `FIREFLY_CLIENT_SECRET`, `FIREFLY_MODEL_ID` |
+| Config Name | Provider      | Default Model ID               | Env Vars                                                                            |
+| ----------- | ------------- | ------------------------------ | ----------------------------------------------------------------------------------- |
+| gemini      | google_gemini | gemini-3.1-flash-image-preview | `GEMINI_ENABLED`, `GEMINI_API_KEY`, `GEMINI_MODEL_ID`                               |
+| nova        | bedrock_nova  | amazon.nova-canvas-v1:0        | `NOVA_ENABLED`, `NOVA_MODEL_ID`                                                     |
+| openai      | openai        | dall-e-3                       | `OPENAI_ENABLED`, `OPENAI_API_KEY`, `OPENAI_MODEL_ID`                               |
+| firefly     | adobe_firefly | firefly-image-5                | `FIREFLY_ENABLED`, `FIREFLY_CLIENT_ID`, `FIREFLY_CLIENT_SECRET`, `FIREFLY_MODEL_ID` |
 
 Prompt enhancement uses separate config: `PROMPT_MODEL_PROVIDER`, `PROMPT_MODEL_ID`, `PROMPT_MODEL_API_KEY`.
 
@@ -146,122 +146,122 @@ Prompt enhancement uses separate config: `PROMPT_MODEL_PROVIDER`, `PROMPT_MODEL_
 
 **AWS** (set by SAM deployment):
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `AWS_REGION` | No | `us-west-2` | AWS region for S3/CloudFront/Bedrock |
-| `S3_BUCKET` | Yes | -- | S3 bucket for sessions and gallery |
-| `CLOUDFRONT_DOMAIN` | Yes | -- | CloudFront distribution domain for CDN URLs |
+| Variable            | Required | Default     | Description                                 |
+| ------------------- | -------- | ----------- | ------------------------------------------- |
+| `AWS_REGION`        | No       | `us-west-2` | AWS region for S3/CloudFront/Bedrock        |
+| `S3_BUCKET`         | Yes      | --          | S3 bucket for sessions and gallery          |
+| `CLOUDFRONT_DOMAIN` | Yes      | --          | CloudFront distribution domain for CDN URLs |
 
 **Model Credentials** (required for each enabled model):
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `GEMINI_API_KEY` | Yes* | `""` | Google Gemini API key |
-| `OPENAI_API_KEY` | Yes* | `""` | OpenAI API key |
-| `FIREFLY_CLIENT_ID` | Yes* | `""` | Adobe Firefly OAuth2 client ID |
-| `FIREFLY_CLIENT_SECRET` | Yes* | `""` | Adobe Firefly OAuth2 client secret |
+| Variable                | Required | Default | Description                        |
+| ----------------------- | -------- | ------- | ---------------------------------- |
+| `GEMINI_API_KEY`        | Yes*     | `""`    | Google Gemini API key              |
+| `OPENAI_API_KEY`        | Yes*     | `""`    | OpenAI API key                     |
+| `FIREFLY_CLIENT_ID`     | Yes*     | `""`    | Adobe Firefly OAuth2 client ID     |
+| `FIREFLY_CLIENT_SECRET` | Yes*     | `""`    | Adobe Firefly OAuth2 client secret |
 
 *Required only if the corresponding model is enabled. Nova Canvas uses the Lambda IAM role (no API key).
 
 **Model Enable/Disable**:
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `GEMINI_ENABLED` | No | `true` | Enable Gemini model |
-| `NOVA_ENABLED` | No | `true` | Enable Nova Canvas model |
-| `OPENAI_ENABLED` | No | `true` | Enable OpenAI (DALL-E 3) model |
-| `FIREFLY_ENABLED` | No | `true` | Enable Firefly model |
+| Variable          | Required | Default | Description                    |
+| ----------------- | -------- | ------- | ------------------------------ |
+| `GEMINI_ENABLED`  | No       | `true`  | Enable Gemini model            |
+| `NOVA_ENABLED`    | No       | `true`  | Enable Nova Canvas model       |
+| `OPENAI_ENABLED`  | No       | `true`  | Enable OpenAI (DALL-E 3) model |
+| `FIREFLY_ENABLED` | No       | `true`  | Enable Firefly model           |
 
 **Model ID Overrides**:
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `GEMINI_MODEL_ID` | No | `gemini-3.1-flash-image-preview` | Gemini model identifier |
-| `NOVA_MODEL_ID` | No | `amazon.nova-canvas-v1:0` | Nova Canvas Bedrock model identifier |
-| `OPENAI_MODEL_ID` | No | `dall-e-3` | OpenAI model identifier (iteration uses `gpt-image-1` regardless) |
-| `FIREFLY_MODEL_ID` | No | `firefly-image-5` | Adobe Firefly model identifier |
+| Variable           | Required | Default                          | Description                                                       |
+| ------------------ | -------- | -------------------------------- | ----------------------------------------------------------------- |
+| `GEMINI_MODEL_ID`  | No       | `gemini-3.1-flash-image-preview` | Gemini model identifier                                           |
+| `NOVA_MODEL_ID`    | No       | `amazon.nova-canvas-v1:0`        | Nova Canvas Bedrock model identifier                              |
+| `OPENAI_MODEL_ID`  | No       | `dall-e-3`                       | OpenAI model identifier (iteration uses `gpt-image-1` regardless) |
+| `FIREFLY_MODEL_ID` | No       | `firefly-image-5`                | Adobe Firefly model identifier                                    |
 
 **Prompt Enhancement**:
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `PROMPT_MODEL_PROVIDER` | No | `openai` | Provider for prompt enhancement (`openai` or `google_gemini`) |
-| `PROMPT_MODEL_ID` | No | `gpt-4o` | Model ID for prompt enhancement |
-| `PROMPT_MODEL_API_KEY` | Yes | `""` | API key for prompt enhancement model |
+| Variable                | Required | Default  | Description                                                   |
+| ----------------------- | -------- | -------- | ------------------------------------------------------------- |
+| `PROMPT_MODEL_PROVIDER` | No       | `openai` | Provider for prompt enhancement (`openai` or `google_gemini`) |
+| `PROMPT_MODEL_ID`       | No       | `gpt-4o` | Model ID for prompt enhancement                               |
+| `PROMPT_MODEL_API_KEY`  | Yes      | `""`     | API key for prompt enhancement model                          |
 
 **Tier System (Auth + Billing + Quotas)**:
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `MONTHLY_SPEND_CEILING_USD_MICROS` | No | `500000000` | Hard monthly spend ceiling ($500). The bound that caps the invoice; a daily ceiling alone does not |
-| `GLOBAL_DAILY_SPEND_CEILING_USD_MICROS` | No | `25000000` | Hard daily spend ceiling ($25). Burst headroom under the monthly bound |
-| `AUTH_ENABLED` | **Yes** | _none_ | Enable Cognito auth + tier resolution. Gates **identity only** -- quota, cost caps and spend metering apply either way. No default: config raises at import if unset, and the SAM parameter has no default either, so the choice appears in the deploy parameters |
-| `ANON_GENERATE_LIMIT` | No | `5` | `/generate` calls per source IP per window when `AUTH_ENABLED=false` |
-| `ANON_REFINE_LIMIT` | No | `10` | `/iterate` + `/outpaint` calls per source IP per window when `AUTH_ENABLED=false` |
-| `ANON_WINDOW_SECONDS` | No | `3600` | Rolling window for anonymous limits |
-| `GUEST_IP_GENERATE_LIMIT` | No | `3` | Guest generates per source IP. Must be below `GUEST_GLOBAL_LIMIT` or it never binds |
-| `GUEST_IP_WINDOW_SECONDS` | No | `3600` | Rolling window for the per-IP guest limit |
-| `BILLING_ENABLED` | No | `false` | Enable Stripe billing (requires `AUTH_ENABLED=true`) |
-| `COGNITO_USER_POOL_ID` | Yes* | `""` | Cognito User Pool ID |
-| `COGNITO_USER_POOL_CLIENT_ID` | Yes* | `""` | Cognito App Client ID |
-| `COGNITO_DOMAIN` | Yes* | `""` | Cognito Hosted UI domain prefix |
-| `COGNITO_REGION` | No | `us-west-2` | Cognito region |
-| `USERS_TABLE_NAME` | No | `pixel-prompt-users` | DynamoDB table for tier and quota state |
-| `GUEST_TOKEN_SECRET` | Yes* | `""` | HMAC secret for signing guest cookies |
-| `GUEST_GENERATE_LIMIT` | No | `1` | `/generate` calls per guest per window |
-| `GUEST_WINDOW_SECONDS` | No | `3600` | Guest rolling window length |
-| `GUEST_GLOBAL_LIMIT` | No | `5` | Global cap on guest `/generate` calls per window |
-| `GUEST_GLOBAL_WINDOW_SECONDS` | No | `3600` | Global guest window length |
-| `FREE_GENERATE_LIMIT` | No | `1` | `/generate` calls per free user per window |
-| `FREE_REFINE_LIMIT` | No | `2` | `/iterate` + `/outpaint` calls per free user per window |
-| `FREE_WINDOW_SECONDS` | No | `3600` | Free tier rolling window length |
-| `PAID_DAILY_LIMIT` | No | `200` | Refinement calls per paid user per day (operator-tuned) |
-| `PAID_WINDOW_SECONDS` | No | `86400` | Paid tier rolling window length |
-| `STRIPE_SECRET_KEY` | Yes** | `""` | Stripe API secret key |
-| `STRIPE_WEBHOOK_SECRET` | Yes** | `""` | Stripe webhook signing secret |
-| `STRIPE_PRICE_ID` | Yes** | `""` | Stripe price ID for paid subscription |
-| `STRIPE_SUCCESS_URL` | Yes** | `""` | Redirect URL after successful checkout |
-| `STRIPE_CANCEL_URL` | Yes** | `""` | Redirect URL after cancelled checkout |
-| `STRIPE_PORTAL_RETURN_URL` | Yes** | `""` | Return URL from Stripe customer portal |
+| Variable                                | Required | Default              | Description                                                                                                                                                                                                                                                       |
+| --------------------------------------- | -------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MONTHLY_SPEND_CEILING_USD_MICROS`      | No       | `500000000`          | Hard monthly spend ceiling ($500). The bound that caps the invoice; a daily ceiling alone does not                                                                                                                                                                |
+| `GLOBAL_DAILY_SPEND_CEILING_USD_MICROS` | No       | `25000000`           | Hard daily spend ceiling ($25). Burst headroom under the monthly bound                                                                                                                                                                                            |
+| `AUTH_ENABLED`                          | **Yes**  | _none_               | Enable Cognito auth + tier resolution. Gates **identity only** -- quota, cost caps and spend metering apply either way. No default: config raises at import if unset, and the SAM parameter has no default either, so the choice appears in the deploy parameters |
+| `ANON_GENERATE_LIMIT`                   | No       | `5`                  | `/generate` calls per source IP per window when `AUTH_ENABLED=false`                                                                                                                                                                                              |
+| `ANON_REFINE_LIMIT`                     | No       | `10`                 | `/iterate` + `/outpaint` calls per source IP per window when `AUTH_ENABLED=false`                                                                                                                                                                                 |
+| `ANON_WINDOW_SECONDS`                   | No       | `3600`               | Rolling window for anonymous limits                                                                                                                                                                                                                               |
+| `GUEST_IP_GENERATE_LIMIT`               | No       | `3`                  | Guest generates per source IP. Must be below `GUEST_GLOBAL_LIMIT` or it never binds                                                                                                                                                                               |
+| `GUEST_IP_WINDOW_SECONDS`               | No       | `3600`               | Rolling window for the per-IP guest limit                                                                                                                                                                                                                         |
+| `BILLING_ENABLED`                       | No       | `false`              | Enable Stripe billing (requires `AUTH_ENABLED=true`)                                                                                                                                                                                                              |
+| `COGNITO_USER_POOL_ID`                  | Yes*     | `""`                 | Cognito User Pool ID                                                                                                                                                                                                                                              |
+| `COGNITO_USER_POOL_CLIENT_ID`           | Yes*     | `""`                 | Cognito App Client ID                                                                                                                                                                                                                                             |
+| `COGNITO_DOMAIN`                        | Yes*     | `""`                 | Cognito Hosted UI domain prefix                                                                                                                                                                                                                                   |
+| `COGNITO_REGION`                        | No       | `us-west-2`          | Cognito region                                                                                                                                                                                                                                                    |
+| `USERS_TABLE_NAME`                      | No       | `pixel-prompt-users` | DynamoDB table for tier and quota state                                                                                                                                                                                                                           |
+| `GUEST_TOKEN_SECRET`                    | Yes*     | `""`                 | HMAC secret for signing guest cookies                                                                                                                                                                                                                             |
+| `GUEST_GENERATE_LIMIT`                  | No       | `1`                  | `/generate` calls per guest per window                                                                                                                                                                                                                            |
+| `GUEST_WINDOW_SECONDS`                  | No       | `3600`               | Guest rolling window length                                                                                                                                                                                                                                       |
+| `GUEST_GLOBAL_LIMIT`                    | No       | `5`                  | Global cap on guest `/generate` calls per window                                                                                                                                                                                                                  |
+| `GUEST_GLOBAL_WINDOW_SECONDS`           | No       | `3600`               | Global guest window length                                                                                                                                                                                                                                        |
+| `FREE_GENERATE_LIMIT`                   | No       | `1`                  | `/generate` calls per free user per window                                                                                                                                                                                                                        |
+| `FREE_REFINE_LIMIT`                     | No       | `2`                  | `/iterate` + `/outpaint` calls per free user per window                                                                                                                                                                                                           |
+| `FREE_WINDOW_SECONDS`                   | No       | `3600`               | Free tier rolling window length                                                                                                                                                                                                                                   |
+| `PAID_DAILY_LIMIT`                      | No       | `200`                | Refinement calls per paid user per day (operator-tuned)                                                                                                                                                                                                           |
+| `PAID_WINDOW_SECONDS`                   | No       | `86400`              | Paid tier rolling window length                                                                                                                                                                                                                                   |
+| `STRIPE_SECRET_KEY`                     | Yes**    | `""`                 | Stripe API secret key                                                                                                                                                                                                                                             |
+| `STRIPE_WEBHOOK_SECRET`                 | Yes**    | `""`                 | Stripe webhook signing secret                                                                                                                                                                                                                                     |
+| `STRIPE_PRICE_ID`                       | Yes**    | `""`                 | Stripe price ID for paid subscription                                                                                                                                                                                                                             |
+| `STRIPE_SUCCESS_URL`                    | Yes**    | `""`                 | Redirect URL after successful checkout                                                                                                                                                                                                                            |
+| `STRIPE_CANCEL_URL`                     | Yes**    | `""`                 | Redirect URL after cancelled checkout                                                                                                                                                                                                                             |
+| `STRIPE_PORTAL_RETURN_URL`              | Yes**    | `""`                 | Return URL from Stripe customer portal                                                                                                                                                                                                                            |
 
 *Required when `AUTH_ENABLED=true`. **Required when `BILLING_ENABLED=true`.
 
 **Per-Model Daily Caps (cost ceiling)**:
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `MODEL_GEMINI_DAILY_CAP` | No | `500` | Daily generation cap for Gemini |
-| `MODEL_NOVA_DAILY_CAP` | No | `500` | Daily generation cap for Nova Canvas |
-| `MODEL_OPENAI_DAILY_CAP` | No | `500` | Daily generation cap for OpenAI |
-| `MODEL_FIREFLY_DAILY_CAP` | No | `500` | Daily generation cap for Firefly |
+| Variable                  | Required | Default | Description                          |
+| ------------------------- | -------- | ------- | ------------------------------------ |
+| `MODEL_GEMINI_DAILY_CAP`  | No       | `500`   | Daily generation cap for Gemini      |
+| `MODEL_NOVA_DAILY_CAP`    | No       | `500`   | Daily generation cap for Nova Canvas |
+| `MODEL_OPENAI_DAILY_CAP`  | No       | `500`   | Daily generation cap for OpenAI      |
+| `MODEL_FIREFLY_DAILY_CAP` | No       | `500`   | Daily generation cap for Firefly     |
 
 Cost ceiling checks apply regardless of `AUTH_ENABLED` -- the provider bills for a generation whether or not the caller logged in. Models at their daily cap are skipped during `/generate` (other models still run). If all models are capped, `/generate` returns 429 `MODEL_COST_CEILING`. Also enforced on `/iterate` and `/outpaint`, consumed before dispatch.
 
 **CAPTCHA (Cloudflare Turnstile)**:
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `CAPTCHA_ENABLED` | No | `false` | Enable Turnstile CAPTCHA for guest `/generate` |
-| `AGE_GATE_ENABLED` | No | **`true`** | Require an 18+ affirmation before a first `/generate`. Defaults **on**, unlike every other flag here: Google's API terms allow use only where the service is not "likely to be accessed by" under-18s, so the compliant behaviour is what an operator gets by doing nothing |
-| `TURNSTILE_SECRET_KEY` | Yes*** | `""` | Cloudflare Turnstile secret key |
+| Variable               | Required | Default    | Description                                                                                                                                                                                                                                                                 |
+| ---------------------- | -------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CAPTCHA_ENABLED`      | No       | `false`    | Enable Turnstile CAPTCHA for guest `/generate`                                                                                                                                                                                                                              |
+| `AGE_GATE_ENABLED`     | No       | **`true`** | Require an 18+ affirmation before a first `/generate`. Defaults **on**, unlike every other flag here: Google's API terms allow use only where the service is not "likely to be accessed by" under-18s, so the compliant behaviour is what an operator gets by doing nothing |
+| `TURNSTILE_SECRET_KEY` | Yes***   | `""`       | Cloudflare Turnstile secret key                                                                                                                                                                                                                                             |
 
 ***Required when `CAPTCHA_ENABLED=true`.
 
 **Email Notifications (Amazon SES)**:
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `SES_ENABLED` | No | `false` | Enable SES email notifications |
-| `SES_FROM_EMAIL` | Yes**** | `""` | Verified SES sender email address |
-| `SES_REGION` | No | `us-west-2` | AWS region for SES |
+| Variable         | Required | Default     | Description                       |
+| ---------------- | -------- | ----------- | --------------------------------- |
+| `SES_ENABLED`    | No       | `false`     | Enable SES email notifications    |
+| `SES_FROM_EMAIL` | Yes****  | `""`        | Verified SES sender email address |
+| `SES_REGION`     | No       | `us-west-2` | AWS region for SES                |
 
 ****Required when `SES_ENABLED=true`.
 
 **Admin Dashboard**:
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `ADMIN_ENABLED` | No | `false` | Enable admin API endpoints (requires `AUTH_ENABLED=true`) |
+| Variable        | Required | Default | Description                                               |
+| --------------- | -------- | ------- | --------------------------------------------------------- |
+| `ADMIN_ENABLED` | No       | `false` | Enable admin API endpoints (requires `AUTH_ENABLED=true`) |
 
 **Open-Source Mode**: setting `AUTH_ENABLED=false` explicitly (with `BILLING_ENABLED=false`) disables auth, billing, CAPTCHA, email notifications, and admin features. Contributors can still run the full stack without any paid-tier setup -- no Cognito, no Stripe. It is an explicit configuration, not a default: there is no safe value to assume, so `AUTH_ENABLED` must be stated.
 
@@ -271,33 +271,33 @@ This means open-source mode _does_ read and write DynamoDB -- metering requires 
 
 **CORS**:
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `CORS_ALLOWED_ORIGIN` | No | `*` | Allowed CORS origin (set to frontend domain in production) |
+| Variable              | Required | Default | Description                                                |
+| --------------------- | -------- | ------- | ---------------------------------------------------------- |
+| `CORS_ALLOWED_ORIGIN` | No       | `*`     | Allowed CORS origin (set to frontend domain in production) |
 
 **Operational Timeouts**:
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `API_CLIENT_TIMEOUT` | No | `60.0` | Timeout for AI provider API calls (seconds, float) |
-| `IMAGE_DOWNLOAD_TIMEOUT` | No | `30` | Timeout for downloading generated images (seconds) |
-| `ENHANCE_TIMEOUT` | No | `30.0` | Timeout for prompt enhancement/adaptation LLM calls (seconds, float) |
-| `GENERATE_THREAD_WORKERS` | No | `4` | Number of parallel generation threads |
+| Variable                  | Required | Default | Description                                                          |
+| ------------------------- | -------- | ------- | -------------------------------------------------------------------- |
+| `API_CLIENT_TIMEOUT`      | No       | `60.0`  | Timeout for AI provider API calls (seconds, float)                   |
+| `IMAGE_DOWNLOAD_TIMEOUT`  | No       | `30`    | Timeout for downloading generated images (seconds)                   |
+| `ENHANCE_TIMEOUT`         | No       | `30.0`  | Timeout for prompt enhancement/adaptation LLM calls (seconds, float) |
+| `GENERATE_THREAD_WORKERS` | No       | `4`     | Number of parallel generation threads                                |
 
 **Frontend** (Vite, set in `.env` or `.env.local`):
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `VITE_API_ENDPOINT` | Yes (prod) | -- | API Gateway endpoint URL |
-| `VITE_AUTH_ENABLED` | No | `false` | Enable Cognito auth UI |
-| `VITE_BILLING_ENABLED` | No | `false` | Enable Stripe billing UI |
-| `VITE_COGNITO_DOMAIN` | Yes* | -- | Cognito Hosted UI domain |
-| `VITE_COGNITO_CLIENT_ID` | Yes* | -- | Cognito App Client ID |
-| `VITE_COGNITO_REDIRECT_URI` | Yes* | -- | OAuth2 callback URL |
-| `VITE_COGNITO_LOGOUT_URI` | Yes* | -- | Post-logout redirect URL |
-| `VITE_ADMIN_ENABLED` | No | `false` | Enable admin dashboard UI |
-| `VITE_CAPTCHA_ENABLED` | No | `false` | Enable Turnstile CAPTCHA UI |
-| `VITE_TURNSTILE_SITE_KEY` | Yes** | -- | Cloudflare Turnstile site key |
+| Variable                    | Required   | Default | Description                   |
+| --------------------------- | ---------- | ------- | ----------------------------- |
+| `VITE_API_ENDPOINT`         | Yes (prod) | --      | API Gateway endpoint URL      |
+| `VITE_AUTH_ENABLED`         | No         | `false` | Enable Cognito auth UI        |
+| `VITE_BILLING_ENABLED`      | No         | `false` | Enable Stripe billing UI      |
+| `VITE_COGNITO_DOMAIN`       | Yes*       | --      | Cognito Hosted UI domain      |
+| `VITE_COGNITO_CLIENT_ID`    | Yes*       | --      | Cognito App Client ID         |
+| `VITE_COGNITO_REDIRECT_URI` | Yes*       | --      | OAuth2 callback URL           |
+| `VITE_COGNITO_LOGOUT_URI`   | Yes*       | --      | Post-logout redirect URL      |
+| `VITE_ADMIN_ENABLED`        | No         | `false` | Enable admin dashboard UI     |
+| `VITE_CAPTCHA_ENABLED`      | No         | `false` | Enable Turnstile CAPTCHA UI   |
+| `VITE_TURNSTILE_SITE_KEY`   | Yes**      | --      | Cloudflare Turnstile site key |
 
 *Required when `VITE_AUTH_ENABLED=true`. **Required when `VITE_CAPTCHA_ENABLED=true`.
 

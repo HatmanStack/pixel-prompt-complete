@@ -36,7 +36,7 @@ hard to copy, is what happens after it:
 - **It learns which model suits you.** Generating gives you four images you did
   not choose between. Refining one is a choice, and a costly one, so the app
   records it. Over time that answers a question a single-model tool cannot
-  ask: which model is actually best for *your* prompts.
+  ask: which model is actually best for _your_ prompts.
 
 Submit a prompt and you get Gemini, Nova Canvas, DALL-E 3 and Firefly side by
 side. Deployed on AWS with Lambda, S3 and CloudFront, no servers to manage.
@@ -120,25 +120,25 @@ npm run dev
 
 ### Frontend Commands
 
-| Command | Description |
-|---------|-------------|
-| `npm run dev` | Dev server on port 3000 |
-| `npm run build` | Production build |
-| `npm run lint` | ESLint |
-| `npm run typecheck` | TypeScript check |
-| `npm test` | Vitest (all tests) |
-| `npm run test:coverage` | Coverage report |
-| `npm run format` | Prettier format |
-| `npm run format:check` | Prettier check |
+| Command                 | Description             |
+| ----------------------- | ----------------------- |
+| `npm run dev`           | Dev server on port 3000 |
+| `npm run build`         | Production build        |
+| `npm run lint`          | ESLint                  |
+| `npm run typecheck`     | TypeScript check        |
+| `npm test`              | Vitest (all tests)      |
+| `npm run test:coverage` | Coverage report         |
+| `npm run format`        | Prettier format         |
+| `npm run format:check`  | Prettier check          |
 
 ### Backend Commands
 
-| Command | Description |
-|---------|-------------|
-| `PYTHONPATH=backend/src pytest tests/backend/unit -v` | Unit tests |
-| `ruff check backend/src/` | Lint |
-| `ruff format backend/src/` | Format |
-| `sam local start-api` | Local API |
+| Command                                               | Description |
+| ----------------------------------------------------- | ----------- |
+| `PYTHONPATH=backend/src pytest tests/backend/unit -v` | Unit tests  |
+| `ruff check backend/src/`                             | Lint        |
+| `ruff format backend/src/`                            | Format      |
+| `sam local start-api`                                 | Local API   |
 
 ### E2E Tests (MiniStack)
 
@@ -187,12 +187,12 @@ make check
 
 Four fixed models run in parallel for every generation:
 
-| Name | Provider | Default Model ID | Enable Env Var |
-|------|----------|-------------------|----------------|
-| Gemini | Google | gemini-3.1-flash-image-preview | `GEMINI_ENABLED` |
-| Nova Canvas | Amazon Bedrock | amazon.nova-canvas-v1:0 | `NOVA_ENABLED` |
-| DALL-E 3 | OpenAI | dall-e-3 | `OPENAI_ENABLED` |
-| Firefly | Adobe | firefly-image-5 | `FIREFLY_ENABLED` |
+| Name        | Provider       | Default Model ID               | Enable Env Var    |
+| ----------- | -------------- | ------------------------------ | ----------------- |
+| Gemini      | Google         | gemini-3.1-flash-image-preview | `GEMINI_ENABLED`  |
+| Nova Canvas | Amazon Bedrock | amazon.nova-canvas-v1:0        | `NOVA_ENABLED`    |
+| DALL-E 3    | OpenAI         | dall-e-3                       | `OPENAI_ENABLED`  |
+| Firefly     | Adobe          | firefly-image-5                | `FIREFLY_ENABLED` |
 
 Each model requires its own credentials. Gemini and OpenAI need API keys (`GEMINI_API_KEY`, `OPENAI_API_KEY`). Firefly uses OAuth2 (`FIREFLY_CLIENT_ID`, `FIREFLY_CLIENT_SECRET`). Nova Canvas uses the Lambda IAM role (no API key). Models can be individually disabled.
 
