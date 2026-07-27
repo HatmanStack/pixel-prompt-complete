@@ -207,3 +207,18 @@ docs: update API endpoint table in CLAUDE.md
    reverting one and reporting the delta. Squashing would destroy exactly
    that. Write commit bodies worth keeping: what changed and why, closing with
    the evidence it works rather than the claim.
+
+## Versioning
+
+`CHANGELOG.md` and the git tags are the release record, and
+`backend/pyproject.toml`'s `version` tracks the newest released section. The
+other two version fields are inert: the root `package.json` and
+`frontend/package.json` are both `private: true` and are never published, so
+their `version` values (`1.0.0` and `0.0.0`) mean nothing and are deliberately
+not kept in step. Do not "fix" them to match — that would imply a coupling that
+does not exist.
+
+Open work this repository has consciously deferred is listed in
+[docs/follow-ups/2026-07-audit-deferred.md](docs/follow-ups/2026-07-audit-deferred.md),
+each entry with the condition that retires it. Architectural decisions that
+govern live code are in [docs/adr/](docs/adr/README.md).
