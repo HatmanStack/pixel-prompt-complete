@@ -434,6 +434,13 @@ def test_outpaint_firefly_bounds_its_whole_chain_by_the_budget_it_was_given():
     timeouts = [r.timeout for r in m.request_history]
     assert len(timeouts) == c.FIREFLY_SEQUENTIAL_CALLS
     assert sum(timeouts) <= budget
+    # Anchor the declared worst case to the timeouts actually issued. Without
+    # this, firefly_worst_case_seconds is checked only against its own
+    # arithmetic: drop the token call from the sum and every "fits the budget"
+    # assertion still passes while the real chain overruns by 10s. Verified by
+    # mutation -- removing FIREFLY_TOKEN_TIMEOUT from the worst case is caught
+    # here and nowhere else.
+    assert sum(timeouts) == c.firefly_worst_case_seconds(budget)
 
 
 def test_firefly_falls_back_to_the_generate_budget_when_none_is_supplied():
@@ -589,4 +596,31 @@ def test_generation_dispatch_keeps_the_larger_asynchronous_budget():
     assert seen, "the provider handler was never reached"
     assert "timeout" not in seen[0], (
         "the generate dispatch must not inherit the synchronous budget"
+    )
+
+
+def test_openai_client_is_built_with_the_derived_timeout_and_no_hidden_retries():
+    """The multiplier openai_worst_case_seconds assumes, checked at the source.
+
+    The SDK defaults max_retries to 2, which makes the configured timeout a
+    per-attempt bound rather than a total one. If that default came back, the
+    worst case would be three times what OPENAI_MAX_ATTEMPTS declares and
+    every budget assertion would still pass, because they all read the same
+    constant. This reads what the client was actually constructed with.
+    """
+    from unittest.mock import patch
+
+    import utils.clients as c
+
+    c._openai_clients.clear()
+    budget = 70.0
+    with patch("utils.clients.OpenAI") as mock_openai:
+        c.get_openai_client("k", timeout=c.openai_call_timeout(budget))
+
+    kwargs = mock_openai.call_args.kwargs
+    assert kwargs["max_retries"] == c.OPENAI_MAX_ATTEMPTS - 1
+    assert kwargs["timeout"] == c.openai_call_timeout(budget)
+    assert (
+        c.openai_worst_case_seconds(budget)
+        >= c.OPENAI_MAX_ATTEMPTS * c.openai_call_timeout(budget)
     )
