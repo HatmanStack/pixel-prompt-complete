@@ -1886,14 +1886,29 @@ def response(
     body: dict[str, Any],
     set_cookie: str | None = None,
 ) -> ApiResponse:
-    """Helper function to create API Gateway response."""
+    """Helper function to create API Gateway response.
+
+    ``retryAfter`` in the body is mirrored into a real ``Retry-After`` header.
+    Five error factories compute it — ``daily_spend_ceiling`` to the second —
+    and this is the single choke point every handler returns through, so one
+    check here covers all of them. The body field stays: a client already
+    reading it must keep working, and the two agreeing is the point.
+    """
     headers = {
         "Content-Type": "application/json",
         "Access-Control-Allow-Origin": cors_allowed_origin,
         "Access-Control-Allow-Credentials": "true",
         "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, X-Correlation-ID",
+        # Without this a browser cannot read Retry-After cross-origin, which
+        # would make emitting it pointless for the only client that has one.
+        "Access-Control-Expose-Headers": "Retry-After, X-Correlation-ID",
     }
+    retry_after = body.get("retryAfter")
+    # bool is an int subclass, and True would render as "True" — a value no
+    # client can parse into a delay.
+    if isinstance(retry_after, int) and not isinstance(retry_after, bool) and retry_after > 0:
+        headers["Retry-After"] = str(retry_after)
     resp: ApiResponse = {
         "statusCode": status_code,
         "headers": headers,
