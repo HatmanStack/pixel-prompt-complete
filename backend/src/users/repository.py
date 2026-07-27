@@ -738,9 +738,7 @@ class UserRepository:
             now = int(time.time())
         self._table.update_item(
             Key={"userId": f"event#{event_id}"},
-            UpdateExpression=(
-                "SET completedAt = :now, #ttl = :ttl REMOVE leaseExpiresAt"
-            ),
+            UpdateExpression=("SET completedAt = :now, #ttl = :ttl REMOVE leaseExpiresAt"),
             ExpressionAttributeNames={"#ttl": "ttl"},
             ExpressionAttributeValues={
                 ":now": now,
@@ -821,9 +819,7 @@ class UserRepository:
             set_parts.append("#ttl = if_not_exists(#ttl, :ttl)")
         self._table.update_item(
             Key={"userId": item_key},
-            UpdateExpression=(
-                "SET " + ", ".join(set_parts) + " ADD " + ", ".join(add_parts)
-            ),
+            UpdateExpression=("SET " + ", ".join(set_parts) + " ADD " + ", ".join(add_parts)),
             ExpressionAttributeNames=names,
             ExpressionAttributeValues=values,
         )
