@@ -96,7 +96,16 @@ lock-check: ## Check backend/requirements-lock.txt is current (needs network)
 e2e-up: ## Start MiniStack
 	docker compose up -d --wait
 
+# The environment mirrors the e2e job in ci.yml. Without it this target fails
+# on any machine that has not exported the variables by hand: config.py raises
+# on an unset AUTH_ENABLED by design, and the e2e conftest -- unlike the unit
+# one -- sets no default. CI supplied them as job env, so the gap only ever
+# showed up locally. Each is overridable from the caller's environment.
 e2e: ## Run E2E tests (needs Docker: `make e2e-up` first)
+	AWS_DEFAULT_REGION=$${AWS_DEFAULT_REGION:-us-east-1} \
+	S3_BUCKET=$${S3_BUCKET:-test-bucket} \
+	AUTH_ENABLED=$${AUTH_ENABLED:-false} \
+	MINISTACK_ENDPOINT=$${MINISTACK_ENDPOINT:-http://localhost:4566} \
 	PYTHONPATH=backend/src $(PYTEST) tests/backend/e2e -v -m e2e --no-cov
 
 e2e-down: ## Stop MiniStack
