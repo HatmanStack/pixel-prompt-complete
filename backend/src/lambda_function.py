@@ -1184,7 +1184,12 @@ def run_generation(payload: dict[str, Any]) -> dict[str, Any]:
             (
                 "/generate",
                 mname,
-                mresult.get("duration", 0) * 1000,  # seconds to ms
+                # Coerced, not left to Python's numeric tower. An errored
+                # model returns no "duration" key -- the timer is read only on
+                # the success branch -- so .get() yields the int default and an
+                # int reaches a parameter declared float. That absence is how a
+                # non-float got in.
+                float(mresult.get("duration") or 0.0) * 1000,  # seconds to ms
                 mresult.get("status") == "error",
             )
             for mname, mresult in results.items()
@@ -1820,6 +1825,41 @@ def _session_is_private(session: dict[str, Any]) -> bool:
     return session.get("visibility") == "private"
 
 
+def _resolve_tier_or_none(event: LambdaEvent) -> TierContext | None:
+    """Resolve the caller's tier, or ``None`` if identity cannot be resolved.
+
+    ``_guest_service`` is ``None`` whenever ``GUEST_TOKEN_SECRET`` is unset,
+    and with ``AUTH_ENABLED=true`` that reaches ``resolve_tier``'s guest path,
+    which needs it. ``/status`` and ``/download`` were passing it straight
+    through while ``/me`` and ``/prompts/history`` guarded.
+
+    The guard is ``auth_enabled and _guest_service is None``, not
+    ``_guest_service is None``: with auth off the service is legitimately
+    absent and ``resolve_tier`` short-circuits before reading it, so widening
+    the guard would change behaviour in a configuration that is not broken.
+
+    These two endpoints answer ``None`` rather than 500, unlike the three
+    neighbouring sites, and the difference is deliberate:
+
+    - The write paths (``_parse_and_validate_request``) and the identity paths
+      (``/me``, ``/prompts/history``) return 500, so the misconfiguration is
+      loud and cannot pass unnoticed.
+    - A 500 *here* would be a side channel. It separates "this session exists
+      and is private" from "no such session", which is exactly the disclosure
+      the 404-not-403 rule on these endpoints exists to prevent. And both
+      endpoints also serve public sessions, which have nothing to do with
+      guest identity: failing them would give a missing secret a blast radius
+      across the whole read path, gallery included.
+
+    ``None`` already has a defined meaning to ``_caller_owns_session``: not
+    the owner. For a private session that yields the 404 those handlers
+    already return.
+    """
+    if config.auth_enabled and _guest_service is None:
+        return None
+    return resolve_tier(event, _user_repo, _guest_service)
+
+
 def _caller_owns_session(session: dict[str, Any], tier_ctx: Any) -> bool:
     """Return True if ``tier_ctx`` identifies the owner of ``session``.
 
@@ -1879,7 +1919,7 @@ def handle_status(event: LambdaEvent, correlation_id: str | None = None) -> ApiR
         # A private session is readable only by its owner. 404 rather than 403:
         # a 403 confirms the session exists, which is itself a disclosure.
         if _session_is_private(session) and not _caller_owns_session(
-            session, resolve_tier(event, _user_repo, _guest_service)
+            session, _resolve_tier_or_none(event)
         ):
             return response(404, {"error": f"Session {session_id} not found"})
 
@@ -2090,7 +2130,7 @@ def handle_download(event: LambdaEvent, correlation_id: str | None = None) -> Ap
         # Same ownership rule as /status. A download URL is a grant of access,
         # so this endpoint needs the check just as much as the viewing one.
         if _session_is_private(session) and not _caller_owns_session(
-            session, resolve_tier(event, _user_repo, _guest_service)
+            session, _resolve_tier_or_none(event)
         ):
             return response(404, {"error": f"Session {session_id} not found"})
 

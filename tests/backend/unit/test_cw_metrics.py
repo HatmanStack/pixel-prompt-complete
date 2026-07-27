@@ -305,3 +305,76 @@ def test_generate_emits_one_put_metric_data_and_skips_skipped_models():
         if d["Name"] == "Model"
     }
     assert model_dimensions == {"gemini", "openai", "firefly"}
+
+
+def test_an_errored_model_reports_a_float_duration():
+    """An errored model returns no "duration" key, and that is how a non-float
+    reached a parameter declared ``duration_ms: float``.
+
+    The success branch of ``generate_for_model`` puts ``duration`` in its
+    result dict; the error branch does not, so ``.get("duration")`` falls back
+    to the default and ``default * 1000`` is whatever type the default is.
+    Skipped models are filtered out before the emit, so an errored model is
+    the only way in.
+
+    The assertion is on the datum that actually reaches ``put_metric_data``,
+    not on a call signature: the value published is the observable.
+    """
+    from unittest.mock import MagicMock, patch
+
+    def _model(name, provider):
+        m = MagicMock()
+        m.name = name
+        m.provider = provider
+        return m
+
+    mock_client = MagicMock()
+    with (
+        patch("ops.metrics._get_cw_client", return_value=mock_client),
+        patch(
+            "lambda_function.get_enabled_models",
+            return_value=[_model("gemini", "google_gemini")],
+        ),
+        patch("lambda_function.prompt_enhancer") as mock_enh,
+        patch("lambda_function.content_filter") as mock_cf,
+        patch("lambda_function.session_manager") as mock_sm,
+        patch("lambda_function.get_handler") as mock_get_handler,
+        patch("lambda_function._handle_failed_result"),
+        patch("lambda_function._cost_meter"),
+        patch("lambda_function._user_repo", MagicMock()),
+    ):
+        mock_enh.adapt_per_model.return_value = {"gemini": "a cat"}
+        mock_cf.check_prompt.return_value = False
+        mock_sm.add_iteration.return_value = 0
+        mock_get_handler.return_value = lambda *a, **k: {
+            "status": "error",
+            "error": "provider said no",
+        }
+
+        from lambda_function import run_generation
+
+        results = run_generation({
+            "sessionId": "s1",
+            "prompt": "a cat",
+            "modelNames": ["gemini"],
+            "skipped": {},
+            "visibility": "public",
+            "tier": "anon",
+            "userId": "anon",
+            "correlationId": "corr-dur",
+        })
+
+    assert results["gemini"]["status"] == "error"
+    assert "duration" not in results["gemini"], (
+        "if the error branch starts recording a duration this test no longer "
+        "exercises the absent-key path it is named for"
+    )
+
+    datums = mock_client.put_metric_data.call_args.kwargs["MetricData"]
+    durations = [d for d in datums if d["MetricName"] == "Latency"]
+    assert durations, datums
+    for d in durations:
+        assert isinstance(d["Value"], float), (
+            f"published {d['Value']!r} ({type(d['Value']).__name__}) for a "
+            "metric declared float"
+        )
