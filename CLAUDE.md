@@ -525,7 +525,11 @@ exposed to client code: `ANALYZE=true` (read by `frontend/vite.config.ts:22`)
 adds the Rollup visualizer and writes `dist/stats.html`. `npm run analyze` sets
 it. Left unset, no module graph is written into the deployed directory.
 
-See `backend/.env.example` and `frontend/.env.example` for copyable templates.
+See `frontend/.env.example` for a copyable frontend template, and
+`backend/.env.deploy.example` for the `npm run deploy` one.
+`backend/.env.example` is the backend reference surface rather than a file to
+copy to `.env.deploy` — it lists everything the code reads, most of which that
+script does not act on.
 Every variable in the tables above is genuinely read by code, and every default
 matches `backend/src/config.py` — do not add a row for something nothing
 reads.

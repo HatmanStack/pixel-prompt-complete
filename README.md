@@ -139,12 +139,20 @@ runs. There is deliberately no default because there is no safe value to guess:
 token secret. Failing at import forces the choice into the deploy parameters,
 where it is reviewable.
 
-Set it, and everything else, in `backend/.env.deploy` (copy
-`backend/.env.example`) or as SAM parameter overrides. The full variable
-surface — around ninety variables with their defaults — is documented in
-[`backend/.env.example`](backend/.env.example) and in
-[`CLAUDE.md`](CLAUDE.md#environment-variables). It is not duplicated here: a
-duplicated table is a table that drifts.
+Set it in `backend/.env.deploy`, which `npm run deploy` reads, or as a SAM
+parameter override. There are two backend templates and they are not
+interchangeable:
+
+- [`backend/.env.deploy.example`](backend/.env.deploy.example) — **copy this to
+  `backend/.env.deploy`.** It holds exactly the keys `npm run deploy` acts on,
+  and it is the file the script names when `.env.deploy` is missing.
+- [`backend/.env.example`](backend/.env.example) — the reference surface: every
+  variable the backend reads, with the code's defaults, around ninety of them.
+  Read it to find out what exists. Do not copy it to `.env.deploy`, where most
+  of it would be silently ignored.
+
+[`CLAUDE.md`](CLAUDE.md#environment-variables) carries that same surface as
+tables. It is not duplicated here: a duplicated table is a table that drifts.
 
 The frontend has its own, much smaller surface: copy
 [`frontend/.env.example`](frontend/.env.example) to `frontend/.env`.
@@ -181,12 +189,12 @@ your AWS and SAM prerequisites, builds, deploys, and writes the resulting API
 endpoint into `frontend/.env`:
 
 ```bash
-cp backend/.env.example backend/.env.deploy   # then edit it — AUTH_ENABLED is mandatory
+cp backend/.env.deploy.example backend/.env.deploy   # then edit it — AUTH_ENABLED is mandatory
 npm run deploy
 ```
 
-It forwards a subset of `.env.deploy` as SAM parameter overrides: `AUTH_ENABLED`,
-the prompt-model settings, the four models' enable/id/credential variables,
+It forwards what it reads as SAM parameter overrides: `AUTH_ENABLED`, the
+prompt-model settings, the four models' enable/id/credential variables,
 `ALARM_EMAIL` and the two spend ceilings. Anything else you want to change is a
 SAM parameter, set with `sam deploy --guided` or explicit overrides:
 
