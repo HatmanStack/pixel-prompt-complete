@@ -126,6 +126,9 @@ export const API_ROUTES = {
   // Prompt enhancement
   ENHANCE: '/enhance',
 
+  // Client-side error reporting
+  LOG: '/log',
+
   // Gallery endpoints
   GALLERY_LIST: '/gallery/list',
   GALLERY_DETAIL: '/gallery',

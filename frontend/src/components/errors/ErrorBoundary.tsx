@@ -5,6 +5,7 @@
 
 import { Component, type ReactNode, type ErrorInfo } from 'react';
 import { Button } from '@/components/common/Button';
+import { reportError } from '@/api/log';
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -57,12 +58,22 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
     const correlationId = generateCorrelationId();
 
-    // Log error (in production this would go to CloudWatch/etc)
+    // Kept: free, and useful in development.
     console.error('Error Boundary caught:', {
       correlationId,
       component: this.props.componentName || 'Unknown',
       error: error.message,
       stack: errorInfo.componentStack,
+    });
+
+    // The console is not an observability channel for a static app on a CDN.
+    // Fire-and-forget and never throwing, by contract -- a reporter that
+    // throws in here would lose the error it was called to report. Not
+    // awaited: the fallback must render now, not after a network round trip.
+    void reportError('ERROR', error.message, {
+      stack: errorInfo.componentStack ?? undefined,
+      metadata: { component: this.props.componentName || 'Unknown' },
+      correlationId,
     });
 
     this.setState({
