@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from config import api_client_timeout
 from utils.clients import get_bedrock_client
 
 from ._common import (
@@ -27,9 +28,15 @@ _DEFAULT_WIDTH = 1024
 _DEFAULT_HEIGHT = 1024
 
 
-def _invoke_nova(model_id: str, body: dict[str, Any]) -> dict[str, Any]:
-    """Invoke a Nova Canvas model and return the parsed response body."""
-    client = get_bedrock_client()
+def _invoke_nova(model_id: str, body: dict[str, Any], budget: float) -> dict[str, Any]:
+    """Invoke a Nova Canvas model and return the parsed response body.
+
+    ``budget`` is the wall time this whole call has to fit inside; the client
+    derives its connect and read timeouts from it. The refinement path passes
+    the synchronous budget because it is answered inside the HTTP request;
+    /generate passes ``api_client_timeout`` and runs in a worker.
+    """
+    client = get_bedrock_client(budget=budget)
     response = client.invoke_model(
         modelId=model_id,
         body=json.dumps(body),
@@ -60,7 +67,9 @@ def handle_nova(model_config: ModelConfig, prompt: str, _params: GenerationParam
                 "cfgScale": 8.0,
             },
         }
-        payload = _invoke_nova(model_config["id"], body)
+        payload = _invoke_nova(
+            model_config["id"], body, model_config.get("timeout", api_client_timeout)
+        )
         image_base64 = _extract_nova_image(payload)
         return _success_result(image_base64, model_config, "bedrock_nova")
 
@@ -92,7 +101,9 @@ def iterate_nova(
                 "height": _DEFAULT_HEIGHT,
             },
         }
-        payload = _invoke_nova(model_config["id"], body)
+        payload = _invoke_nova(
+            model_config["id"], body, model_config.get("timeout", api_client_timeout)
+        )
         image_base64 = _extract_nova_image(payload)
         return _success_result(image_base64, model_config, "bedrock_nova")
 
@@ -135,7 +146,9 @@ def outpaint_nova(
                 "height": expansion["new_height"],
             },
         }
-        payload = _invoke_nova(model_config["id"], body)
+        payload = _invoke_nova(
+            model_config["id"], body, model_config.get("timeout", api_client_timeout)
+        )
         image_base64 = _extract_nova_image(payload)
         return _success_result(image_base64, model_config, "bedrock_nova")
 

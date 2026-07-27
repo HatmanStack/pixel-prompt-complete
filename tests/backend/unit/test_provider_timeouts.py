@@ -200,3 +200,393 @@ def test_running_calls_are_reported_when_models_were_also_skipped():
     ]
     assert budget_logs, "abandoned provider call was not reported"
     assert budget_logs[0].kwargs["stillRunning"] == 1
+
+
+# ---------------------------------------------------------------------------
+# The invariant, for every provider rather than only Bedrock.
+#
+# config.py states that every provider must bound its own call below the
+# dispatch budget. Until Task 1 that was asserted for Bedrock alone, which is
+# how outpaint_firefly came to chain four sequential 60s calls against a 70s
+# budget without a single test noticing.
+# ---------------------------------------------------------------------------
+
+
+def test_sync_budget_fits_inside_the_gateway_ceiling():
+    """/iterate, /outpaint and /enhance are answered inside the HTTP request.
+
+    Their whole chain has to clear the 29s gateway ceiling, not the 70s
+    dispatch budget the asynchronous worker enjoys.
+    """
+    import config
+
+    assert config.sync_dispatch_budget_seconds < config.gateway_integration_timeout_seconds
+    assert config.sync_dispatch_budget_seconds > 0
+
+
+def test_enhance_timeout_cannot_exceed_the_sync_budget():
+    """A 30s enhance timeout inside a 29s ceiling cannot succeed at its limit."""
+    import importlib
+
+    import config
+
+    previous = os.environ.get("ENHANCE_TIMEOUT")
+    os.environ["ENHANCE_TIMEOUT"] = "300"
+    try:
+        reloaded = importlib.reload(config)
+        assert reloaded.enhance_timeout == reloaded.sync_dispatch_budget_seconds
+    finally:
+        if previous is None:
+            os.environ.pop("ENHANCE_TIMEOUT", None)
+        else:
+            os.environ["ENHANCE_TIMEOUT"] = previous
+        importlib.reload(config)
+
+
+def test_enhance_timeout_below_the_budget_is_left_alone():
+    """The clamp is a ceiling, not an override: a shorter value must survive."""
+    import importlib
+
+    import config
+
+    previous = os.environ.get("ENHANCE_TIMEOUT")
+    os.environ["ENHANCE_TIMEOUT"] = "5"
+    try:
+        reloaded = importlib.reload(config)
+        assert reloaded.enhance_timeout == 5.0
+    finally:
+        if previous is None:
+            os.environ.pop("ENHANCE_TIMEOUT", None)
+        else:
+            os.environ["ENHANCE_TIMEOUT"] = previous
+        importlib.reload(config)
+
+
+def test_bedrock_worst_case_fits_the_synchronous_budget_too():
+    """Nova is reachable from /iterate and /outpaint, which have 25s, not 70s."""
+    import config
+    import utils.clients as c
+
+    budget = config.sync_dispatch_budget_seconds
+    assert c.bedrock_worst_case_seconds(budget) <= budget
+
+
+def test_firefly_worst_case_fits_inside_the_budget():
+    """outpaint_firefly chains token -> upload -> expand -> download.
+
+    Three of those four calls used a hardcoded _API_TIMEOUT = 60, so the real
+    worst case was ~190s against a 70s budget.
+    """
+    import utils.clients as c
+
+    for budget in (30.0, 70.0, 200.0):
+        assert c.firefly_worst_case_seconds(budget) <= budget, budget
+
+
+def test_firefly_call_timeout_stays_positive_on_an_absurdly_small_budget():
+    """A misconfigured budget should not produce a zero or negative timeout.
+
+    requests treats timeout=0 as an immediate failure and a negative timeout
+    raises, so either would turn a tuning mistake into a total provider outage.
+    """
+    import utils.clients as c
+
+    assert c.firefly_call_timeout(1.0) >= 1
+
+
+def test_openai_worst_case_fits_inside_the_budget():
+    """The SDK call and the image download are sequential, so both count."""
+    import utils.clients as c
+
+    for budget in (30.0, 70.0, 200.0):
+        assert c.openai_worst_case_seconds(budget) <= budget, budget
+
+
+def test_gemini_worst_case_fits_inside_the_budget():
+    import utils.clients as c
+
+    for budget in (30.0, 70.0, 200.0):
+        assert c.gemini_worst_case_seconds(budget) <= budget, budget
+
+
+def test_every_configured_provider_has_a_bound_and_respects_it():
+    """The invariant config.py states, checked for all four providers at once.
+
+    Table-driven over config.MODELS rather than a hardcoded list: a fifth
+    provider added without an entry in PROVIDER_WORST_CASE fails here, which
+    is the only mechanism that stops the next unbounded provider shipping.
+    """
+    import config
+    import utils.clients as c
+
+    providers = {m.provider for m in config.MODELS.values()}
+    missing = providers - set(c.PROVIDER_WORST_CASE)
+    assert not missing, f"providers with no worst-case bound: {sorted(missing)}"
+
+    for provider in sorted(providers):
+        worst_case = c.PROVIDER_WORST_CASE[provider]
+        for budget in (
+            config.sync_dispatch_budget_seconds,
+            config.api_client_timeout,
+            config.generate_dispatch_budget_seconds,
+        ):
+            assert worst_case(budget) <= budget, (provider, budget, worst_case(budget))
+
+
+def _png_bytes(width: int = 1024, height: int = 1024) -> bytes:
+    """A real PNG, because outpaint_firefly reads the source dimensions."""
+    import io
+
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (width, height), (10, 20, 30)).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _firefly_config(budget=None):
+    cfg = {
+        "provider": "adobe_firefly",
+        "id": "firefly-image-5",
+        "api_key": "",
+        "client_id": "cid",
+        "client_secret": "secret",
+    }
+    if budget is not None:
+        cfg["timeout"] = budget
+    return cfg
+
+
+def _mock_the_firefly_chain(m, generate_url):
+    import models.providers.firefly as firefly_mod
+
+    m.post(firefly_mod._TOKEN_URL, json={"access_token": "t"})
+    m.post(firefly_mod._STORAGE_URL, json={"images": [{"id": "upload-1"}]})
+    m.post(generate_url, json={"outputs": [{"image": {"url": "https://img.example/x.png"}}]})
+    m.get("https://img.example/x.png", content=b"\x89PNG-not-really")
+
+
+def _reset_firefly_token():
+    import models.providers.firefly as firefly_mod
+
+    firefly_mod._cached_token = None
+    firefly_mod._cached_token_expiry = 0.0
+
+
+def test_iterate_firefly_bounds_its_whole_chain_by_the_budget_it_was_given():
+    """Four sequential HTTP calls, and their sum has to fit the budget.
+
+    Asserting on the timeout argument is asserting on the contract here: a
+    blocking call that cannot be cancelled costs exactly its timeout in the
+    worst case, so the timeout IS the bound.
+    """
+    import base64
+
+    import requests_mock
+
+    import config
+    import models.providers.firefly as firefly_mod
+    import utils.clients as c
+
+    _reset_firefly_token()
+    budget = config.sync_dispatch_budget_seconds
+    expected = c.firefly_call_timeout(budget)
+
+    with requests_mock.Mocker() as m:
+        _mock_the_firefly_chain(m, firefly_mod._GENERATE_URL)
+        result = firefly_mod.iterate_firefly(
+            _firefly_config(budget),
+            base64.b64encode(b"source").decode(),
+            "a cat",
+            [],
+        )
+
+    assert result["status"] == "success", result
+    timeouts = [r.timeout for r in m.request_history]
+    assert len(timeouts) == c.FIREFLY_SEQUENTIAL_CALLS
+    assert timeouts[0] == c.FIREFLY_TOKEN_TIMEOUT
+    assert timeouts[1:] == [expected] * (c.FIREFLY_SEQUENTIAL_CALLS - 1)
+    assert sum(timeouts) <= budget
+
+
+def test_outpaint_firefly_bounds_its_whole_chain_by_the_budget_it_was_given():
+    """The path the finding is actually about: ~190s against a 70s budget."""
+    import requests_mock
+
+    import config
+    import models.providers.firefly as firefly_mod
+    import utils.clients as c
+
+    _reset_firefly_token()
+    budget = config.sync_dispatch_budget_seconds
+    expected = c.firefly_call_timeout(budget)
+
+    with requests_mock.Mocker() as m:
+        _mock_the_firefly_chain(m, firefly_mod._EXPAND_URL)
+        result = firefly_mod.outpaint_firefly(
+            _firefly_config(budget),
+            _png_bytes(),
+            "16:9",
+            "a cat",
+        )
+
+    assert result["status"] == "success", result
+    timeouts = [r.timeout for r in m.request_history]
+    assert len(timeouts) == c.FIREFLY_SEQUENTIAL_CALLS
+    assert sum(timeouts) <= budget
+
+
+def test_firefly_falls_back_to_the_generate_budget_when_none_is_supplied():
+    """/generate runs in the worker with 900s and no gateway; it keeps the
+    larger budget rather than inheriting the synchronous one."""
+    import requests_mock
+
+    import config
+    import models.providers.firefly as firefly_mod
+    import utils.clients as c
+
+    _reset_firefly_token()
+    expected = c.firefly_call_timeout(config.api_client_timeout)
+
+    with requests_mock.Mocker() as m:
+        _mock_the_firefly_chain(m, firefly_mod._GENERATE_URL)
+        result = firefly_mod.handle_firefly(_firefly_config(), "a cat", {})
+
+    assert result["status"] == "success", result
+    timeouts = [r.timeout for r in m.request_history]
+    # handle_firefly is token -> generate -> download: three calls, not four.
+    assert timeouts[1:] == [expected, expected]
+    assert expected > c.firefly_call_timeout(config.sync_dispatch_budget_seconds)
+
+
+def _stub_model_config():
+    import config
+
+    return config.ModelConfig(
+        name="gemini",
+        provider="google_gemini",
+        enabled=True,
+        api_key="k",
+        model_id="gemini-3.1-flash-image-preview",
+        display_name="Gemini",
+    )
+
+
+def _recorder(seen):
+    def _handler(model_config, *_args, **_kwargs):
+        seen.append(model_config)
+        return {"status": "success", "image": "aGk=", "model": "m", "provider": "google_gemini"}
+
+    return _handler
+
+
+def test_refinement_hands_the_provider_the_synchronous_budget():
+    """/iterate is answered inside the HTTP request, so 60s cannot be its bound."""
+    import json
+    from unittest.mock import MagicMock, patch
+
+    import config
+    from users.quota import QuotaResult
+
+    seen: list[dict] = []
+    session = {
+        "sessionId": "s1",
+        "visibility": "public",
+        "models": {
+            "gemini": {
+                "iterationCount": 1,
+                "iterations": [{"index": 0, "status": "completed", "imageKey": "k.png"}],
+            }
+        },
+    }
+
+    with (
+        patch("lambda_function._spend_ceiling_exceeded", return_value=(False, "")),
+        patch("lambda_function.enforce_quota") as mock_quota,
+        patch("lambda_function.content_filter") as mock_cf,
+        patch("lambda_function.get_model", return_value=_stub_model_config()),
+        patch("lambda_function._model_runtime_disabled", return_value=False),
+        patch("lambda_function._model_counter_service") as mock_counter,
+        patch("lambda_function.session_manager") as mock_sm,
+        patch("lambda_function.image_storage") as mock_storage,
+        patch("lambda_function.context_manager"),
+        patch("lambda_function.get_iterate_handler", return_value=_recorder(seen)),
+        patch("lambda_function._handle_successful_result", return_value={
+            "image_key": "k", "image_url": "u"
+        }),
+        patch("lambda_function._cost_meter"),
+        patch("lambda_function.emit_request_metric"),
+        patch("lambda_function._user_repo"),
+    ):
+        mock_quota.return_value = QuotaResult(allowed=True, reason=None, reset_at=0)
+        mock_cf.check_prompt.return_value = False
+        mock_counter.consume_model_slot.return_value = True
+        mock_sm.get_session.return_value = session
+        mock_sm.add_iteration.return_value = 1
+        mock_storage.get_image_bytes.return_value = b"png-bytes"
+
+        from lambda_function import handle_iterate
+
+        resp = handle_iterate(
+            {
+                "body": json.dumps(
+                    {"sessionId": "s1", "model": "gemini", "prompt": "bluer"}
+                ),
+                "requestContext": {"http": {"sourceIp": "127.0.0.1"}},
+                "headers": {},
+            },
+            "corr-sync",
+        )
+
+    assert resp["statusCode"] == 200, resp
+    assert seen, "the provider handler was never reached"
+    assert seen[0]["timeout"] == config.sync_dispatch_budget_seconds
+
+
+def test_generation_dispatch_keeps_the_larger_asynchronous_budget():
+    """After Phase 3 the dispatch runs in a worker with 900s and no gateway.
+
+    Handing it the 25s synchronous budget would make every model fail for a
+    ceiling that does not apply to it.
+    """
+    from unittest.mock import MagicMock, patch
+
+    seen: list[dict] = []
+    model = _stub_model_config()
+
+    with (
+        patch("lambda_function.get_enabled_models", return_value=[model]),
+        patch("lambda_function.prompt_enhancer") as mock_enh,
+        patch("lambda_function.content_filter") as mock_cf,
+        patch("lambda_function.session_manager") as mock_sm,
+        patch("lambda_function.get_handler", return_value=_recorder(seen)),
+        patch("lambda_function._handle_successful_result", return_value={
+            "image_key": "k", "image_url": "u"
+        }),
+        patch("lambda_function._cost_meter"),
+        patch("ops.metrics._get_cw_client"),
+        patch("lambda_function._user_repo", MagicMock()),
+    ):
+        mock_enh.adapt_per_model.return_value = {"gemini": "a cat"}
+        mock_cf.check_prompt.return_value = False
+        mock_sm.add_iteration.return_value = 0
+
+        from lambda_function import run_generation
+
+        run_generation(
+            {
+                "sessionId": "s1",
+                "prompt": "a cat",
+                "modelNames": ["gemini"],
+                "skipped": {},
+                "visibility": "public",
+                "tier": "anon",
+                "userId": "anon",
+                "correlationId": "corr-async",
+            }
+        )
+
+    assert seen, "the provider handler was never reached"
+    assert "timeout" not in seen[0], (
+        "the generate dispatch must not inherit the synchronous budget"
+    )

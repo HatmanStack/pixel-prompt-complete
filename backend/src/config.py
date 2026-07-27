@@ -501,6 +501,15 @@ if auth_enabled and cors_allowed_origin == "*":
     )
 
 # Operational Timeouts (seconds) - configurable via environment
+
+# API Gateway HTTP APIs cap the integration timeout at 30 seconds and the
+# quota is not adjustable. One second of margin is kept so a request that
+# is going to be abandoned is abandoned by us, with a logged reason,
+# rather than by the gateway with a 504 and no record.
+#
+# Declared first because two budgets below are derived from it.
+gateway_integration_timeout_seconds = 29
+
 api_client_timeout = _safe_float("API_CLIENT_TIMEOUT", 60.0)
 
 # Every provider must bound its own call below this, because the dispatch
@@ -514,15 +523,22 @@ api_client_timeout = _safe_float("API_CLIENT_TIMEOUT", 60.0)
 # function's 900s timeout and no gateway in front of it. Synchronous mode has
 # no such headroom -- see sync_mode_fits_gateway below.
 generate_dispatch_budget_seconds = api_client_timeout + 10
-image_download_timeout = _safe_int("IMAGE_DOWNLOAD_TIMEOUT", 30)
-enhance_timeout = _safe_float("ENHANCE_TIMEOUT", 30.0)
-generate_thread_workers = _safe_int("GENERATE_THREAD_WORKERS", 4)
 
-# API Gateway HTTP APIs cap the integration timeout at 30 seconds and the
-# quota is not adjustable. One second of margin is kept so a request that
-# is going to be abandoned is abandoned by us, with a logged reason,
-# rather than by the gateway with a 504 and no record.
-gateway_integration_timeout_seconds = 29
+# /iterate, /outpaint and /enhance are answered inside the HTTP request, so
+# their whole call chain has to fit under the gateway ceiling rather than the
+# dispatch budget above -- there is no worker invocation behind them. Four
+# seconds are reserved for validation, quota, the session read/write and
+# response assembly.
+sync_dispatch_budget_seconds = float(gateway_integration_timeout_seconds - 4)
+
+image_download_timeout = _safe_int("IMAGE_DOWNLOAD_TIMEOUT", 30)
+
+# Clamped rather than merely defaulted. A 30s enhance timeout inside a 29s
+# gateway ceiling cannot succeed at its limit: the gateway returns 504 first,
+# the caller is told the request failed, and the LLM call is billed anyway.
+# ADR-A12 records why /enhance is not gated in other ways.
+enhance_timeout = min(_safe_float("ENHANCE_TIMEOUT", 30.0), sync_dispatch_budget_seconds)
+generate_thread_workers = _safe_int("GENERATE_THREAD_WORKERS", 4)
 
 # When true (the default), POST /generate answers the caller as soon as the
 # session exists and hands the provider dispatch to an asynchronous

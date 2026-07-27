@@ -1542,6 +1542,16 @@ def _handle_refinement(
             return response(429, error_responses.model_cost_ceiling())
 
         config_dict = get_model_config_dict(model_config)
+        # The budget this provider call has to fit inside, set on the
+        # refinement path only. /iterate and /outpaint are answered inside the
+        # HTTP request, so their whole chain sits under the 29s gateway
+        # ceiling. /generate deliberately has no such key: after Phase 3 its
+        # dispatch runs in a worker invocation with the function's 900s
+        # timeout and no gateway in front of it, so it keeps
+        # api_client_timeout. That asymmetry is the non-obvious part -- the
+        # same provider handler is bounded differently depending on which
+        # invocation it is running in.
+        config_dict["timeout"] = config.sync_dispatch_budget_seconds
         handler = get_handler_fn(model_config.provider)
         handler_args = build_handler_args_fn(
             config_dict,
