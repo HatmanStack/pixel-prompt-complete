@@ -144,8 +144,16 @@ def _collocation_pattern(phrase: str) -> re.Pattern[str]:
     to it: that one also compiles the two *blocking* keyword lists, and
     widening those would change what the filter rejects, which is not what
     this fixes.
+
+    ``s?`` and not ``(?:e?s)?``. Every entry above pluralises with a bare -s;
+    the only one ending in a letter that would take -es is "gore tex", and
+    "gore texes" is not a word -- it is an uncountable brand name. Allowing the
+    ``e`` bought nothing and cost precision: it also matched "orangees" and
+    "celles", so a malformed near-miss of an entry was silently subtracted
+    from the residue. An allowlist should match the phrases it lists, not
+    approximations of them.
     """
-    return re.compile(r"\b" + re.escape(_normalize_words(phrase)) + r"(?:e?s)?\b")
+    return re.compile(r"\b" + re.escape(_normalize_words(phrase)) + r"s?\b")
 
 
 class ContentFilter:

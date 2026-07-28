@@ -4,7 +4,7 @@ Unit tests for content filtering utilities
 
 import pytest
 
-from utils.content_filter import ContentFilter
+from utils.content_filter import BENIGN_COLLOCATIONS, ContentFilter
 
 
 class TestContentFilter:
@@ -359,3 +359,30 @@ def test_plural_tolerance_does_not_open_the_filter(prompt):
     removes text rather than short-circuiting.
     """
     assert ContentFilter().check_prompt(prompt) is True, prompt
+
+
+@pytest.mark.parametrize("prompt", ["blood orangees", "blood celles", "blood vessells"])
+def test_the_allowlist_does_not_match_malformed_near_misses(prompt):
+    """An allowlist should match what it lists, not approximations of it.
+
+    The suffix was briefly `(?:e?s)?`, which also matched "orangees" and
+    "celles" -- so a misspelling of an entry was subtracted from the residue
+    just as the entry itself would be. No entry needs the -es form: every one
+    pluralises with a bare -s, and the only candidate ("gore tex") is an
+    uncountable brand name.
+    """
+    assert ContentFilter().check_prompt(prompt) is True, prompt
+
+
+def test_every_listed_collocation_passes_in_both_forms():
+    """Guards the whole list at once, so a new entry cannot quietly regress.
+
+    Catches both directions of the plural bug: an entry written in the plural
+    leaves its own singular blocked, and before _collocation_pattern existed
+    every entry left its plural blocked.
+    """
+    f = ContentFilter()
+    failures = [
+        p for p in BENIGN_COLLOCATIONS if f.check_prompt(p) or f.check_prompt(f"{p}s")
+    ]
+    assert not failures, f"listed collocations rejected: {failures}"
