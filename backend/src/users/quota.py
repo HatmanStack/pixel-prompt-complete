@@ -56,7 +56,29 @@ def enforce_quota(
         # enforce_quota is reached, so only "generate" arrives here. Do not
         # re-add a refine branch: it would be unreachable.
         #
-        # Per-IP first: it is the only guest bucket a caller cannot reset.
+        # Identity BEFORE metering. Ordered first because the per-IP bucket is
+        # the one a caller cannot reset -- dropping the cookie mints a fresh
+        # token, but the IP hash persists -- so consuming from it and then
+        # refusing the request spends an allowance the caller has no way to
+        # recover, for a request that was never going to be served.
+        if ctx.guest_token_id is None:
+            # Was a bare `assert`. Under `python -O` the check vanishes and an
+            # unidentifiable guest is metered against nothing, which is how a
+            # guest bucket becomes unlimited; without -O it surfaced as an
+            # AssertionError with no diagnostic, inside a fail-open wrapper, in
+            # a function whose every other failure returns a QuotaResult.
+            #
+            # Denying rather than failing open, unlike the store-error paths:
+            # an unreachable store is a transient fact about infrastructure,
+            # whereas reaching here means resolve_tier produced a guest context
+            # with no token id, which is a bug in this process.
+            StructuredLogger.error(
+                "Guest context has no token id; denying rather than metering "
+                "an unidentifiable caller against nothing"
+            )
+            return QuotaResult(allowed=False, reason="guest_identity_missing", reset_at=0)
+
+        # Per-IP next: it is the only guest bucket a caller cannot reset.
         # Dropping the cookie mints a new token with a fresh per-token
         # counter, so checking that alone bounds nothing.
         if ctx.ip_hash:
@@ -77,22 +99,6 @@ def enforce_quota(
                 return QuotaResult(allowed=False, reason="guest_ip", reset_at=reset, usage=usage)
 
         # Per-guest next so denied guests don't consume the global pool.
-        if ctx.guest_token_id is None:
-            # Was a bare `assert`. Under `python -O` the check vanishes and an
-            # unidentifiable guest is metered against nothing, which is how a
-            # guest bucket becomes unlimited; without -O it surfaced as an
-            # AssertionError with no diagnostic, inside a fail-open wrapper, in
-            # a function whose every other failure returns a QuotaResult.
-            #
-            # Denying rather than failing open, unlike the store-error paths:
-            # an unreachable store is a transient fact about infrastructure,
-            # whereas reaching here means resolve_tier produced a guest context
-            # with no token id, which is a bug in this process.
-            StructuredLogger.error(
-                "Guest context has no token id; denying rather than metering "
-                "an unidentifiable caller against nothing"
-            )
-            return QuotaResult(allowed=False, reason="guest_identity_missing", reset_at=0)
         ok, item = repo.increment_guest_generate(
             ctx.guest_token_id,
             config.guest_generate_limit,

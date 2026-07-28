@@ -56,7 +56,14 @@ def cors_headers() -> dict[str, str]:
         ),
         # Without this a browser cannot read Retry-After cross-origin, which
         # would make emitting it pointless for the only client that has one.
-        "Access-Control-Expose-Headers": "Retry-After, X-Correlation-ID",
+        # Only headers a response actually carries. Retry-After is set on
+        # the 429 paths and tested. X-Correlation-ID was listed here
+        # too, but nothing sets it on a response: the client mints its
+        # own and sends it (client.ts), and the server only ever reads
+        # it off the request. Advertising a header that is never
+        # present tells a browser to expose nothing and tells the next
+        # reader the wrong thing about the contract.
+        "Access-Control-Expose-Headers": "Retry-After",
     }
     if config.cors_allowed_origin != _WILDCARD_ORIGIN:
         headers[_CREDENTIALS_HEADER] = "true"

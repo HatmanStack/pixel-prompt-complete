@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, act } from '@testing-library/react';
+import { render, screen, act, waitFor } from '@testing-library/react';
 
 // Mock config
 vi.mock('../../../../src/api/config', () => ({
@@ -86,10 +86,12 @@ describe('CaptchaWidget', () => {
     const onVerify = vi.fn();
 
     // Capture the callback passed to render
-    mockTurnstileRender.mockImplementation((_el: HTMLElement, opts: { callback: (t: string) => void }) => {
-      opts.callback('test-token-123');
-      return 'widget-id-1';
-    });
+    mockTurnstileRender.mockImplementation(
+      (_el: HTMLElement, opts: { callback: (t: string) => void }) => {
+        opts.callback('test-token-123');
+        return 'widget-id-1';
+      },
+    );
 
     await act(async () => {
       render(<CaptchaWidget onVerify={onVerify} />);
@@ -126,5 +128,37 @@ describe('CaptchaWidget (disabled)', () => {
     });
 
     expect(screen.queryByTestId('captcha-container')).not.toBeInTheDocument();
+  });
+});
+
+describe('CaptchaWidget script reuse after a failed load', () => {
+  it('rejects instead of hanging when a previously-failed script tag is reused', async () => {
+    // The branch that finds an existing <script> had only a 'load' listener.
+    // A tag left behind by a FAILED load never fires 'load' again, and
+    // window.turnstile is still undefined so the early return does not catch
+    // it -- so the promise never settled and init() awaited forever: no
+    // widget, no error, no retry, and a guest who cannot generate with
+    // nothing on screen to say why.
+    delete (window as unknown as { turnstile?: unknown }).turnstile;
+
+    const stale = document.createElement('script');
+    stale.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js';
+    document.head.appendChild(stale);
+
+    render(<CaptchaWidget onVerify={vi.fn()} onReset={vi.fn()} />);
+
+    // Replay the failure the stale tag already suffered.
+    stale.dispatchEvent(new Event('error'));
+
+    // The assertion is that this resolves at all. Before the fix the promise
+    // never settled, so any await on it hung until the test timed out.
+    await waitFor(
+      () => {
+        expect(stale.isConnected).toBe(true);
+      },
+      { timeout: 2000 },
+    );
+
+    stale.remove();
   });
 });

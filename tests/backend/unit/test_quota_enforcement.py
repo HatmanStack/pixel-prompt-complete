@@ -300,3 +300,40 @@ def test_the_quota_module_has_no_bare_asserts():
 
     source = inspect.getsource(quota_module)
     assert "assert " not in source
+
+
+def test_a_guest_with_no_token_id_burns_no_per_ip_slot():
+    """The denial must come BEFORE the per-IP bucket is charged.
+
+    The per-IP bucket is the only guest counter a caller cannot reset:
+    dropping the cookie mints a fresh token with a fresh per-token count, but
+    the IP hash persists. Charging it and then refusing the request spends an
+    allowance the caller has no way to recover, for a request that was never
+    going to be served -- and the branch exists precisely for a bug upstream
+    in resolve_tier, so the caller did nothing to earn it.
+    """
+    from unittest.mock import MagicMock
+
+    from users.quota import enforce_quota
+    from users.tier import TierContext
+
+    repo = MagicMock()
+    ctx = TierContext(
+        tier="guest",
+        user_id="guest#unknown",
+        email=None,
+        is_authenticated=False,
+        guest_token_id=None,
+        issue_guest_cookie=False,
+        ip_hash="deadbeef",
+    )
+
+    result = enforce_quota(ctx, "generate", repo, now=1000)
+
+    assert result.allowed is False
+    assert result.reason == "guest_identity_missing"
+    assert repo.increment_guest_ip.call_count == 0, (
+        "a slot was consumed from the one bucket the caller cannot reset, "
+        "for a request that was refused anyway"
+    )
+    assert repo.increment_guest_generate.call_count == 0

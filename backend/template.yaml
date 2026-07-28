@@ -1063,9 +1063,14 @@ Resources:
         # Access-Control-Expose-Headers the Lambda sets does not survive on its
         # own. Retry-After is not CORS-safelisted: without this a browser reads
         # null for it and the backoff hint is unreadable cross-origin.
+        # Only headers a response actually carries. X-Correlation-ID was
+        # listed here and on the Lambda's own CORS block, but nothing sets it
+        # on a response -- the client mints its own and sends it, and the
+        # server only reads it off the request. The gateway's CORS config
+        # replaces the integration's headers, so the two must agree or the
+        # deployed behaviour silently differs from what the unit tests assert.
         ExposeHeaders:
           - Retry-After
-          - X-Correlation-ID
         MaxAge: 86400
         AllowCredentials: true
       DefaultRouteSettings:

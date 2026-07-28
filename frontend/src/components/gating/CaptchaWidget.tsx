@@ -37,7 +37,16 @@ function loadTurnstileScript(): Promise<void> {
     }
     const existing = document.querySelector(`script[src="${TURNSTILE_SCRIPT_URL}"]`);
     if (existing) {
+      // Both handlers, matching the fresh-script branch below. With only
+      // 'load', a script tag left behind by a PREVIOUS failed load never fires
+      // again -- window.turnstile is still undefined, so the early return
+      // above does not catch it -- and this promise never settles. init()
+      // then awaits forever: no widget, no error, no retry, and a guest who
+      // cannot generate with nothing on screen to say why.
       existing.addEventListener('load', () => resolve());
+      existing.addEventListener('error', () =>
+        reject(new Error('Failed to load Turnstile script')),
+      );
       return;
     }
     const script = document.createElement('script');

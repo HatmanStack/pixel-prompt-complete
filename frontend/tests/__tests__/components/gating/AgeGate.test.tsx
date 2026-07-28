@@ -83,6 +83,7 @@ vi.mock('../../../../src/components/gating/CaptchaWidget', () => ({
 
 import { GenerationPanel } from '../../../../src/components/generation/GenerationPanel';
 import { useAppStore } from '../../../../src/stores/useAppStore';
+import { AgeGateModal } from '../../../../src/components/gating/AgeGateModal';
 
 function ageError() {
   return Object.assign(new Error('AGE_VERIFICATION_REQUIRED'), {
@@ -178,5 +179,103 @@ describe('age gate', () => {
 
     await waitFor(() => expect(mockShowError).toHaveBeenCalled());
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+});
+
+describe('AgeGateModal focus management', () => {
+  it('moves focus into the dialog when it opens', async () => {
+    render(<AgeGateModal open onConfirm={vi.fn()} onDecline={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(document.activeElement).not.toBe(document.body);
+    });
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.contains(document.activeElement)).toBe(true);
+  });
+
+  it('focuses the decline option, not the affirmative one', async () => {
+    // aria-modal is a promise that nothing outside is reachable; focus has to
+    // start inside for that to be true. It starts on "under 18" deliberately:
+    // focusing the affirmative answer would put it one Enter away from a user
+    // who has not read the question, which is the nudge this dialog avoids.
+    render(<AgeGateModal open onConfirm={vi.fn()} onDecline={vi.fn()} />);
+
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: /under 18/i })),
+    );
+  });
+
+  it('restores focus to the trigger when it closes', async () => {
+    const trigger = document.createElement('button');
+    document.body.appendChild(trigger);
+    trigger.focus();
+
+    const { rerender } = render(<AgeGateModal open onConfirm={vi.fn()} onDecline={vi.fn()} />);
+    await waitFor(() => expect(document.activeElement).not.toBe(trigger));
+
+    rerender(<AgeGateModal open={false} onConfirm={vi.fn()} onDecline={vi.fn()} />);
+
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+    trigger.remove();
+  });
+});
+
+describe('AgeGateModal focus trap cycling', () => {
+  it('wraps Tab from the last control back to the first', async () => {
+    const user = userEvent.setup();
+    render(<AgeGateModal open onConfirm={vi.fn()} onDecline={vi.fn()} />);
+
+    const affirm = screen.getByRole('button', { name: /18 or older/i });
+    const decline = screen.getByRole('button', { name: /under 18/i });
+
+    decline.focus();
+    await user.tab();
+
+    expect(document.activeElement).toBe(affirm);
+  });
+
+  it('wraps Shift+Tab from the first control round to the last', async () => {
+    const user = userEvent.setup();
+    render(<AgeGateModal open onConfirm={vi.fn()} onDecline={vi.fn()} />);
+
+    const affirm = screen.getByRole('button', { name: /18 or older/i });
+    const decline = screen.getByRole('button', { name: /under 18/i });
+
+    affirm.focus();
+    await user.tab({ shift: true });
+
+    expect(document.activeElement).toBe(decline);
+  });
+
+  it('leaves keys other than Tab alone', async () => {
+    const onConfirm = vi.fn();
+    const onDecline = vi.fn();
+    const user = userEvent.setup();
+    render(<AgeGateModal open onConfirm={onConfirm} onDecline={onDecline} />);
+
+    const decline = screen.getByRole('button', { name: /under 18/i });
+    decline.focus();
+    // Escape in particular: this dialog deliberately has no neutral
+    // dismissal, because both answers are answers and treating a keypress as
+    // either would record one the user did not give.
+    await user.keyboard('{Escape}');
+
+    expect(onConfirm).not.toHaveBeenCalled();
+    expect(onDecline).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog')).toBeTruthy();
+  });
+
+  it('does not install the handler while closed', async () => {
+    const user = userEvent.setup();
+    render(<AgeGateModal open={false} onConfirm={vi.fn()} onDecline={vi.fn()} />);
+
+    const outside = document.createElement('button');
+    document.body.appendChild(outside);
+    outside.focus();
+    await user.tab();
+
+    // A closed gate must not trap anything: the effect returns early.
+    expect(screen.queryByRole('dialog')).toBeNull();
+    outside.remove();
   });
 });

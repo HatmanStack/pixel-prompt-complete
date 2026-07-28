@@ -592,6 +592,11 @@ def test_a_synchronous_failure_before_run_generation_still_refunds(wired):
         )
 
     assert resp["statusCode"] == 500
+    # Pin WHERE the failure landed, not just that one happened. Without this
+    # the test still passes if the handler starts failing earlier -- before
+    # create_session -- and it would no longer be exercising the
+    # after-validation, before-run_generation window it is named for.
+    assert mock_sm.create_session.called
     assert not mock_run.called
     assert mock_refund.called, "nothing downstream had refunded, so this path owed one"
 
