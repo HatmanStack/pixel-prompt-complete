@@ -70,7 +70,12 @@ export async function reportError(
     // metadata is caller-supplied. Context is the first thing to go, because
     // the level and the message are the report.
     let payload = JSON.stringify(body);
-    if (payload.length > MAX_LOG_BODY_BYTES) {
+    // Byte length, not `.length`. A JS string reports UTF-16 code units, so
+    // any non-ASCII content -- an accented prompt, an emoji, a CJK error
+    // message -- occupies more bytes on the wire than characters in memory,
+    // and a payload that measures under the cap here can still exceed it as
+    // transmitted. TextEncoder measures what actually gets sent.
+    if (new TextEncoder().encode(payload).length > MAX_LOG_BODY_BYTES) {
       delete body.metadata;
       payload = JSON.stringify(body);
     }

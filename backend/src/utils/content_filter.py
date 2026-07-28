@@ -96,6 +96,10 @@ CONTEXT_DEPENDENT_KEYWORDS = (
 # Single words containing a term need no entry either -- "bloodhound",
 # "lifeblood" and "asexual" have no word boundary around the term, so \b
 # never matches inside them.
+#
+# Write entries in the SINGULAR. _collocation_pattern appends an optional
+# plural, so "blood orange" covers "blood oranges" -- but the reverse does not
+# hold, and a plural entry leaves its own singular blocked.
 BENIGN_COLLOCATIONS = (
     "blood moon",
     "blood orange",
@@ -110,7 +114,7 @@ BENIGN_COLLOCATIONS = (
     "al gore",
     "hate mail",
     "violent storm",
-    "violent waves",
+    "violent wave",
     "violent wind",
     "sexual dimorphism",
     "sexual reproduction",
@@ -121,6 +125,27 @@ BENIGN_COLLOCATIONS = (
 
 def _word_pattern(phrase: str) -> re.Pattern[str]:
     return re.compile(r"\b" + re.escape(_normalize_words(phrase)) + r"\b")
+
+
+def _collocation_pattern(phrase: str) -> re.Pattern[str]:
+    """Allowlist pattern, tolerant of a plural on the final word.
+
+    ``_word_pattern``'s trailing ``\\b`` means "blood orange" does not match
+    "blood oranges": the ``s`` continues the word, so there is no boundary
+    there. The allowlist then never fires, "blood" survives into the residue,
+    and the filter rejects the exact phrase the entry exists to permit --
+    reproducing the false positive this list was written to fix.
+
+    Plural is the more natural phrasing for most of these ("blood oranges",
+    "blood vessels", "violent waves"), so matching only the singular misses
+    the common case rather than an edge case.
+
+    Deliberately a separate builder from ``_word_pattern`` rather than a change
+    to it: that one also compiles the two *blocking* keyword lists, and
+    widening those would change what the filter rejects, which is not what
+    this fixes.
+    """
+    return re.compile(r"\b" + re.escape(_normalize_words(phrase)) + r"(?:e?s)?\b")
 
 
 class ContentFilter:
@@ -139,7 +164,7 @@ class ContentFilter:
         """Initialize Content Filter with blocked keywords."""
         self._unambiguous_patterns = [_word_pattern(kw) for kw in UNAMBIGUOUS_KEYWORDS]
         self._context_patterns = [_word_pattern(kw) for kw in CONTEXT_DEPENDENT_KEYWORDS]
-        self._benign_patterns = [_word_pattern(p) for p in BENIGN_COLLOCATIONS]
+        self._benign_patterns = [_collocation_pattern(p) for p in BENIGN_COLLOCATIONS]
         # Pre-normalize keywords for evasion check. Both tiers participate:
         # spelling a word out letter by letter is deliberate, so the benign
         # reading no longer applies to it.

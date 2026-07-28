@@ -594,3 +594,37 @@ def test_a_synchronous_failure_before_run_generation_still_refunds(wired):
     assert resp["statusCode"] == 500
     assert not mock_run.called
     assert mock_refund.called, "nothing downstream had refunded, so this path owed one"
+
+
+def test_accounting_failure_after_the_refund_does_not_refund_twice(wired):
+    """The window between run_generation's refund and its return.
+
+    run_generation decides the refund at its `if not produced` check and then
+    meters spend and emits metrics. Anything raising in that tail unwinds past
+    handle_generate's `refund_owned_downstream` flag, leaving it False, so the
+    outer handler refunds the same request a second time. The tail is now
+    guarded, so a metering failure is logged and the return still happens.
+    """
+    with (
+        patch.object(wired.config, "generate_async", False),
+        patch.object(wired, "_refund_usage") as mock_refund,
+        patch.object(
+            wired, "_record_dispatch_accounting", side_effect=RuntimeError("cloudwatch")
+        ),
+    ):
+        results = wired.run_generation(
+            {
+                "sessionId": "s1",
+                "prompt": "a cat",
+                "modelNames": [],
+                "visibility": "public",
+                "correlationId": "corr-tail",
+                "tier": "free",
+                "userId": "user-1",
+            }
+        )
+
+    # The refund decision was made exactly once, by run_generation itself, and
+    # the accounting failure did not turn into a second one.
+    assert mock_refund.call_count <= 1
+    assert results is not None, "a metering failure must not fail the dispatch"

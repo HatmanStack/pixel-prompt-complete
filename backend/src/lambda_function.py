@@ -1166,6 +1166,49 @@ def run_generation(payload: dict[str, Any]) -> dict[str, Any]:
     if not produced:
         _refund_usage(tier_ctx, "generate", correlation_id)
 
+    # Everything from here is accounting and observability, and none of it may
+    # raise. Two reasons, and the second is the load-bearing one:
+    #
+    # 1. The images exist and the provider has billed for them. Failing the
+    #    request because a metric write hiccuped throws away work the caller
+    #    already paid for.
+    # 2. handle_generate decides whether to refund by checking whether this
+    #    function returned. The refund decision is made immediately above, so a
+    #    raise BELOW it unwinds past that flag and the outer handler refunds a
+    #    second time -- returning the charge twice for one request, or
+    #    refunding a caller who did receive images.
+    #
+    # Both failures are already logged inside their own modules; swallowing
+    # here loses nothing but the propagation.
+    try:
+        _record_dispatch_accounting(
+            results=results,
+            skipped_models=skipped_models,
+            models_to_dispatch=models_to_dispatch,
+            tier_ctx=tier_ctx,
+        )
+    except Exception as e:
+        StructuredLogger.error(
+            f"Accounting for a completed generation failed: {e}",
+            correlation_id=correlation_id,
+            sessionId=payload.get("sessionId"),
+            traceback=traceback.format_exc(),
+        )
+
+    return results
+
+
+def _record_dispatch_accounting(
+    results: dict[str, Any],
+    skipped_models: dict[str, Any],
+    models_to_dispatch: list[Any],
+    tier_ctx: TierContext | None,
+) -> None:
+    """Meter spend and emit request metrics for a finished dispatch.
+
+    Extracted so its failure modes sit behind one guard in run_generation
+    rather than on the path between the refund decision and the return.
+    """
     # Meter what this request cost in dollars. Every dispatched model is
     # metered, including ones that errored or timed out: the provider
     # performed the work and bills for it regardless of whether we managed
@@ -1211,8 +1254,6 @@ def run_generation(payload: dict[str, Any]) -> dict[str, Any]:
             if mname not in skipped_models
         ]
     )
-
-    return results
 
 
 def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> ApiResponse:
@@ -2416,7 +2457,12 @@ def handle_me(event: LambdaEvent, correlation_id: str | None = None) -> ApiRespo
     window_seconds = (
         config.paid_window_seconds if ctx.tier == "paid" else config.free_window_seconds
     )
-    item = _user_repo.touch_quota_window(ctx.user_id, window_seconds, int(time.time()))
+    item = _user_repo.touch_quota_window(
+        ctx.user_id,
+        window_seconds,
+        int(time.time()),
+        daily_window_seconds=config.paid_window_seconds,
+    )
     window_start = int(item.get("windowStart", 0) or 0)
 
     if ctx.tier == "paid":

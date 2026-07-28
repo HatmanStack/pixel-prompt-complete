@@ -307,3 +307,55 @@ def test_a_hateful_expression_was_already_safe():
     rather than repeated.
     """
     assert ContentFilter().check_prompt("a hateful expression") is False
+
+
+# ---------------------------------------------------------------------------
+# Plural collocations
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "blood orange",
+        "blood oranges",
+        "a still life with blood oranges",
+        "blood vessel",
+        "blood vessels",
+        "blood cells",
+        "violent wave",
+        "violent waves",
+        "offensive lines",
+        "blood moons",
+    ],
+)
+def test_benign_collocations_pass_in_singular_and_plural(prompt):
+    """The allowlist matched the singular only, so the plural was rejected.
+
+    "blood orange" passed and "blood oranges" did not -- the trailing \\b has no
+    boundary before the s, the entry never fired, a bare "blood" survived into
+    the residue, and the filter rejected the exact phrase the entry exists to
+    permit. Plural is the more natural phrasing for most of these, so the
+    common case was the broken one.
+    """
+    assert ContentFilter().check_prompt(prompt) is False, prompt
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "blood everywhere",
+        "covered in blood",
+        "gore",
+        "extremely violent",
+        "a blood moon and blood everywhere",
+    ],
+)
+def test_plural_tolerance_does_not_open_the_filter(prompt):
+    """Widening the allowlist must not widen what gets through it.
+
+    The last case is the one that matters: an allowlisted collocation next to a
+    bare use of the same keyword is still blocked, because the allowlist
+    removes text rather than short-circuiting.
+    """
+    assert ContentFilter().check_prompt(prompt) is True, prompt

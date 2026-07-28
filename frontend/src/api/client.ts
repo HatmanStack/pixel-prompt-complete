@@ -37,7 +37,13 @@ interface ApiErrorWithMeta extends Error {
   status?: number;
   code?: string;
   correlationId?: string;
-  /** Seconds parsed off the response's `Retry-After` header, when it had one. */
+  /**
+   * Milliseconds to wait, parsed off the response's `Retry-After` header when
+   * it had one. The header carries seconds; `parseRetryAfter` converts, so
+   * this can be handed straight to `sleep`. Documented in the unit it is
+   * stored in, not the unit it arrived in -- reading it as seconds and
+   * passing it to a timer would wait a thousand times too long.
+   */
   retryAfter?: number;
 }
 

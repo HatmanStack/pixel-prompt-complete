@@ -761,11 +761,14 @@ def _drive_gemini(entry, cfg):
 
     source = base64.b64encode(b"source").decode()
     # types is patched for the same reason test_iterate_handlers.py patches
-    # it: iterate_gemini and outpaint_gemini call types.Part.from_text()
-    # POSITIONALLY, and the installed google-genai signature is
-    # `from_text(*, text)`. That is a real latent bug, it predates this phase
-    # (identical at 52f2583) and it is out of scope here -- flagged in the
-    # phase report. It is unrelated to the timeout this test is about.
+    # it: constructing real google-genai Part objects is not what this test is
+    # about, and stubbing them keeps it to the timeout.
+    #
+    # An earlier version of this comment described a positional
+    # `types.Part.from_text()` call as a live latent bug. It was, and it was
+    # fixed in be82b6d -- gemini.py now passes `text=` by keyword at both call
+    # sites. Left as a note because a comment describing a defect that no
+    # longer exists sends the next reader hunting for it.
     with (
         patch.object(gemini_mod, "_get_genai_client") as factory,
         patch.object(gemini_mod, "types"),

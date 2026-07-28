@@ -118,7 +118,13 @@ class UserRepository:
             if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
                 raise
 
-    def touch_quota_window(self, user_id: str, window_seconds: int, now: int) -> dict:
+    def touch_quota_window(
+        self,
+        user_id: str,
+        window_seconds: int,
+        now: int,
+        daily_window_seconds: int = 86400,
+    ) -> dict:
         """Ensure the user exists and reset counters if the window expired."""
         self.get_or_create_user(user_id, now=now)
         self._reset_if_stale(
@@ -132,11 +138,18 @@ class UserRepository:
         # this one window — refinement and generation — and both must be
         # zeroed together, or GET /me reports a count the quota layer has
         # already forgotten.
+        # Parameterised rather than a literal 86400. The paid tier's window is
+        # operator-tunable via PAID_WINDOW_SECONDS, and `enforce_quota` reads
+        # that value -- so a hardcoded day here reset the counters on a
+        # different schedule from the one the quota check enforces. GET /me
+        # then reported a count the quota layer had already forgotten, or
+        # refused a caller whose window this method still considered open.
+        # Defaulted so callers that genuinely mean "a day" need not thread it.
         self._reset_if_stale(
             user_id,
             "dailyResetAt",
             ["dailyCount", "dailyGenerateCount"],
-            86400,
+            daily_window_seconds,
             now,
         )
         return self.get_user(user_id) or {}
