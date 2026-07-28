@@ -37,10 +37,43 @@ interface ApiErrorWithMeta extends Error {
   status?: number;
   code?: string;
   correlationId?: string;
+  /**
+   * Milliseconds to wait, parsed off the response's `Retry-After` header when
+   * it had one. The header carries seconds; `parseRetryAfter` converts, so
+   * this can be handed straight to `sleep`. Documented in the unit it is
+   * stored in, not the unit it arrived in -- reading it as seconds and
+   * passing it to a timer would wait a thousand times too long.
+   */
+  retryAfter?: number;
 }
 
-// HTTP status codes that are safe to retry
-const RETRYABLE_STATUS_CODES = [429, 502, 503, 504];
+// HTTP status codes that are safe to retry.
+//
+// 429 is deliberately absent. A rolling-window quota cannot succeed a second
+// later, and every retry re-enters enforce_quota on the backend -- DynamoDB
+// writes on a request already known to be denied, inflating the quota-rejection
+// alarm with traffic the client generated after being told no.
+const RETRYABLE_STATUS_CODES = [502, 503, 504];
+
+// Only these may be retried. Every other method may have changed server state
+// before the failure reached us: POST /generate, /iterate and /outpaint are
+// credit-charged and provider-billed, and a 504 means the gateway gave up
+// while the Lambda kept going.
+const IDEMPOTENT_METHODS = ['GET', 'HEAD'];
+
+/**
+ * Parse a `Retry-After` header into milliseconds.
+ *
+ * The backend emits delay-seconds. The HTTP-date form is legal but unused
+ * here, so anything non-numeric is ignored in favour of the exponential
+ * backoff rather than guessed at.
+ */
+function parseRetryAfter(header: string | null): number | undefined {
+  if (!header) return undefined;
+  const seconds = Number(header);
+  if (!Number.isFinite(seconds) || seconds <= 0) return undefined;
+  return seconds * 1000;
+}
 
 // In-flight redirect promise to prevent duplicate PKCE/state creation on concurrent 401s
 let redirectPromise: Promise<void> | null = null;
@@ -66,6 +99,9 @@ async function apiFetch<T>(
 
   // Generate correlation ID for request tracing (or use provided one)
   const correlationId = options.correlationId || generateCorrelationId();
+
+  // `fetch` defaults to GET when no method is given.
+  const method = (options.method ?? 'GET').toUpperCase();
 
   try {
     // Attach Authorization header when signed in
@@ -102,6 +138,9 @@ async function apiFetch<T>(
       // field it never emits. Without this fallback, every caller matching on
       // a specific failure has to string-match the human-readable message.
       error.code = errorData.code ?? errorData.error;
+      // Read off the response here: the retry decision is made in the catch
+      // block, where the Response object is out of scope.
+      error.retryAfter = parseRetryAfter(response.headers.get('Retry-After'));
 
       // Auth/billing response interceptors
       if (response.status === 401) {
@@ -144,24 +183,29 @@ async function apiFetch<T>(
       throw timeoutError;
     }
 
-    // Determine if we should retry
+    // Determine if we should retry. A non-idempotent request is never
+    // retried, whatever it failed with -- including a network error, which is
+    // exactly the case where the server may already have done the work.
+    const isIdempotent = IDEMPOTENT_METHODS.includes(method);
     const isRetryableStatus = apiError.status && RETRYABLE_STATUS_CODES.includes(apiError.status);
     const isNetworkError =
       !apiError.status &&
       (apiError.name === 'TypeError' || Boolean(apiError.message?.includes('fetch')));
     const shouldRetry =
-      retryCount < RETRY_CONFIG.maxRetries && (isRetryableStatus || isNetworkError);
+      isIdempotent && retryCount < RETRY_CONFIG.maxRetries && (isRetryableStatus || isNetworkError);
 
     if (shouldRetry) {
-      let delay = Math.min(
+      const backoff = Math.min(
         RETRY_CONFIG.initialDelay * Math.pow(2, retryCount),
         RETRY_CONFIG.maxDelay,
       );
-
-      // Use longer delay for rate limit responses
-      if (apiError.status === 429) {
-        delay = Math.max(delay, 1000);
-      }
+      // A server that says when to come back knows better than our backoff
+      // curve does -- but clamp it, so a hostile or mistaken header cannot
+      // hang the UI for minutes.
+      const delay =
+        apiError.retryAfter !== undefined
+          ? Math.min(apiError.retryAfter, RETRY_CONFIG.maxDelay)
+          : backoff;
 
       await sleep(delay);
 
@@ -169,7 +213,7 @@ async function apiFetch<T>(
       return apiFetch<T>(endpoint, { ...options, correlationId }, retryCount + 1);
     }
 
-    // Show 429 toast only after retries are exhausted
+    // 429 is not retried at all, so this fires on the first response
     if (apiError.status === 429) {
       try {
         useToastStore
@@ -287,12 +331,26 @@ export async function iterateMultiple(
 }
 
 /**
- * List all sessions in gallery
+ * List a page of gallery sessions, newest first.
+ *
+ * `limit` is optional on purpose: the backend clamps it to 1..50 and defaults
+ * it to 20, so the bound is the server's guarantee rather than this client's
+ * good behaviour.
  */
-export async function listSessions(): Promise<SessionGalleryListResponse> {
-  return apiFetch<SessionGalleryListResponse>(API_ROUTES.GALLERY_LIST, {
-    method: 'GET',
-  });
+export async function listSessions(
+  limit?: number,
+  cursor?: string,
+): Promise<SessionGalleryListResponse> {
+  const params = new URLSearchParams();
+  if (limit !== undefined) params.set('limit', String(limit));
+  if (cursor) params.set('cursor', cursor);
+  const query = params.toString();
+  return apiFetch<SessionGalleryListResponse>(
+    `${API_ROUTES.GALLERY_LIST}${query ? `?${query}` : ''}`,
+    {
+      method: 'GET',
+    },
+  );
 }
 
 /**

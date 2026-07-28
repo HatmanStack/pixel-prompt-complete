@@ -2,14 +2,13 @@
 Unit tests for model handlers
 """
 
-import pytest
+from unittest.mock import Mock, patch
+
 import responses
-from unittest.mock import Mock, patch, MagicMock
+
 from models.providers import handle_google_gemini, handle_openai
-from .fixtures.api_responses import (
-    SAMPLE_IMAGE_CONTENT,
-    SAMPLE_IMAGE_BASE64
-)
+
+from .fixtures.api_responses import SAMPLE_IMAGE_CONTENT
 
 
 class TestOpenAIHandler:

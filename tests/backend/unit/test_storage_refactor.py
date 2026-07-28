@@ -6,8 +6,6 @@ import base64
 import json
 from unittest.mock import patch
 
-import pytest
-
 from utils.storage import ImageStorage
 
 from .fixtures.api_responses import SAMPLE_IMAGE_BASE64
@@ -402,7 +400,7 @@ class TestDownloadRouteRegistration:
     def test_download_route_registered(self, mock_s3):
         """GET /download/... should be routed to handle_download."""
         with (
-            patch("lambda_function.session_manager") as mock_sm,
+            patch("lambda_function.session_manager"),
             patch("lambda_function.handle_download") as mock_handler,
         ):
             mock_handler.return_value = {"statusCode": 200, "body": "{}"}

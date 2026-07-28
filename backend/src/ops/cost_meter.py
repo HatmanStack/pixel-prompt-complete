@@ -31,6 +31,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import config
+from ops import store_breaker
 from users.repository import UserRepository
 from utils.logger import StructuredLogger
 
@@ -38,6 +39,27 @@ from utils.logger import StructuredLogger
 # cost?" then expire. Without this the table grows by one item per day forever,
 # which is a poor look for a cost-control feature.
 SPEND_ITEM_TTL_SECONDS = 400 * 86400
+
+# Bookkeeping attributes on a spend item that are not money.
+_NON_SPEND_ATTRIBUTES = frozenset({"userId", "updatedAt", "ttl"})
+
+# The attributes a ceiling actually evaluates. A corrupt value here cannot be
+# skipped: reporting 0 for an unreadable total tells a guard whose whole job
+# is to notice spend that there was none.
+CEILING_ATTRIBUTES = frozenset({"totalMicros", "enhanceMicros"})
+
+
+class UnreadableSpendTotal(Exception):
+    """A spend item was read successfully but a ceiling attribute is not a number.
+
+    Deliberately distinct from a store error, because the two want opposite
+    policies. A DynamoDB failure is transient, and failing open on it is
+    argued in the ceiling helpers in ``lambda_function``: hard-failing every
+    billable request on a blip would be a self-inflicted outage. A malformed
+    attribute is permanent -- failing open there means the ceiling stays off
+    until a human reads the logs, which is exactly the failure this exception
+    exists to separate out.
+    """
 
 
 def _day_key(now: int) -> str:
@@ -113,7 +135,13 @@ class CostMeter:
                 now=now,
                 ttl=now + SPEND_ITEM_TTL_SECONDS,
             )
+            store_breaker.record_store_result(True)
         except Exception as e:
+            # The seventh fail-open site, and the one most easily missed: this
+            # is not a guard failing open, it is the ACCOUNTING silently
+            # stopping, which is why a partition problem is invisible as well
+            # as unbounded.
+            store_breaker.record_store_result(False)
             StructuredLogger.error(
                 f"Cost meter failed to record daily spend: {e}",
                 totalMicros=total,
@@ -127,7 +155,9 @@ class CostMeter:
                 now=now,
                 ttl=now + SPEND_ITEM_TTL_SECONDS,
             )
+            store_breaker.record_store_result(True)
         except Exception as e:
+            store_breaker.record_store_result(False)
             StructuredLogger.error(
                 f"Cost meter failed to record monthly spend: {e}",
                 totalMicros=total,
@@ -135,6 +165,13 @@ class CostMeter:
 
         # Mirror to CloudWatch so spend can be alarmed on. DynamoDB holds the
         # authoritative number; this is what can actually page someone.
+        # Deliberately NOT recorded against the store breaker. This block
+        # is a CloudWatch failure, not a DynamoDB one, and the breaker exists
+        # to detect that the quota/spend STORE is unreachable. Counting a
+        # telemetry outage towards it would shed generations because metrics
+        # were throttled -- exactly the self-inflicted outage every fail-open
+        # in this repo argues against. Flagged in the phase report, because
+        # Phase-5 Task 9 lists this block among the sites to wire.
         try:
             from ops.metrics import emit_spend_metric
 
@@ -147,7 +184,9 @@ class CostMeter:
         if user_id and user_id != "anon":
             try:
                 self._repo.add_counters(user_id, {"periodSpendMicros": total}, now=now)
+                store_breaker.record_store_result(True)
             except Exception as e:
+                store_breaker.record_store_result(False)
                 StructuredLogger.error(
                     f"Cost meter failed to record user spend for {user_id}: {e}",
                     totalMicros=total,
@@ -183,14 +222,43 @@ class CostMeter:
         return self._read_spend(monthly_spend_item_key(now))
 
     def _read_spend(self, key: str) -> dict[str, Any]:
+        """Read a spend accumulator, coercing defensively.
+
+        This used to be ``int(v)`` over every attribute except the three
+        excluded below. Any non-numeric attribute on a ``spend#`` item raised
+        ``ValueError``, which the three ceiling helpers catch and **fail
+        open** -- so the last guard against an unbounded provider bill could
+        be switched off by an attribute nobody was reading, and the symptom
+        was a log line rather than an outage.
+
+        An attribute the ceilings do not read is skipped with a WARNING: the
+        guard's job is to bound spend, and a corrupt sibling must not be able
+        to disable it. An attribute a ceiling *does* read raises
+        ``UnreadableSpendTotal``, which is deliberately not the same thing as
+        a store error -- see that class's docstring.
+        """
         item = self._repo.get_user(key)
         if not item:
             return {"totalMicros": 0}
-        return {
-            k: int(v)
-            for k, v in item.items()
-            if k not in ("userId", "updatedAt", "ttl")
-        }
+
+        spend: dict[str, Any] = {}
+        for attribute, value in item.items():
+            if attribute in _NON_SPEND_ATTRIBUTES:
+                continue
+            try:
+                spend[attribute] = int(value)
+            except (TypeError, ValueError) as e:
+                if attribute in CEILING_ATTRIBUTES:
+                    raise UnreadableSpendTotal(
+                        f"{key}.{attribute} is not a number: {value!r}"
+                    ) from e
+                StructuredLogger.warning(
+                    "Skipping a non-numeric attribute on a spend item; the "
+                    "ceiling is evaluated from the remaining fields",
+                    item=key,
+                    attribute=attribute,
+                )
+        return spend
 
 
 def reconcile_monthly_spend(repo: Any, now: int) -> dict[str, int]:

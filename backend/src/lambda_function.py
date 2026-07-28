@@ -4,9 +4,9 @@ Routes API requests to appropriate handlers for image generation,
 iteration, outpainting, and session status.
 """
 
-import atexit
 import base64
 import json
+import os
 import re
 import time
 import traceback
@@ -17,6 +17,7 @@ from typing import Any
 from uuid import uuid4
 
 import boto3
+from botocore.config import Config as BotoConfig
 
 import config
 from api.enhance import PromptEnhancer
@@ -29,7 +30,6 @@ from config import (
     MAX_ITERATIONS,
     MODELS,
     cloudfront_domain,
-    cors_allowed_origin,
     generate_thread_workers,
     get_enabled_models,
     get_model,
@@ -44,8 +44,9 @@ from models.providers import (
     get_outpaint_handler,
     sanitize_error_message,
 )
-from ops.cost_meter import CostMeter
-from ops.metrics import emit_quota_rejection, emit_request_metric
+from ops import store_breaker
+from ops.cost_meter import CostMeter, UnreadableSpendTotal
+from ops.metrics import emit_quota_rejection, emit_request_metric, emit_request_metrics
 from ops.model_counters import ModelCounterService
 from prompts.repository import PromptHistoryRepository
 from users.quota import QuotaResult, enforce_quota
@@ -53,6 +54,7 @@ from users.repository import UserRepository
 from users.tier import TierContext, anon_tier, persist_guest, resolve_tier
 from utils import error_responses
 from utils.content_filter import ContentFilter
+from utils.http import invocation_ack, json_response
 from utils.logger import StructuredLogger
 from utils.storage import ImageStorage
 
@@ -111,13 +113,40 @@ prompt_enhancer = PromptEnhancer()
 _executor = ThreadPoolExecutor(max_workers=generate_thread_workers)
 _gallery_executor = ThreadPoolExecutor(max_workers=4)
 
+# Lambda client for the asynchronous /generate self-invoke. Lazily built so a
+# unit test without moto never constructs one at import.
+_lambda_client = None
 
-def _shutdown_executors():
-    _executor.shutdown(wait=False)
-    _gallery_executor.shutdown(wait=False)
+# The Invoke that hands work to the worker is itself on the request path, so it
+# is bounded for the same reason the CloudWatch client is (ops/metrics.py): an
+# unbounded call would put the request back inside the gateway ceiling it
+# exists to escape.
+#
+# Exactly one attempt. An Event invoke is not idempotent from the caller's
+# side: if Lambda accepts it but the 202 is lost or arrives after read_timeout,
+# a botocore retry sends the same payload again and BOTH can be delivered. Two
+# workers then run run_generation against one sessionId -- eight iterations
+# instead of four, every provider called and billed twice, and _cost_meter
+# double-counting. Retrying buys a second chance at a transport blip; losing
+# that chance costs one inline fallback. Double-generating costs real money.
+_INVOKE_CONNECT_TIMEOUT_SECONDS = 2
+_INVOKE_READ_TIMEOUT_SECONDS = 5
+_INVOKE_MAX_ATTEMPTS = 1
 
 
-atexit.register(_shutdown_executors)
+def _get_lambda_client():
+    """Return a lazily-initialized Lambda client with bounded timeouts."""
+    global _lambda_client
+    if _lambda_client is None:
+        _lambda_client = boto3.client(
+            "lambda",
+            config=BotoConfig(
+                connect_timeout=_INVOKE_CONNECT_TIMEOUT_SECONDS,
+                read_timeout=_INVOKE_READ_TIMEOUT_SECONDS,
+                retries={"mode": "standard", "total_max_attempts": _INVOKE_MAX_ATTEMPTS},
+            ),
+        )
+    return _lambda_client
 
 
 @dataclass
@@ -133,28 +162,46 @@ class ValidatedRequest:
 def _daily_spend_exceeded(now: int | None = None) -> bool:
     """True when today's metered spend has reached the configured ceiling.
 
-    Fails OPEN on a read error: if the spend accumulator is unreadable we
-    cannot prove the budget is blown, and hard-failing every billable request
-    on a transient DynamoDB blip would be a self-inflicted outage. The read
-    error is logged so the gap is visible.
+    Fails OPEN on a STORE error: if DynamoDB is unreachable we cannot prove
+    the budget is blown, and hard-failing every billable request on a
+    transient blip would be a self-inflicted outage. The read error is logged
+    so the gap is visible.
+
+    Fails CLOSED on ``UnreadableSpendTotal`` -- a successful read whose total
+    is not a number. That is permanent rather than transient, so failing open
+    would leave the ceiling switched off indefinitely by a stray attribute.
 
     This is check-then-act, not an atomic reservation: the spend write happens
     after the provider call, so concurrent requests can all read an
     under-ceiling total and all proceed. The overshoot is bounded by Lambda's
-    reserved concurrency (10), i.e. ~10 requests' worth — single-digit dollars
-    at current cost-table values, against a $100 default ceiling. That is a
-    deliberately weaker guarantee than the per-model cap, which reserves
-    atomically via a conditional UpdateItem. Revisit if concurrency is raised
-    substantially or the ceiling is tightened toward the overshoot size.
+    reserved concurrency (10), i.e. ~10 requests' worth. At current cost-table
+    values a four-model /generate plus its prompt adaptation is ~196,000
+    micros, so the worst case is ~$2 against the $25 default ceiling — still
+    single-digit dollars, but ~8% of the ceiling rather than the ~2% it was
+    under the four-times-larger ceiling this paragraph originally assumed.
+    That is a deliberately weaker guarantee than the per-model cap, which
+    reserves atomically via a conditional UpdateItem. The "tightened toward
+    the overshoot size" trigger below has already fired once; revisit again if
+    concurrency is raised substantially or the ceiling is tightened further.
     """
     ceiling = config.global_daily_spend_ceiling_usd_micros
     if ceiling <= 0:
         return False
     try:
         spend = _cost_meter.get_daily_spend(now=now)
+    except UnreadableSpendTotal as e:
+        # Fails CLOSED, unlike the store error below. The read succeeded and
+        # the number is corrupt, which is permanent: failing open here leaves
+        # the ceiling off until someone reads the logs. The READ worked, so
+        # this is a success as far as the store breaker is concerned.
+        store_breaker.record_store_result(True)
+        StructuredLogger.error(f"Spend accumulator is unreadable, refusing request: {e}")
+        return True
     except Exception as e:
+        store_breaker.record_store_result(False)
         StructuredLogger.error(f"Spend ceiling check failed, allowing request: {e}")
         return False
+    store_breaker.record_store_result(True)
     return int(spend.get("totalMicros", 0)) >= ceiling
 
 
@@ -164,17 +211,24 @@ def _monthly_spend_exceeded(now: int | None = None) -> bool:
     The daily ceiling bounds a bad day; this bounds a bad month. Without it,
     sustained traffic at just under the daily limit runs to roughly 30x it.
 
-    Fails open on a read error for the same reason as the daily check: an
-    unreadable counter is not evidence the budget is blown.
+    Fails open on a store error for the same reason as the daily check: an
+    unreachable counter is not evidence the budget is blown. Fails closed on
+    a corrupt total, for the reason given there.
     """
     ceiling = config.monthly_spend_ceiling_usd_micros
     if ceiling <= 0:
         return False
     try:
         spend = _cost_meter.get_monthly_spend(now=now)
+    except UnreadableSpendTotal as e:
+        store_breaker.record_store_result(True)
+        StructuredLogger.error(f"Monthly accumulator is unreadable, refusing request: {e}")
+        return True
     except Exception as e:
+        store_breaker.record_store_result(False)
         StructuredLogger.error(f"Monthly ceiling check failed, allowing request: {e}")
         return False
+    store_breaker.record_store_result(True)
     return int(spend.get("totalMicros", 0)) >= ceiling
 
 
@@ -191,9 +245,15 @@ def _enhance_spend_exceeded(now: int | None = None) -> bool:
         return False
     try:
         spend = _cost_meter.get_daily_spend(now=now)
+    except UnreadableSpendTotal as e:
+        store_breaker.record_store_result(True)
+        StructuredLogger.error(f"Spend accumulator is unreadable, refusing enhance: {e}")
+        return True
     except Exception as e:
+        store_breaker.record_store_result(False)
         StructuredLogger.error(f"Enhance ceiling check failed, allowing request: {e}")
         return False
+    store_breaker.record_store_result(True)
     return int(spend.get("enhanceMicros", 0)) >= ceiling
 
 
@@ -273,8 +333,9 @@ def _enforce_quota_safe(tier_ctx: TierContext, endpoint_kind: str, now: int) -> 
     ERROR rather than WARNING — it needs to be alarmable.
     """
     try:
-        return enforce_quota(tier_ctx, endpoint_kind, _user_repo, now)
+        result = enforce_quota(tier_ctx, endpoint_kind, _user_repo, now)
     except Exception as e:
+        store_breaker.record_store_result(False)
         StructuredLogger.error(
             f"Quota check failed, allowing request: {e}",
             tier=tier_ctx.tier,
@@ -283,18 +344,98 @@ def _enforce_quota_safe(tier_ctx: TierContext, endpoint_kind: str, now: int) -> 
         from users.quota import QuotaResult
 
         return QuotaResult(allowed=True, reason=None, reset_at=0, usage={})
+    # Deliberately NO record_store_result(True) here, and this is not an
+    # oversight. enforce_quota delegates the anon path to
+    # users.quota._enforce_anon, which catches its own store error, records
+    # the failure, and returns an allowed result -- so a success recorded
+    # here would immediately overwrite the failure recorded one frame down
+    # and reset the consecutive counter on every request. Caught by
+    # test_generate_stops_dispatching...: with the True in place the breaker
+    # never tripped at all. The site closest to the store call is the one
+    # that knows whether it was reached.
+    return result
 
 
-def _refund_credits(
+def _model_runtime_disabled(model_name: str, correlation_id: str | None = None) -> bool:
+    """True when an admin has disabled ``model_name`` at runtime.
+
+    The single reader of ``config#model#<name>``. It exists as a helper rather
+    than an inline call because the read had exactly one caller — the
+    ``/generate`` dispatch filter — so a model switched off for burning money
+    or hallucinating went on serving every ``/iterate`` and ``/outpaint``
+    request. Three paths asking one function is what stops a fourth from
+    diverging.
+
+    Fails OPEN on a store error, consistent with every other guard that reads
+    this table (quota, per-model caps, spend ceilings): an unreachable config
+    store is not evidence a model is disabled, and refusing all refinement
+    because DynamoDB hiccuped would be a self-inflicted outage. Logged at
+    ERROR so a persistent failure — which means a kill switch that no longer
+    kills — is alarmable.
+    """
+    try:
+        runtime_cfg = _user_repo.get_model_runtime_config(model_name)
+    except Exception as e:
+        StructuredLogger.error(
+            f"Runtime model config check failed, allowing {model_name}: {e}",
+            correlation_id=correlation_id,
+        )
+        return False
+    return bool(runtime_cfg and runtime_cfg.get("disabled"))
+
+
+def _seconds_until_reset(reset_at: int, now: int) -> int | None:
+    """Seconds a rejected caller must wait for their window to reset.
+
+    Returns None when the quota layer reported no usable reset instant — the
+    fail-open path returns ``reset_at=0``, and a stale one is already past.
+    A caller is better served by no Retry-After than by an invented interval
+    it would obey.
+    """
+    if reset_at <= now:
+        return None
+    return reset_at - now
+
+
+# Which counter ``enforce_quota`` incremented, per (tier, endpoint). Mirrors
+# users/quota.py; the third element names the config attribute holding that
+# bucket's window length, read at call time so a reloaded config is honoured.
+#
+# ``guest`` is absent DELIBERATELY, not by omission. A guest identity is
+# honour-system — dropping the cookie mints a new one, which is exactly why
+# users/quota.py meters guests against their source IP as well — so refunding
+# a guest is an unlimited retry for anyone who wants one.
+_REFUND_COUNTERS: dict[tuple[str, str], tuple[str, str, str]] = {
+    ("free", "generate"): ("generateCount", "windowStart", "free_window_seconds"),
+    ("free", "refine"): ("refineCount", "windowStart", "free_window_seconds"),
+    ("free", "outpaint"): ("refineCount", "windowStart", "free_window_seconds"),
+    ("paid", "generate"): ("dailyGenerateCount", "dailyResetAt", "paid_window_seconds"),
+    ("paid", "refine"): ("dailyCount", "dailyResetAt", "paid_window_seconds"),
+    ("paid", "outpaint"): ("dailyCount", "dailyResetAt", "paid_window_seconds"),
+    ("anon", "generate"): ("generateCount", "windowStart", "anon_window_seconds"),
+    ("anon", "refine"): ("refineCount", "windowStart", "anon_window_seconds"),
+    ("anon", "outpaint"): ("refineCount", "windowStart", "anon_window_seconds"),
+}
+
+
+def _refund_usage(
     tier_ctx: TierContext | None, endpoint_kind: str, correlation_id: str | None = None
 ) -> None:
-    """Return credits for a request that produced nothing.
+    """Return what a request consumed when it produced nothing.
+
+    There are two quota systems and this has to serve both. With
+    ``CREDITS_ENABLED`` the charge is a credit debit; without it — the shipped
+    default — ``enforce_quota`` consumes the tier's call counter *as* the
+    check, so that counter is what a failed request has to give back. Refunding
+    only the ledger meant the entire mechanism was inert in a default deploy,
+    and a free user with ``FREE_GENERATE_LIMIT=1`` lost their hour to a
+    provider outage with no recourse.
 
     Credits are debited before dispatch, which is required: reserving after
     the provider call would let concurrent requests overdraw. The consequence
     is that a request charged up front but yielding no image has taken the
     user's money for nothing — worst on /generate, the most expensive action
-    in the ledger.
+    in the ledger. The call counter has the same shape and the same problem.
 
     Refunding only on TOTAL failure is deliberate. A partial result is still a
     result: the product's premise is comparing models, and pro-rating would
@@ -306,27 +447,64 @@ def _refund_credits(
 
     INVARIANT: every path that returns non-2xx after quota enforcement must
     call this exactly once. The early-exit paths (no models enabled, every
-    model capped, bad session reference, missing source image) are the easiest
-    to miss precisely because they never reach a provider — no cost was
-    incurred, so charging for them is the least defensible case of all.
+    model capped, model disabled at runtime, bad session reference, missing
+    source image) are the easiest to miss precisely because they never reach a
+    provider — no cost was incurred, so charging for them is the least
+    defensible case of all.
     """
-    if not config.credits_enabled or tier_ctx is None:
+    if tier_ctx is None:
         return
-    if tier_ctx.tier not in ("free", "paid"):
+
+    # `anon` is metered by a call counter, never by credits -- `_enforce_anon`
+    # increments generateCount/refineCount on `anon#<ip_hash>` and no credit is
+    # ever debited. So it takes the counter path below whatever
+    # `credits_enabled` says. Returning early for it here made every anon
+    # refund inert in exactly the deployment where anon is the only tier there
+    # is (CREDITS_ENABLED=true with AUTH_ENABLED=false), while
+    # `_REFUND_COUNTERS` carried anon rows showing the refund was intended.
+    # `guest` is excluded separately and deliberately: nothing to refund to.
+    if config.credits_enabled and tier_ctx.tier != "anon":
+        if tier_ctx.tier not in ("free", "paid"):
+            return
+        amount = config.credit_cost(endpoint_kind)
+        if amount <= 0:
+            return
+        try:
+            _user_repo.grant_credits(tier_ctx.user_id, amount)
+            StructuredLogger.info(
+                f"Refunded {amount} centi-credits for a failed {endpoint_kind}",
+                correlation_id=correlation_id,
+                userId=tier_ctx.user_id,
+            )
+        except Exception as e:
+            StructuredLogger.error(
+                f"Failed to refund credits for {endpoint_kind}: {e}",
+                correlation_id=correlation_id,
+                userId=tier_ctx.user_id,
+            )
         return
-    amount = config.credit_cost(endpoint_kind)
-    if amount <= 0:
+
+    mapping = _REFUND_COUNTERS.get((tier_ctx.tier, endpoint_kind))
+    if mapping is None:
         return
+    counter, window_field, window_attr = mapping
     try:
-        _user_repo.grant_credits(tier_ctx.user_id, amount)
-        StructuredLogger.info(
-            f"Refunded {amount} centi-credits for a failed {endpoint_kind}",
-            correlation_id=correlation_id,
-            userId=tier_ctx.user_id,
+        refunded = _user_repo.decrement_counter(
+            tier_ctx.user_id,
+            counter,
+            window_field,
+            getattr(config, window_attr),
+            int(time.time()),
         )
+        if refunded:
+            StructuredLogger.info(
+                f"Refunded one {counter} for a failed {endpoint_kind}",
+                correlation_id=correlation_id,
+                userId=tier_ctx.user_id,
+            )
     except Exception as e:
         StructuredLogger.error(
-            f"Failed to refund credits for {endpoint_kind}: {e}",
+            f"Failed to refund {counter} for {endpoint_kind}: {e}",
             correlation_id=correlation_id,
             userId=tier_ctx.user_id,
         )
@@ -448,18 +626,31 @@ def _parse_and_validate_request(
     # Quota enforcement (after validation so invalid requests don't consume quota)
     if endpoint_kind in ("generate", "refine", "outpaint"):
         # (Guest refine/outpaint was already refused above, before any write.)
-        result = _enforce_quota_safe(tier_ctx, endpoint_kind, int(time.time()))
+        now = int(time.time())
+        result = _enforce_quota_safe(tier_ctx, endpoint_kind, now)
         if not result.allowed:
             # A user hitting a wall and an attacker probing one used to look
             # identical from outside, and a limit set wrongly low produced
             # silent churn instead of a signal.
             emit_quota_rejection(tier_ctx.tier, endpoint_kind, result.reason or "unknown")
+            # Every rolling-window rejection knows when it lifts. Passing it
+            # down is what puts a Retry-After on the wire: error_response only
+            # writes the field when it is given one, so these 429s carried no
+            # backoff hint at all and a client had nothing to act on.
+            retry_after = _seconds_until_reset(result.reset_at, now)
             if result.reason == "suspended":
                 return None, response(403, error_responses.account_suspended())
+            if result.reason == "guest_identity_missing":
+                # 403, not the tier fall-through's 429: nothing here is a rate
+                # limit, so telling the caller to wait for a window to reset is
+                # advice that can never work. Signing in is the way through.
+                return None, response(403, error_responses.auth_required())
             if result.reason == "guest_ip":
-                return None, response(429, error_responses.guest_ip_limit())
+                return None, response(429, error_responses.guest_ip_limit(retry_after=retry_after))
             if result.reason == "guest_global":
-                return None, response(429, error_responses.guest_global_limit())
+                return None, response(
+                    429, error_responses.guest_global_limit(retry_after=retry_after)
+                )
             if result.reason == "insufficient_credits":
                 return None, response(
                     402,
@@ -472,7 +663,9 @@ def _parse_and_validate_request(
                 )
             return None, response(
                 429,
-                error_responses.tier_quota_exceeded(tier_ctx.tier, result.reset_at),
+                error_responses.tier_quota_exceeded(
+                    tier_ctx.tier, result.reset_at, retry_after=retry_after
+                ),
             )
 
     return ValidatedRequest(body=body, ip=ip, prompt=prompt, tier=tier_ctx), None
@@ -545,11 +738,6 @@ def extract_correlation_id(event: LambdaEvent) -> str:
     return correlation_id or str(uuid4())
 
 
-def _not_implemented(endpoint: str) -> ApiResponse:
-    """Stub response for routes whose business logic lands in later phases."""
-    return response(501, {"error": f"{endpoint} not implemented"})
-
-
 def _route_admin(path: str, method: str, event: LambdaEvent, correlation_id: str) -> ApiResponse:
     """Dispatch admin API routes.
 
@@ -618,6 +806,27 @@ def lambda_handler(event: LambdaEvent, context: LambdaContext) -> ApiResponse:
         from ops.metrics import handle_daily_snapshot
 
         return handle_daily_snapshot(event, context, repo=_user_repo)
+
+    # Asynchronous /generate worker. Must come before extract_correlation_id
+    # and the path parsing below, both of which assume an HTTP event.
+    if event.get("source") == "generate_worker":
+        try:
+            run_generation(event)
+        except Exception as e:
+            # Deliberately not re-raised. Every per-model failure is already
+            # recorded on the session, so raising would add an unexplained
+            # invocation error -- and a platform-chosen retry that would
+            # generate and bill the images a second time -- on top of a session
+            # the client can already read the truth from.
+            StructuredLogger.error(
+                f"Generate worker failed: {e}",
+                correlation_id=event.get("correlationId"),
+                sessionId=event.get("sessionId"),
+                traceback=traceback.format_exc(),
+            )
+        # Not an HTTP response: the worker is invoked directly, so nothing
+        # reads headers here. See utils.http.invocation_ack.
+        return invocation_ack()
 
     correlation_id = extract_correlation_id(event)
 
@@ -694,6 +903,359 @@ def lambda_handler(event: LambdaEvent, context: LambdaContext) -> ApiResponse:
         return response(500, {"error": "Internal server error"})
 
 
+def _dispatch_generation_async(payload: dict[str, Any], correlation_id: str | None = None) -> bool:
+    """Hand the provider dispatch to a worker invocation. True when accepted.
+
+    Returns False on ANY failure -- AWS_LAMBDA_FUNCTION_NAME absent, the
+    lambda:InvokeFunction grant missing, the account throttling -- and the
+    caller then runs the dispatch inline.
+
+    That fallback is load-bearing. A deploy whose IAM grant did not land
+    degrades to the pre-async behaviour (a slow request that may 504) rather
+    than to sessions that are created, answered 202, and never worked on.
+    AWS_LAMBDA_FUNCTION_NAME is set by the Lambda runtime; outside Lambda it is
+    absent, which is exactly when falling back is right.
+    """
+    try:
+        function_name = os.environ["AWS_LAMBDA_FUNCTION_NAME"]
+        _get_lambda_client().invoke(
+            FunctionName=function_name,
+            InvocationType="Event",
+            Payload=json.dumps(payload).encode(),
+        )
+        return True
+    except Exception as e:
+        StructuredLogger.error(
+            f"Async generate dispatch failed, running inline instead: {e}",
+            correlation_id=correlation_id,
+            sessionId=payload.get("sessionId"),
+        )
+        return False
+
+
+def run_generation(payload: dict[str, Any]) -> dict[str, Any]:
+    """Perform the provider dispatch for an already-created session.
+
+    Called synchronously by handle_generate when GENERATE_ASYNC is false,
+    and by the asynchronous worker branch of lambda_handler otherwise.
+    Everything that must happen before the caller is answered -- spend
+    ceilings, tier, CAPTCHA, age gate, quota, per-model slot reservation,
+    session creation -- has already happened by the time this runs.
+
+    `payload` carries only JSON-serialisable values because in async mode it
+    crosses an Invoke boundary. Returns the per-model results map, including
+    the skipped entries the request path computed, so synchronous mode can
+    return it to the caller verbatim.
+    """
+    session_id: str = payload["sessionId"]
+    prompt: str = payload["prompt"]
+    model_names: list[str] = payload["modelNames"]
+    skipped_models: dict[str, Any] = payload.get("skipped") or {}
+    visibility: str = payload["visibility"]
+    correlation_id: str | None = payload.get("correlationId")
+
+    # A MINIMAL TierContext, not a real identity. Only two fields are
+    # load-bearing here: `_refund_usage` reads `.tier` and `.user_id`, and
+    # `_cost_meter.record_models` reads the same two. Everything else is
+    # filler and must never be used for an authorization decision -- in
+    # particular `is_authenticated=False` is a placeholder, not a claim about
+    # the caller, who was already authenticated in the request path.
+    # None when the request had no tier context at all, which both consumers
+    # already handle.
+    tier_ctx: TierContext | None = None
+    if payload.get("tier") is not None:
+        tier_ctx = TierContext(
+            tier=payload["tier"],
+            user_id=payload.get("userId") or "",
+            email=None,
+            is_authenticated=False,
+            guest_token_id=None,
+            issue_guest_cookie=False,
+        )
+
+    results: dict[str, Any] = {}
+
+    # Resolved from get_enabled_models(), not config.get_model(): the request
+    # path picked these names out of exactly that list, so this is the same
+    # source of truth. config.get_model raises ValueError for a model that is
+    # not enabled, which would abandon the whole dispatch over one model.
+    #
+    # A name can only fail to resolve here if the worker container's
+    # configuration differs from the request container's -- a deploy that
+    # changes a *_ENABLED variable while requests are in flight. That was
+    # impossible before this refactor, because the ModelConfig objects were
+    # carried in memory rather than rebuilt from a name. It becomes possible
+    # the moment the dispatch can cross an invocation boundary, so the model
+    # is marked failed on the session: leaving its column pending would strand
+    # the session short of a terminal status and the client would poll until
+    # it gave up.
+    enabled_by_name = {m.name: m for m in get_enabled_models()}
+    models_to_dispatch = [enabled_by_name[name] for name in model_names if name in enabled_by_name]
+    for _missing in [name for name in model_names if name not in enabled_by_name]:
+        StructuredLogger.error(
+            "Model was reserved for dispatch but is not enabled in this container",
+            correlation_id=correlation_id,
+            sessionId=session_id,
+            model=_missing,
+        )
+        results[_missing] = {"status": "error", "error": "Model is not enabled"}
+        try:
+            _handle_failed_result(
+                session_id,
+                _missing,
+                session_manager.add_iteration(session_id, _missing, prompt),
+                "Model is not enabled",
+            )
+        except Exception as e:
+            StructuredLogger.warning(
+                f"Could not mark unresolved model as failed: {e}",
+                correlation_id=correlation_id,
+                sessionId=session_id,
+                model=_missing,
+            )
+
+    # Adapt prompt per model (single LLM call, ~4x cheaper than per-model calls)
+    adapted_prompts = prompt_enhancer.adapt_per_model(
+        prompt, model_names, correlation_id=correlation_id
+    )
+
+    # Re-filter the rewritten prompts. The user's prompt was checked at
+    # validation, but what actually reaches the provider is this LLM
+    # rewrite — an unfiltered channel between the check and the call. The
+    # rewrite can introduce blocked terms the original never contained,
+    # either because the model elaborated in an unwanted direction or
+    # because the original was crafted to survive the filter and steer the
+    # rewrite. Checking only the input leaves the output unexamined.
+    #
+    # Falls back to the (already-checked) original rather than failing the
+    # request: one model's rewrite going astray should not deny the user
+    # the other three.
+    for _model_name, _adapted in list(adapted_prompts.items()):
+        if _adapted != prompt and content_filter.check_prompt(_adapted):
+            StructuredLogger.warning(
+                "Adapted prompt failed the content filter; falling back to the original",
+                correlation_id=correlation_id,
+                model=_model_name,
+            )
+            adapted_prompts[_model_name] = prompt
+
+    target = datetime.now(timezone.utc).strftime("%Y-%m-%d-%H-%M-%S")
+
+    def generate_for_model(model_config):
+        model_name = model_config.name
+        start_time = time.time()
+        iteration_index = None
+
+        try:
+            model_prompt = adapted_prompts.get(model_name, prompt)
+            iteration_index = session_manager.add_iteration(
+                session_id, model_name, prompt, adapted_prompt=model_prompt
+            )
+
+            handler = get_handler(model_config.provider)
+            config_dict = get_model_config_dict(model_config)
+            result = handler(config_dict, model_prompt, {})
+
+            duration = time.time() - start_time
+
+            if result["status"] == "success":
+                info = _handle_successful_result(
+                    session_id,
+                    model_name,
+                    prompt,
+                    result,
+                    iteration_index,
+                    target,
+                    duration,
+                    visibility,
+                    context_prompt=prompt,
+                )
+                return model_name, {
+                    "status": "completed",
+                    "imageKey": info["image_key"],
+                    "imageUrl": info["image_url"],
+                    "iteration": iteration_index,
+                    "duration": duration,
+                }
+            else:
+                error_msg = sanitize_error_message(result.get("error", "Unknown error"))
+                _handle_failed_result(session_id, model_name, iteration_index, error_msg)
+                return model_name, {
+                    "status": "error",
+                    "error": error_msg,
+                    "iteration": iteration_index,
+                }
+
+        except Exception as e:
+            sanitized = sanitize_error_message(e)
+            if iteration_index is not None:
+                try:
+                    _handle_failed_result(session_id, model_name, iteration_index, sanitized)
+                except Exception as fail_err:
+                    StructuredLogger.warning(
+                        f"Failed to mark iteration as failed: {fail_err}",
+                        correlation_id=correlation_id,
+                    )
+            return model_name, {"status": "error", "error": sanitized}
+
+    # Include skipped models in results
+    results.update(skipped_models)
+
+    # Execute in parallel using module-level executor
+    futures = {_executor.submit(generate_for_model, model): model for model in models_to_dispatch}
+    future_timeout = config.generate_dispatch_budget_seconds
+    try:
+        for future in as_completed(futures, timeout=future_timeout):
+            try:
+                model_name, result = future.result()
+                results[model_name] = result
+            except Exception as e:
+                model_name = futures[future].name
+                sanitized = sanitize_error_message(e)
+                StructuredLogger.error(
+                    f"Thread pool failure for {model_name}: {sanitized}",
+                    correlation_id=correlation_id,
+                )
+                results[model_name] = {"status": "error", "error": sanitized}
+    except TimeoutError:
+        # Cancel what can still be cancelled. A future that has already
+        # started cannot be stopped -- the provider call is blocking I/O
+        # inside a worker thread -- so this only helps when there are more
+        # models than workers. The real defence is that every provider
+        # bounds its own call below this budget, so nothing should still
+        # be running by the time we get here. Nova was unbounded until
+        # this change, which is exactly how work outlived the budget,
+        # completed, and was billed after the user was told it failed.
+        # Counted from the futures themselves, not from len(results):
+        # `results` already holds the skipped models, which were never
+        # dispatched, so subtracting it undercounts by that many and can
+        # go negative -- silencing the log in exactly the case it exists
+        # for (models capped, one real call still burning money).
+        cancelled = sum(1 for f in futures if f.cancel())
+        still_running = sum(1 for f in futures if not f.cancelled() and not f.done())
+        if still_running > 0:
+            StructuredLogger.error(
+                "Dispatch budget expired with provider calls still running; "
+                "they will complete and be billed",
+                correlation_id=correlation_id,
+                stillRunning=still_running,
+                cancelled=cancelled,
+            )
+
+        # Mark any models that didn't complete in time
+        for future, model_cfg in futures.items():
+            model_name = model_cfg.name
+            if model_name not in results:
+                StructuredLogger.error(
+                    f"Model {model_name} timed out after {future_timeout}s",
+                    correlation_id=correlation_id,
+                )
+                results[model_name] = {
+                    "status": "error",
+                    "error": f"Model timed out after {future_timeout}s",
+                }
+
+    # Nothing generated at all: the user paid for a result they did not
+    # get. Skipped models do not count as attempts, so an all-skipped
+    # request refunds too.
+    produced = [
+        r
+        for name, r in results.items()
+        if name not in skipped_models and r.get("status") != "error"
+    ]
+    if not produced:
+        _refund_usage(tier_ctx, "generate", correlation_id)
+
+    # Everything from here is accounting and observability, and none of it may
+    # raise. Two reasons, and the second is the load-bearing one:
+    #
+    # 1. The images exist and the provider has billed for them. Failing the
+    #    request because a metric write hiccuped throws away work the caller
+    #    already paid for.
+    # 2. handle_generate decides whether to refund by checking whether this
+    #    function returned. The refund decision is made immediately above, so a
+    #    raise BELOW it unwinds past that flag and the outer handler refunds a
+    #    second time -- returning the charge twice for one request, or
+    #    refunding a caller who did receive images.
+    #
+    # Both failures are already logged inside their own modules; swallowing
+    # here loses nothing but the propagation.
+    try:
+        _record_dispatch_accounting(
+            results=results,
+            skipped_models=skipped_models,
+            models_to_dispatch=models_to_dispatch,
+            tier_ctx=tier_ctx,
+        )
+    except Exception as e:
+        StructuredLogger.error(
+            f"Accounting for a completed generation failed: {e}",
+            correlation_id=correlation_id,
+            sessionId=payload.get("sessionId"),
+            traceback=traceback.format_exc(),
+        )
+
+    return results
+
+
+def _record_dispatch_accounting(
+    results: dict[str, Any],
+    skipped_models: dict[str, Any],
+    models_to_dispatch: list[Any],
+    tier_ctx: TierContext | None,
+) -> None:
+    """Meter spend and emit request metrics for a finished dispatch.
+
+    Extracted so its failure modes sit behind one guard in run_generation
+    rather than on the path between the refund decision and the return.
+    """
+    # Meter what this request cost in dollars. Every dispatched model is
+    # metered, including ones that errored or timed out: the provider
+    # performed the work and bills for it regardless of whether we managed
+    # to return it to the user (see the as_completed timeout above, which
+    # does not cancel in-flight futures). For a spend ceiling, over-counting
+    # is the safe direction — under-counting means unbounded spend.
+    _cost_meter.record_models(
+        model_names=[m.name for m in models_to_dispatch],
+        operation="generate",
+        tier=tier_ctx.tier if tier_ctx else "anon",
+        user_id=tier_ctx.user_id if tier_ctx else None,
+        # Only bill for the adaptation when one actually happened. The
+        # enhancer short-circuits to the raw prompt with no LLM call when
+        # PROMPT_MODEL_API_KEY is unset — a supported open-source setup —
+        # and booking phantom spend there would corrupt the cost data this
+        # meter exists to gather.
+        include_enhance=prompt_enhancer.is_available,
+    )
+
+    # Emitted regardless of auth: knowing which provider is slow or
+    # failing has nothing to do with whether the caller logged in.
+    #
+    # One call for the whole dispatch, not one per model. Each put_metric_data
+    # is bounded at 2s connect + 2s read x 2 attempts, so four models was up
+    # to ~16s of blocking network time. The async move took that off the
+    # request path but not out of the reserved concurrency slot or the billed
+    # duration. Skipped models are excluded: they never reached a provider, so
+    # reporting latency for them would report work that did not happen.
+    emit_request_metrics(
+        [
+            (
+                "/generate",
+                mname,
+                # Coerced, not left to Python's numeric tower. An errored
+                # model returns no "duration" key -- the timer is read only on
+                # the success branch -- so .get() yields the int default and an
+                # int reaches a parameter declared float. That absence is how a
+                # non-float got in.
+                float(mresult.get("duration") or 0.0) * 1000,  # seconds to ms
+                mresult.get("status") == "error",
+            )
+            for mname, mresult in results.items()
+            if mname not in skipped_models
+        ]
+    )
+
+
 def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> ApiResponse:
     """
     POST /generate - Create new session and generate initial images.
@@ -710,13 +1272,38 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
     if err:
         return err
 
+    # Set once run_generation has returned, after which the refund decision is
+    # already made and the outer handler must not make it again. Bound here so
+    # the handler can read it however early the failure lands.
+    refund_owned_downstream = False
+
     try:
+        # Every cost guard above this line reads one DynamoDB table and fails
+        # OPEN when it is unreachable, so a partition opens all of them at
+        # once and stops the spend accounting too. This is the only bound that
+        # does not need that table. Checked AFTER quota -- a caller who cannot
+        # generate anyway should be refused for the reason that actually
+        # applies to them -- and BEFORE any provider is reached.
+        #
+        # Refunds on the way out, per the _refund_usage invariant: this is an
+        # early exit that never reaches a provider. Phase 2 removed 503 from
+        # the client's retryable set for POSTs, so this cannot be retried into.
+        if store_breaker.should_shed():
+            StructuredLogger.error(
+                "Shedding /generate: the quota store is unreachable and this "
+                "container has spent its degraded dispatch budget",
+                correlation_id=correlation_id,
+                **store_breaker.state(),
+            )
+            _refund_usage(validated.tier, "generate", correlation_id)
+            return response(503, error_responses.spend_guard_degraded())
+
         prompt = validated.prompt
 
         # Get enabled models
         enabled_models = get_enabled_models()
         if not enabled_models:
-            _refund_credits(validated.tier, "generate", correlation_id)
+            _refund_usage(validated.tier, "generate", correlation_id)
             return response(500, {"error": "No models enabled"})
 
         # Filter models by runtime disable and per-model cost ceiling
@@ -728,15 +1315,19 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
         now_ts = int(time.time())
         try:
             for model in enabled_models:
-                # Runtime disable check (admin-toggled via DynamoDB)
-                runtime_cfg = _user_repo.get_model_runtime_config(model.name)
-                if runtime_cfg and runtime_cfg.get("disabled"):
+                # Runtime disable check (admin-toggled via DynamoDB). Shared
+                # with /iterate and /outpaint so a kill switch means the same
+                # thing on every path that can spend money on a model.
+                if _model_runtime_disabled(model.name, correlation_id):
                     skipped_models[model.name] = {
                         "status": "skipped",
                         "reason": "admin_disabled",
                     }
                     continue
-                # Per-model cost ceiling check
+                # Per-model cost ceiling check. This is a RESERVATION and it
+                # stays in the request path: consuming the slot after the
+                # caller has been answered would let concurrent requests
+                # overdraw the cap.
                 if _model_counter_service.consume_model_slot(model.name, now_ts):
                     models_to_dispatch.append(model)
                 else:
@@ -744,12 +1335,14 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
                         "status": "skipped",
                         "reason": "daily_cap_reached",
                     }
+            store_breaker.record_store_result(True)
         except Exception as e:
             # Fail OPEN, consistent with the quota and spend-ceiling checks: an
             # unreachable counter store is not evidence a model is over its
             # cap, and refusing every generation because DynamoDB hiccuped
             # would be a self-inflicted outage. Logged at ERROR so a persistent
             # failure — which means silently uncapped models — is alarmable.
+            store_breaker.record_store_result(False)
             StructuredLogger.error(
                 f"Per-model cap check failed, dispatching all models: {e}",
                 correlation_id=correlation_id,
@@ -758,42 +1351,15 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
             skipped_models = {}
 
         if not models_to_dispatch:
-            _refund_credits(validated.tier, "generate", correlation_id)
+            _refund_usage(validated.tier, "generate", correlation_id)
             return response(429, error_responses.model_cost_ceiling())
 
         enabled_model_names = [m.name for m in models_to_dispatch]
 
-        # Adapt prompt per model (single LLM call, ~4x cheaper than per-model calls)
-        adapted_prompts = prompt_enhancer.adapt_per_model(
-            prompt, enabled_model_names, correlation_id=correlation_id
-        )
-
-        # Re-filter the rewritten prompts. The user's prompt was checked at
-        # validation, but what actually reaches the provider is this LLM
-        # rewrite — an unfiltered channel between the check and the call. The
-        # rewrite can introduce blocked terms the original never contained,
-        # either because the model elaborated in an unwanted direction or
-        # because the original was crafted to survive the filter and steer the
-        # rewrite. Checking only the input leaves the output unexamined.
-        #
-        # Falls back to the (already-checked) original rather than failing the
-        # request: one model's rewrite going astray should not deny the user
-        # the other three.
-        for _model_name, _adapted in list(adapted_prompts.items()):
-            if _adapted != prompt and content_filter.check_prompt(_adapted):
-                StructuredLogger.warning(
-                    "Adapted prompt failed the content filter; falling back to the original",
-                    correlation_id=correlation_id,
-                    model=_model_name,
-                )
-                adapted_prompts[_model_name] = prompt
-
         # Create session
         visibility = _visibility_for_tier(validated.tier.tier if validated.tier else None)
         owner_id = (
-            validated.tier.user_id
-            if validated.tier and validated.tier.is_authenticated
-            else None
+            validated.tier.user_id if validated.tier and validated.tier.is_authenticated else None
         )
         session_id = session_manager.create_session(
             prompt,
@@ -824,164 +1390,22 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
             models=enabled_model_names,
         )
 
-        results = {}
-        target = datetime.now(timezone.utc).strftime("%Y-%m-%d-%H-%M-%S")
-
-        def generate_for_model(model_config):
-            model_name = model_config.name
-            start_time = time.time()
-            iteration_index = None
-
-            try:
-                model_prompt = adapted_prompts.get(model_name, prompt)
-                iteration_index = session_manager.add_iteration(
-                    session_id, model_name, prompt, adapted_prompt=model_prompt
-                )
-
-                handler = get_handler(model_config.provider)
-                config_dict = get_model_config_dict(model_config)
-                result = handler(config_dict, model_prompt, {})
-
-                duration = time.time() - start_time
-
-                if result["status"] == "success":
-                    info = _handle_successful_result(
-                        session_id,
-                        model_name,
-                        prompt,
-                        result,
-                        iteration_index,
-                        target,
-                        duration,
-                        visibility,
-                        context_prompt=prompt,
-                    )
-                    return model_name, {
-                        "status": "completed",
-                        "imageKey": info["image_key"],
-                        "imageUrl": info["image_url"],
-                        "iteration": iteration_index,
-                        "duration": duration,
-                    }
-                else:
-                    error_msg = sanitize_error_message(result.get("error", "Unknown error"))
-                    _handle_failed_result(session_id, model_name, iteration_index, error_msg)
-                    return model_name, {
-                        "status": "error",
-                        "error": error_msg,
-                        "iteration": iteration_index,
-                    }
-
-            except Exception as e:
-                sanitized = sanitize_error_message(e)
-                if iteration_index is not None:
-                    try:
-                        _handle_failed_result(session_id, model_name, iteration_index, sanitized)
-                    except Exception as fail_err:
-                        StructuredLogger.warning(
-                            f"Failed to mark iteration as failed: {fail_err}",
-                            correlation_id=correlation_id,
-                        )
-                return model_name, {"status": "error", "error": sanitized}
-
-        # Include skipped models in results
-        results.update(skipped_models)
-
-        # Execute in parallel using module-level executor
-        futures = {
-            _executor.submit(generate_for_model, model): model for model in models_to_dispatch
+        # Everything below this line is provider work, and none of it is
+        # allowed to depend on the HTTP event. JSON-serialisable only: in
+        # asynchronous mode this crosses an Invoke boundary.
+        worker_payload: dict[str, Any] = {
+            "source": "generate_worker",
+            "sessionId": session_id,
+            "prompt": prompt,
+            "modelNames": enabled_model_names,
+            "skipped": skipped_models,
+            "visibility": visibility,
+            "tier": validated.tier.tier if validated.tier else None,
+            "userId": validated.tier.user_id if validated.tier else None,
+            "correlationId": correlation_id,
         }
-        future_timeout = config.generate_dispatch_budget_seconds
-        try:
-            for future in as_completed(futures, timeout=future_timeout):
-                try:
-                    model_name, result = future.result()
-                    results[model_name] = result
-                except Exception as e:
-                    model_name = futures[future].name
-                    sanitized = sanitize_error_message(e)
-                    StructuredLogger.error(
-                        f"Thread pool failure for {model_name}: {sanitized}",
-                        correlation_id=correlation_id,
-                    )
-                    results[model_name] = {"status": "error", "error": sanitized}
-        except TimeoutError:
-            # Cancel what can still be cancelled. A future that has already
-            # started cannot be stopped -- the provider call is blocking I/O
-            # inside a worker thread -- so this only helps when there are more
-            # models than workers. The real defence is that every provider
-            # bounds its own call below this budget, so nothing should still
-            # be running by the time we get here. Nova was unbounded until
-            # this change, which is exactly how work outlived the budget,
-            # completed, and was billed after the user was told it failed.
-            # Counted from the futures themselves, not from len(results):
-            # `results` already holds the skipped models, which were never
-            # dispatched, so subtracting it undercounts by that many and can
-            # go negative -- silencing the log in exactly the case it exists
-            # for (models capped, one real call still burning money).
-            cancelled = sum(1 for f in futures if f.cancel())
-            still_running = sum(1 for f in futures if not f.cancelled() and not f.done())
-            if still_running > 0:
-                StructuredLogger.error(
-                    "Dispatch budget expired with provider calls still running; "
-                    "they will complete and be billed",
-                    correlation_id=correlation_id,
-                    stillRunning=still_running,
-                    cancelled=cancelled,
-                )
 
-            # Mark any models that didn't complete in time
-            for future, model_cfg in futures.items():
-                model_name = model_cfg.name
-                if model_name not in results:
-                    StructuredLogger.error(
-                        f"Model {model_name} timed out after {future_timeout}s",
-                        correlation_id=correlation_id,
-                    )
-                    results[model_name] = {
-                        "status": "error",
-                        "error": f"Model timed out after {future_timeout}s",
-                    }
-
-        # Nothing generated at all: the user paid for a result they did not
-        # get. Skipped models do not count as attempts, so an all-skipped
-        # request refunds too.
-        produced = [
-            r
-            for name, r in results.items()
-            if name not in skipped_models and r.get("status") != "error"
-        ]
-        if not produced:
-            _refund_credits(validated.tier, "generate", correlation_id)
-
-        # Meter what this request cost in dollars. Every dispatched model is
-        # metered, including ones that errored or timed out: the provider
-        # performed the work and bills for it regardless of whether we managed
-        # to return it to the user (see the as_completed timeout above, which
-        # does not cancel in-flight futures). For a spend ceiling, over-counting
-        # is the safe direction — under-counting means unbounded spend.
-        _cost_meter.record_models(
-            model_names=[m.name for m in models_to_dispatch],
-            operation="generate",
-            tier=validated.tier.tier if validated.tier else "anon",
-            user_id=validated.tier.user_id if validated.tier else None,
-            # Only bill for the adaptation when one actually happened. The
-            # enhancer short-circuits to the raw prompt with no LLM call when
-            # PROMPT_MODEL_API_KEY is unset — a supported open-source setup —
-            # and booking phantom spend there would corrupt the cost data this
-            # meter exists to gather.
-            include_enhance=prompt_enhancer.is_available,
-        )
-
-        # Emitted regardless of auth: knowing which provider is slow or
-        # failing has nothing to do with whether the caller logged in.
-        for mname, mresult in results.items():
-            if mname in skipped_models:
-                continue
-            dur = mresult.get("duration", 0) * 1000  # seconds to ms
-            is_err = mresult.get("status") == "error"
-            emit_request_metric("/generate", mname, dur, is_err)
-
+        # Computed in the request path because the worker cannot set cookies.
         set_cookie = None
         if (
             validated.tier
@@ -992,6 +1416,61 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
             set_cookie = _guest_service.set_cookie_header(
                 validated.tier.new_guest_token, config.guest_window_seconds
             )
+
+        if config.generate_async and not _dispatch_generation_async(worker_payload, correlation_id):
+            # Async was asked for and the Invoke did not land. Falling through
+            # to the inline path looks like graceful degradation and is not:
+            # run_generation carries generate_dispatch_budget_seconds (~70s)
+            # and this route declares a 29s integration timeout, so the gateway
+            # returns 504 at 29s while the function keeps going. The caller
+            # never receives the sessionId, four providers generate and bill
+            # for images that are now unreachable, and no refund fires because
+            # run_generation only refunds when EVERY model errors.
+            #
+            # Failing fast costs one retry. The cause -- a missing
+            # lambda:InvokeFunction grant, or throttling -- is an operator fact
+            # already logged at ERROR by _dispatch_generation_async.
+            #
+            # Narrowed to generate_async deliberately: when the operator has
+            # chosen synchronous mode the inline path below is the intended
+            # behaviour, not a fallback, and tests/backend/e2e depends on it.
+            _refund_usage(validated.tier, "generate", correlation_id)
+            return response(
+                503, error_responses.generation_dispatch_failed(), set_cookie=set_cookie
+            )
+
+        if config.generate_async:
+            # No `session` key, deliberately. GenerationPanel's `else` branch
+            # builds a placeholder session and hands over to useSessionPolling,
+            # which is the path the client already took whenever a session was
+            # not attached -- so this needed no frontend change.
+            #
+            # Skipped entries keep their existing {"status": "skipped",
+            # "reason": ...} shape: a skipped model never becomes a session
+            # iteration, so this response is the only place the cap and
+            # admin-disable signals exist.
+            return response(
+                202,
+                {
+                    "sessionId": session_id,
+                    "prompt": prompt,
+                    "models": {
+                        **skipped_models,
+                        **{name: {"status": "pending"} for name in enabled_model_names},
+                    },
+                },
+                set_cookie=set_cookie,
+            )
+
+        # Synchronous mode.
+        results = run_generation(worker_payload)
+        # From here on the refund decision belongs to run_generation, which
+        # refunds on total failure and deliberately does not on a partial
+        # result. The outer handler must not second-guess it: refunding again
+        # would return the charge twice, and refunding after a partial success
+        # would pay for images the caller actually received.
+        refund_owned_downstream = True
+
         # Return the finished session, not just per-model outcomes. Every
         # future has already been awaited above, so this state is final —
         # the client previously discarded this response, built empty
@@ -1042,6 +1521,23 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
         return response(200, payload, set_cookie=set_cookie)
 
     except Exception as e:
+        # Quota was consumed in _parse_and_validate_request, so this 500 owes a
+        # refund like every other non-2xx below that point -- see the INVARIANT
+        # on _refund_usage. create_session raising on an S3 blip, or the worker
+        # payload failing to serialise, otherwise cost a free user their whole
+        # FREE_WINDOW_SECONDS for an image they never got. `validated` is bound
+        # before the try, so it is safe to read here.
+        #
+        # Guarded, not unconditional. In synchronous mode `run_generation` runs
+        # inside this same `try` and owns the refund decision once it returns:
+        # it refunds on total failure and deliberately withholds one on a
+        # partial result. An unguarded refund here would hand the charge back
+        # twice when a total failure is followed by a raise, and would refund a
+        # caller who actually received images. Asynchronous mode never reaches
+        # that call in the request path, so the flag is still False and the
+        # refund fires -- which is the case this handler exists for.
+        if not refund_owned_downstream:
+            _refund_usage(validated.tier, "generate", correlation_id)
         StructuredLogger.error(
             f"Error in handle_generate: {e}",
             correlation_id=correlation_id,
@@ -1175,13 +1671,28 @@ def _handle_refinement(
     try:
         refs, err = _validate_refinement_request(validated)
         if err:
-            _refund_credits(validated.tier, refund_kind, correlation_id)
+            _refund_usage(validated.tier, refund_kind, correlation_id)
             return err
         session_id, model_name, model_config = refs
 
+        # Runtime kill switch, checked before anything is spent or written:
+        # before the per-model cap slot is consumed (burning budget on a
+        # request that produces nothing), before add_iteration writes an
+        # in_progress row this early return would strand, and before the S3
+        # read in _load_source_image. Refunds, per the _refund_usage
+        # invariant -- this is exactly the class of early exit it warns about.
+        if _model_runtime_disabled(model_name, correlation_id):
+            StructuredLogger.warning(
+                f"Refusing {handler_name} for {model_name}: disabled at runtime",
+                correlation_id=correlation_id,
+                sessionId=session_id,
+            )
+            _refund_usage(validated.tier, refund_kind, correlation_id)
+            return response(503, error_responses.model_disabled(model_name))
+
         loaded, err = _load_source_image(session_id, model_name, validated.tier)
         if err:
-            _refund_credits(validated.tier, refund_kind, correlation_id)
+            _refund_usage(validated.tier, refund_kind, correlation_id)
             return err
         source_image, iteration_count, visibility = loaded
 
@@ -1194,17 +1705,17 @@ def _handle_refinement(
         prompt = validated.prompt
         start_time = time.time()
 
-        iter_kwargs = add_iteration_kwargs or {}
-        iteration_index = session_manager.add_iteration(
-            session_id,
-            model_name,
-            prompt,
-            **iter_kwargs,
-        )
-
         # Per-model daily cap, consumed BEFORE dispatching to the provider.
         # Previously only /generate consumed slots, so refinement traffic could
         # run a model far past its ceiling.
+        #
+        # Ordered before `add_iteration` for the same reason the runtime kill
+        # switch above it is: this branch returns without ever calling
+        # `_handle_failed_result`, so an iteration row written first would stay
+        # `in_progress` forever. `_compute_model_status` would report the model
+        # in progress, `_compute_session_status` the session, and the client
+        # would poll a spinner that never resolves while one of the model's
+        # MAX_ITERATIONS slots stayed spent on work that never ran.
         try:
             slot_ok = _model_counter_service.consume_model_slot(model_name, int(time.time()))
         except Exception as e:
@@ -1214,10 +1725,39 @@ def _handle_refinement(
             )
             slot_ok = True
         if not slot_ok:
-            _refund_credits(validated.tier, refund_kind, correlation_id)
+            _refund_usage(validated.tier, refund_kind, correlation_id)
             return response(429, error_responses.model_cost_ceiling())
 
+        iter_kwargs = add_iteration_kwargs or {}
+        iteration_index = session_manager.add_iteration(
+            session_id,
+            model_name,
+            prompt,
+            **iter_kwargs,
+        )
+
         config_dict = get_model_config_dict(model_config)
+        # The budget this provider call has to fit inside. It is the same
+        # budget /generate uses, and deliberately NOT the 29s gateway ceiling.
+        #
+        # Sizing it to the gateway looks right -- /iterate and /outpaint are
+        # answered inside the HTTP request -- but it does not survive contact
+        # with the per-provider subdivision in utils/clients.py. A 25s budget
+        # becomes a 5s Bedrock read timeout, 5s per Firefly call and 12s for
+        # OpenAI, because each provider reserves for its own worst case
+        # (retries, token round trip, image download). Image refinement
+        # routinely takes 10-40s, so those bounds do not shorten slow
+        # refinements: they fail all of them, mark the iteration failed, and
+        # still pay the provider, which generated the image anyway.
+        #
+        # Overrunning the gateway is the lesser evil and is already survivable.
+        # `add_iteration` has written the row, the provider result is stored
+        # against it, and `useSessionPolling` observes the outcome on /status
+        # regardless of what the original POST returned. A 504 there costs a
+        # stale error toast; a 5s timeout costs the image and the money. The
+        # durable fix is to dispatch refinement to a worker the way Phase 3 did
+        # for /generate, which removes the ceiling instead of negotiating.
+        config_dict["timeout"] = config.generate_dispatch_budget_seconds
         handler = get_handler_fn(model_config.provider)
         handler_args = build_handler_args_fn(
             config_dict,
@@ -1294,7 +1834,7 @@ def _handle_refinement(
             error_msg = sanitize_error_message(result.get("error", "Unknown error"))
             _handle_failed_result(session_id, model_name, iteration_index, error_msg)
             # One model, and it failed: the whole request produced nothing.
-            _refund_credits(validated.tier, refund_kind, correlation_id)
+            _refund_usage(validated.tier, refund_kind, correlation_id)
             return response(
                 500,
                 {
@@ -1320,7 +1860,7 @@ def _handle_refinement(
             correlation_id=correlation_id,
             traceback=traceback.format_exc(),
         )
-        _refund_credits(validated.tier, refund_kind, correlation_id)
+        _refund_usage(validated.tier, refund_kind, correlation_id)
         return response(500, error_responses.internal_server_error())
 
 
@@ -1410,6 +1950,41 @@ def _session_is_private(session: dict[str, Any]) -> bool:
     return session.get("visibility") == "private"
 
 
+def _resolve_tier_or_none(event: LambdaEvent) -> TierContext | None:
+    """Resolve the caller's tier, or ``None`` if identity cannot be resolved.
+
+    ``_guest_service`` is ``None`` whenever ``GUEST_TOKEN_SECRET`` is unset,
+    and with ``AUTH_ENABLED=true`` that reaches ``resolve_tier``'s guest path,
+    which needs it. ``/status`` and ``/download`` were passing it straight
+    through while ``/me`` and ``/prompts/history`` guarded.
+
+    The guard is ``auth_enabled and _guest_service is None``, not
+    ``_guest_service is None``: with auth off the service is legitimately
+    absent and ``resolve_tier`` short-circuits before reading it, so widening
+    the guard would change behaviour in a configuration that is not broken.
+
+    These two endpoints answer ``None`` rather than 500, unlike the three
+    neighbouring sites, and the difference is deliberate:
+
+    - The write paths (``_parse_and_validate_request``) and the identity paths
+      (``/me``, ``/prompts/history``) return 500, so the misconfiguration is
+      loud and cannot pass unnoticed.
+    - A 500 *here* would be a side channel. It separates "this session exists
+      and is private" from "no such session", which is exactly the disclosure
+      the 404-not-403 rule on these endpoints exists to prevent. And both
+      endpoints also serve public sessions, which have nothing to do with
+      guest identity: failing them would give a missing secret a blast radius
+      across the whole read path, gallery included.
+
+    ``None`` already has a defined meaning to ``_caller_owns_session``: not
+    the owner. For a private session that yields the 404 those handlers
+    already return.
+    """
+    if config.auth_enabled and _guest_service is None:
+        return None
+    return resolve_tier(event, _user_repo, _guest_service)
+
+
 def _caller_owns_session(session: dict[str, Any], tier_ctx: Any) -> bool:
     """Return True if ``tier_ctx`` identifies the owner of ``session``.
 
@@ -1469,7 +2044,7 @@ def handle_status(event: LambdaEvent, correlation_id: str | None = None) -> ApiR
         # A private session is readable only by its owner. 404 rather than 403:
         # a 403 confirms the session exists, which is itself a disclosure.
         if _session_is_private(session) and not _caller_owns_session(
-            session, resolve_tier(event, _user_repo, _guest_service)
+            session, _resolve_tier_or_none(event)
         ):
             return response(404, {"error": f"Session {session_id} not found"})
 
@@ -1530,9 +2105,30 @@ def handle_enhance(event: LambdaEvent, correlation_id: str | None = None) -> Api
 
 
 def handle_gallery_list(event: LambdaEvent, correlation_id: str | None = None) -> ApiResponse:
-    """GET /gallery/list - List all galleries with preview images."""
+    """GET /gallery/list - List galleries with preview images.
+
+    Unauthenticated and unquota'd, so the work one request can ask for has to
+    be bounded by the request itself. Clamped exactly as /prompts/recent and
+    /prompts/history clamp, so the three endpoints are visibly consistent.
+    """
+    params = event.get("queryStringParameters") or {}
     try:
-        gallery_folders = image_storage.list_galleries()
+        limit = max(1, min(int(params.get("limit", 20)), 50))
+    except (ValueError, TypeError):
+        return response(400, {"error": "Invalid limit parameter"})
+    cursor = params.get("cursor") or None
+
+    try:
+        # One folder more than asked for. That extra name is how the response
+        # knows whether a next page exists without a second LIST, and it is
+        # dropped before anything is expanded.
+        gallery_folders = image_storage.list_galleries(limit=limit + 1, cursor=cursor)
+        has_more = len(gallery_folders) > limit
+        # Slice BEFORE the fan-out. This is the whole finding: each surviving
+        # folder costs its own paginating LIST, and expanding folders that
+        # will not be returned is what made an unauthenticated GET cost O(N)
+        # with N growing with every session ever created.
+        gallery_folders = gallery_folders[:limit]
 
         def _build_gallery_entry(folder):
             images = image_storage.list_gallery_images(folder)
@@ -1544,10 +2140,7 @@ def handle_gallery_list(event: LambdaEvent, correlation_id: str | None = None) -
             if preview_candidate:
                 preview_url = image_storage.get_cloudfront_url(preview_candidate)
 
-            try:
-                timestamp_str = f"{folder[:10]}T{folder[11:13]}:{folder[14:16]}:{folder[17:19]}Z"
-            except (IndexError, ValueError):
-                timestamp_str = folder
+            timestamp_str = f"{folder[:10]}T{folder[11:13]}:{folder[14:16]}:{folder[17:19]}Z"
 
             return {
                 "id": folder,
@@ -1568,10 +2161,30 @@ def handle_gallery_list(event: LambdaEvent, correlation_id: str | None = None) -
                     correlation_id=correlation_id,
                 )
 
-        # Sort by ID (timestamp) descending
+        # Sort by ID (timestamp) descending. list_galleries already returns
+        # them that way; as_completed does not preserve submission order.
         galleries.sort(key=lambda g: g["id"], reverse=True)
 
-        return response(200, {"galleries": galleries, "total": len(galleries)})
+        body: dict[str, Any] = {"galleries": galleries, "total": len(galleries)}
+        if has_more and gallery_folders:
+            # The oldest id this page ASKED for, not the oldest that survived
+            # expansion. The two differ whenever a per-folder LIST throws, and
+            # deriving the boundary from the survivors is wrong in both
+            # directions: a failure in the middle of the page leaves a folder
+            # newer than the cursor and therefore excluded from every later
+            # page, while a failure at the tail moves the cursor forward and
+            # re-serves folders the caller already has.
+            #
+            # Anchoring to the requested slice makes the boundary independent
+            # of which expansions happened to succeed: no duplicates, and the
+            # only loss is a folder missing from the run in which its LIST
+            # failed. `dropped` reports that rather than letting `total`
+            # quietly under-count.
+            body["nextCursor"] = gallery_folders[-1]
+        dropped = len(gallery_folders) - len(galleries)
+        if dropped:
+            body["dropped"] = dropped
+        return response(200, body)
 
     except Exception as e:
         StructuredLogger.error(
@@ -1656,7 +2269,7 @@ def handle_download(event: LambdaEvent, correlation_id: str | None = None) -> Ap
         # Same ownership rule as /status. A download URL is a grant of access,
         # so this endpoint needs the check just as much as the viewing one.
         if _session_is_private(session) and not _caller_owns_session(
-            session, resolve_tier(event, _user_repo, _guest_service)
+            session, _resolve_tier_or_none(event)
         ):
             return response(404, {"error": f"Session {session_id} not found"})
 
@@ -1844,13 +2457,24 @@ def handle_me(event: LambdaEvent, correlation_id: str | None = None) -> ApiRespo
     window_seconds = (
         config.paid_window_seconds if ctx.tier == "paid" else config.free_window_seconds
     )
-    item = _user_repo.touch_quota_window(ctx.user_id, window_seconds, int(time.time()))
+    item = _user_repo.touch_quota_window(
+        ctx.user_id,
+        window_seconds,
+        int(time.time()),
+        daily_window_seconds=config.paid_window_seconds,
+    )
     window_start = int(item.get("windowStart", 0) or 0)
 
     if ctx.tier == "paid":
         quota = {
             "windowSeconds": config.paid_window_seconds,
             "windowStart": int(item.get("dailyResetAt", 0) or 0),
+            # Reported since paid generation gained a bound: a limit the user
+            # cannot see is a limit they experience as a bug.
+            "generate": {
+                "used": int(item.get("dailyGenerateCount", 0) or 0),
+                "limit": config.paid_daily_generate_limit,
+            },
             "refine": {
                 "used": int(item.get("dailyCount", 0) or 0),
                 "limit": config.paid_daily_limit,
@@ -1901,19 +2525,12 @@ def response(
     body: dict[str, Any],
     set_cookie: str | None = None,
 ) -> ApiResponse:
-    """Helper function to create API Gateway response."""
-    headers = {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": cors_allowed_origin,
-        "Access-Control-Allow-Credentials": "true",
-        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, X-Correlation-ID",
-    }
-    resp: ApiResponse = {
-        "statusCode": status_code,
-        "headers": headers,
-        "body": json.dumps(body),
-    }
-    if set_cookie:
-        resp["cookies"] = [set_cookie]
-    return resp
+    """Helper function to create API Gateway response.
+
+    A thin wrapper over ``utils.http.json_response`` -- the header policy,
+    including the ``Retry-After`` mirroring and the rule that a wildcard
+    origin never carries credentials, lives there so admin and billing
+    responses get exactly the same treatment. Kept as a name because ~60 call
+    sites in this module use it and renaming them would bury this change.
+    """
+    return json_response(status_code, body, set_cookie)

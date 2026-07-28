@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import time
 import traceback
 from typing import Any
@@ -15,19 +14,12 @@ from billing.stripe_client import get_stripe
 from users.repository import UserRepository
 from users.tier import extract_claims
 from utils import error_responses
+from utils.http import json_response
 from utils.logger import StructuredLogger
 
 
 def _response(status: int, body: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "statusCode": status,
-        "headers": {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": config.cors_allowed_origin,
-            "Access-Control-Allow-Credentials": "true",
-        },
-        "body": json.dumps(body),
-    }
+    return json_response(status, body)
 
 
 def handle_billing_checkout(

@@ -1,11 +1,17 @@
 [project]
 name = "pixel-prompt-backend"
-version = "2.0.0"
+version = "2.0.1"
 requires-python = ">=3.13"
 
 [project.optional-dependencies]
 dev = [
     "mypy==2.3.0",
+    # This pin has a second home: the repo-root package.json lint-staged block
+    # runs `uvx ruff@0.15.21`. Bump both together. They were unpinned there and
+    # uvx resolved whatever it fetched, which is why .ruff_cache/ accumulated
+    # directories for 0.14.7, 0.14.8, 0.15.21 and 0.16.0 -- a hook that formats
+    # with a different version than CI checks with is a gate that fails for
+    # reasons the contributor cannot reproduce.
     "ruff==0.15.21",
     "pytest==9.0.3",
     "pytest-mock==3.15.1",
@@ -35,18 +41,101 @@ module = [
 ]
 ignore_missing_imports = true
 
-[tool.pytest.ini_options]
-markers = [
-    "e2e: E2E tests requiring MiniStack",
-    "slow: slow tests (deselect with -m 'not slow')",
+# ---------------------------------------------------------------------------
+# TYPE RATCHET
+#
+# Every module below has pre-existing errors from before mypy was wired into
+# CI. Modules come OFF this list; nothing goes ON it. Adding a module here to
+# make a build pass is the thing this list exists to prevent -- fix the file,
+# or narrow its entry to the codes it still needs.
+#
+# Baseline when this list was written, 2026-07-27:
+#     121 errors across 12 of 54 source files.
+# Before this phase's fixes it was 136 across 22. The direction is the point.
+#
+# No entry uses a blanket `ignore_errors`. Each one names the error codes that
+# module actually reports today, so a NEW class of error in a listed file still
+# fails the build. A blanket ignore catches nothing, which makes it
+# indistinguishable from dropping the file from the run -- and it would have
+# hidden the live Gemini `call-arg` defect fixed in be82b6d.
+#
+# The config is discovered from the current directory, so CI passes
+# `--config-file backend/pyproject.toml` explicitly. There is no pyproject.toml
+# at the repository root; `mypy backend/src/` from there would silently run
+# with mypy's defaults and none of the settings above.
+# ---------------------------------------------------------------------------
+
+# 49 errors. The bulk is union-attr, from _parse_and_validate_request returning
+# (ValidatedRequest | None, ApiResponse | None) and callers reading through the
+# first element. A discriminated union clears ~25 of them; Phase 0 records why
+# that restructuring belongs with the module split rather than with this gate.
+[[tool.mypy.overrides]]
+module = ["lambda_function"]
+disable_error_code = [
+    "arg-type",
+    "index",
+    "misc",
+    "no-untyped-def",
+    "union-attr",
 ]
 
-[tool.coverage.run]
-source = ["."]
-omit = ["**/tests/**"]
+# 15 errors, spread across six codes: the LLM response shapes are read
+# positionally out of untyped SDK objects.
+[[tool.mypy.overrides]]
+module = ["api.enhance"]
+disable_error_code = [
+    "arg-type",
+    "assignment",
+    "attr-defined",
+    "index",
+    "no-untyped-def",
+    "union-attr",
+]
 
-[tool.coverage.report]
-fail_under = 80
+# Missing annotations only. jobs.manager 1, utils.retry 4 (a decorator, which
+# needs ParamSpec to type honestly).
+[[tool.mypy.overrides]]
+module = ["jobs.manager", "utils.retry"]
+disable_error_code = ["no-untyped-def"]
+
+# utils.error_responses 24 (23 of them the factory functions Phase 1 left
+# unannotated), utils.logger 6.
+[[tool.mypy.overrides]]
+module = ["utils.error_responses", "utils.logger"]
+disable_error_code = ["assignment", "no-untyped-def"]
+
+# Values read back out of boto3 responses. billing.webhook 3, utils.storage 7.
+[[tool.mypy.overrides]]
+module = ["billing.webhook", "utils.storage"]
+disable_error_code = ["no-any-return", "no-untyped-def"]
+
+# list invariance against the SDKs' unions of accepted content types.
+# gemini 2, openai_provider 3.
+[[tool.mypy.overrides]]
+module = ["models.providers.gemini", "models.providers.openai_provider"]
+disable_error_code = ["arg-type"]
+
+# 6 errors: the same list invariance, plus values read out of requests' JSON.
+[[tool.mypy.overrides]]
+module = ["models.providers.firefly"]
+disable_error_code = ["arg-type", "no-any-return"]
+
+# 2 errors, both Pillow: an ImageFile/Image assignment and an iteration over a
+# getbbox() that is Optional. Worth a real look rather than an annotation --
+# the misc one is "None object is not iterable".
+[[tool.mypy.overrides]]
+module = ["utils.outpaint"]
+disable_error_code = ["assignment", "misc"]
+
+# The pytest and coverage configuration used to live here, and pytest never
+# loaded it: every documented invocation runs from the repository root, where
+# this file is not on the search path. It is now in /pytest.ini (markers,
+# addopts) and /.coveragerc (fail_under). Do not restore it here -- a config
+# in two places is a config that disagrees with itself.
+#
+# [tool.mypy] and [tool.ruff] stay: mypy is passed
+# --config-file backend/pyproject.toml explicitly, and ruff finds this file by
+# walking up from backend/src (ruff.toml extends it for the rest of the tree).
 
 [tool.ruff]
 line-length = 100

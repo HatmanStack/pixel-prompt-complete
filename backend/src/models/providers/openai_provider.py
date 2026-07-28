@@ -1,9 +1,10 @@
 """
 OpenAI provider handlers.
 
-Per ADR-5: ``handle_openai`` targets DALL-E 3 (``dall-e-3``) for generation,
-while ``iterate_openai`` and ``outpaint_openai`` always use ``gpt-image-1``
-because DALL-E 3 does not support ``images.edit``.
+Per docs/adr/005-dalle3-iteration-uses-gpt-image-1.md: ``handle_openai``
+targets DALL-E 3 (``dall-e-3``) for generation, while ``iterate_openai`` and
+``outpaint_openai`` always use ``gpt-image-1`` because DALL-E 3 does not
+support ``images.edit``.
 """
 
 from __future__ import annotations
@@ -13,8 +14,9 @@ from typing import Any
 
 import requests
 
-from config import api_client_timeout, image_download_timeout
+from config import api_client_timeout
 from utils.clients import get_openai_client as _get_openai_client
+from utils.clients import openai_call_timeout
 
 from ._common import (
     GenerationParams,
@@ -27,8 +29,23 @@ from ._common import (
     _success_result,
 )
 
-# Per ADR-5: gpt-image-1 supports images.edit; DALL-E 3 does not.
+# Per docs/adr/005-dalle3-iteration-uses-gpt-image-1.md: gpt-image-1 supports
+# images.edit; DALL-E 3 does not.
 _EDIT_MODEL = "gpt-image-1"
+
+
+def _call_timeout(model_config: ModelConfig) -> int:
+    """Per-call timeout derived from the budget that binds this request.
+
+    ``model_config["timeout"]`` is set on the refinement path only, where the
+    chain is answered inside the HTTP request and has the gateway ceiling
+    above it. /generate has no such key and keeps ``api_client_timeout``:
+    after the async move it runs in a worker with 900s available.
+
+    The SDK call and the image download are sequential, so they share the
+    budget rather than each getting all of it -- see ``openai_call_timeout``.
+    """
+    return openai_call_timeout(model_config.get("timeout", api_client_timeout))
 
 
 def handle_openai(
@@ -37,7 +54,8 @@ def handle_openai(
     """Generate an image with DALL-E 3 (URL response, downloaded to base64)."""
     try:
         model_id = model_config["id"]
-        client = _get_openai_client(model_config.get("api_key", ""))
+        timeout = _call_timeout(model_config)
+        client = _get_openai_client(model_config.get("api_key", ""), timeout=timeout)
 
         response = client.images.generate(
             model=model_id, prompt=prompt, size="1024x1024", quality="standard", n=1
@@ -47,7 +65,7 @@ def handle_openai(
             raise ValueError("OpenAI returned empty data array")
 
         image_url = response.data[0].url
-        img_response = requests.get(image_url, timeout=image_download_timeout)
+        img_response = requests.get(image_url, timeout=timeout)
         img_response.raise_for_status()
         image_base64 = base64.b64encode(img_response.content).decode("utf-8")
 
@@ -55,7 +73,7 @@ def handle_openai(
 
     except requests.Timeout:
         return _error_result(
-            f"Image download timeout after {image_download_timeout} seconds",
+            f"Image download timeout after {_call_timeout(model_config)} seconds",
             model_config,
             "openai",
         )
@@ -87,10 +105,12 @@ def iterate_openai(
     """Iterate using OpenAI ``images.edit``.
 
     Always uses ``gpt-image-1`` regardless of ``model_config["id"]`` because
-    DALL-E 3 does not support the edit endpoint (ADR-5).
+    DALL-E 3 does not support the edit endpoint
+    (docs/adr/005-dalle3-iteration-uses-gpt-image-1.md).
     """
     try:
-        client = _get_openai_client(model_config.get("api_key", ""), timeout=api_client_timeout)
+        timeout = _call_timeout(model_config)
+        client = _get_openai_client(model_config.get("api_key", ""), timeout=timeout)
         image_bytes = _decode_source_image(source_image)
         context_prompt = _build_context_prompt(prompt, context)
 
@@ -107,7 +127,7 @@ def iterate_openai(
         if hasattr(response.data[0], "b64_json") and response.data[0].b64_json:
             image_base64 = response.data[0].b64_json
         else:
-            image_base64 = _download_image_as_base64(response.data[0].url)
+            image_base64 = _download_image_as_base64(response.data[0].url, timeout=timeout)
 
         return _success_result(image_base64, model_config, "openai")
 
@@ -123,7 +143,8 @@ def outpaint_openai(
 ) -> HandlerResult:
     """Outpaint using OpenAI ``images.edit`` with a padded canvas.
 
-    Always uses ``gpt-image-1`` regardless of ``model_config["id"]`` (ADR-5).
+    Always uses ``gpt-image-1`` regardless of ``model_config["id"]``
+    (docs/adr/005-dalle3-iteration-uses-gpt-image-1.md).
     """
     try:
         from utils.outpaint import (
@@ -138,7 +159,8 @@ def outpaint_openai(
         expansion = calculate_expansion(width, height, preset)
         padded_image = pad_image_with_transparency(image_bytes, expansion)
 
-        client = _get_openai_client(model_config.get("api_key", ""), timeout=api_client_timeout)
+        timeout = _call_timeout(model_config)
+        client = _get_openai_client(model_config.get("api_key", ""), timeout=timeout)
         target_size = get_openai_compatible_size(expansion["new_width"], expansion["new_height"])
 
         response = client.images.edit(
@@ -154,7 +176,7 @@ def outpaint_openai(
         if hasattr(response.data[0], "b64_json") and response.data[0].b64_json:
             image_base64 = response.data[0].b64_json
         else:
-            image_base64 = _download_image_as_base64(response.data[0].url)
+            image_base64 = _download_image_as_base64(response.data[0].url, timeout=timeout)
 
         return _success_result(image_base64, model_config, "openai")
 

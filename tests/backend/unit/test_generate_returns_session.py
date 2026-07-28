@@ -4,6 +4,12 @@ The client previously discarded this response, built empty placeholders, and
 re-fetched the identical data by polling /status every 2s for up to five
 minutes — up to 150 Lambda invocations and S3 reads per generation, for data
 it had already been handed.
+
+The attached session is the *synchronous* contract, so this module pins
+GENERATE_ASYNC=false. With the default async dispatch there is no session to
+attach: /generate answers 202 before any provider has run and the client polls,
+which is the premise these tests exist to rule out. That path has its own
+module, tests/backend/unit/test_generate_async_dispatch.py.
 """
 
 from __future__ import annotations
@@ -19,6 +25,22 @@ os.environ.setdefault("CLOUDFRONT_DOMAIN", "test.cloudfront.net")
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 os.environ.setdefault("AWS_ACCESS_KEY_ID", "testing")
 os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testing")
+
+
+@pytest.fixture(autouse=True)
+def _synchronous_dispatch(monkeypatch):
+    """This module exercises the dispatch loop, not the transport.
+
+    GENERATE_ASYNC defaults true, which makes /generate answer 202 before any
+    provider runs. Patched on the config module rather than set in os.environ
+    because config reads the variable once at import, and this module is not
+    the first to import it. The asynchronous path is covered in
+    tests/backend/unit/test_generate_async_dispatch.py.
+    """
+    import config
+
+    monkeypatch.setattr(config, "generate_async", False)
+
 
 FINISHED_SESSION = {
     "sessionId": "s1",

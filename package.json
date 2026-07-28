@@ -7,21 +7,25 @@
   "scripts": {
     "start": "cd frontend && npm run dev",
     "test": "cd frontend && npx vitest run --passWithNoTests",
-    "test:backend": "cd backend && PYTHONPATH=src pytest ../tests/backend -v --tb=short",
+    "test:backend": "make test-backend",
+    "test:backend:e2e:docker": "make e2e-up && { make e2e; rc=$?; make e2e-down; exit $rc; }",
     "lint": "cd frontend && npm run lint",
-    "lint:backend": "uvx ruff check backend/src/",
+    "lint:backend": "uvx ruff@0.15.21 check backend/src/ tests/ backend/scripts/",
     "check": "npm run lint && npm run lint:backend && npm test && npm run test:backend",
     "deploy": "node ./backend/scripts/deploy.js",
     "prepare": "husky"
   },
   "lint-staged": {
     "frontend/src/**/*.{ts,tsx,js,jsx}": [
-      "prettier --write",
-      "eslint --fix"
+      "frontend/node_modules/.bin/prettier --write",
+      "frontend/node_modules/.bin/eslint --fix"
     ],
-    "backend/src/**/*.py": [
-      "uvx ruff check --fix",
-      "uvx ruff format"
+    "tests/**/*.py": [
+      "uvx ruff@0.15.21 check --fix"
+    ],
+    "backend/{src,scripts}/**/*.py": [
+      "uvx ruff@0.15.21 check --fix",
+      "uvx ruff@0.15.21 format"
     ]
   },
   "keywords": [

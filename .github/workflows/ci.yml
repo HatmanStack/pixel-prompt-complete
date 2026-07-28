@@ -10,6 +10,14 @@ on:
     paths-ignore:
       - '.claude/**'
 
+# Least privilege for the whole workflow. Without this block the job token
+# takes the repository default, which on many repos is read/write -- far more
+# than any job here needs. Every job only reads the checkout; none comments,
+# pushes or publishes, so a narrower grant costs nothing and bounds the blast
+# radius of a compromised action.
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -29,9 +37,28 @@ jobs:
           filters: |
             frontend:
               - 'frontend/**'
+              # This file decides what the frontend job DOES, so a change to it
+              # has to run that job. Otherwise a PR that edits the gate skips
+              # the gate -- the same argument the backend filter makes below
+              # about pytest.ini and the Makefile, applied to the workflow
+              # itself, which is the one file that governs all of them.
+              - '.github/workflows/ci.yml'
             backend:
               - 'backend/**'
-              - 'tests/backend/**'
+              # tests/** rather than tests/backend/**, and ruff.toml, because
+              # the backend job now lints both. A filter narrower than the
+              # thing it gates is a job that silently does not run.
+              - 'tests/**'
+              - 'ruff.toml'
+              # The backend job's behaviour also lives outside backend/ now:
+              # pytest.ini and .coveragerc carry the markers and the 80% floor,
+              # and the job shells out to `make lock-check`. Editing any of
+              # them without this would change what the gate does while
+              # skipping the gate.
+              - 'pytest.ini'
+              - '.coveragerc'
+              - 'Makefile'
+              - '.github/workflows/ci.yml'
 
   frontend:
     name: Frontend Lint & Tests
@@ -54,6 +81,13 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npx vitest run --coverage
+      # Last, deliberately: a build failure is less informative than a test
+      # failure, so the faster signal comes first. Until now no job anywhere
+      # produced a production bundle, so the Vite/Rollup-specific paths -- the
+      # manualChunks heuristic, PostCSS/Tailwind resolution, the
+      # import.meta.env.PROD branches in api/config.ts -- first ran at deploy
+      # time. `make build` runs the same command.
+      - run: npm run build
 
   backend:
     name: Backend Lint & Tests
@@ -74,14 +108,42 @@ jobs:
         with:
           python-version: '3.13'
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+      # From the lockfile, not requirements.txt: requirements.txt pins only the
+      # eight direct dependencies, so every transitive version was whatever the
+      # index served that morning. The dev extras stay unlocked because
+      # backend/pyproject.toml already pins each of them exactly.
       - name: Install dependencies
         run: |
-          uv pip install --system -r backend/src/requirements.txt
+          uv pip install --system -r backend/requirements-lock.txt
           uv pip install --system -e "backend/.[dev]"
+      # The target, not a copy of its lines -- see the Makefile for why it
+      # compiles into the committed path and compares pin lines only. A check
+      # written twice is a check that disagrees with itself.
+      - name: Check the lockfile is current
+        run: make lock-check
       - name: Lint
-        run: ruff check backend/src/
+        run: ruff check backend/src/ tests/ backend/scripts/
+      # Format is checked on backend/src/ only, deliberately. Reformatting the
+      # 65 files under tests/ produces a diff no reviewer will read, and
+      # formatting drift there has caused no observed problem. See ADR-A6 --
+      # this asymmetry is a decision, not an oversight, so please do not
+      # "fix" it by adding tests/ here.
+      - name: Format check
+        run: ruff format --check backend/src/
+      # --config-file is not optional. mypy discovers config from the current
+      # directory and there is no pyproject.toml at the repository root, so
+      # `mypy backend/src/` alone runs with mypy's defaults -- none of the
+      # strict settings, none of the type-ratchet overrides. Verified: it
+      # reports 80 errors in 17 files that way, against 0 with the config.
+      - name: Type check
+        run: mypy --config-file backend/pyproject.toml backend/src/
+      # No --cov flags: /pytest.ini turns coverage on by default and
+      # /.coveragerc holds the 80% floor. They were passed here explicitly
+      # while the config in backend/pyproject.toml went unread, which is
+      # exactly why the gap survived -- CI was green on a threshold that
+      # applied nowhere else.
       - name: Tests
-        run: pytest tests/backend/unit -v --tb=short --cov=backend/src --cov-report=term-missing --cov-fail-under=80
+        run: pytest tests/backend/unit -v --tb=short
 
   e2e:
     name: E2E Tests
@@ -113,9 +175,13 @@ jobs:
         with:
           python-version: '3.13'
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+      # From the lockfile, not requirements.txt: requirements.txt pins only the
+      # eight direct dependencies, so every transitive version was whatever the
+      # index served that morning. The dev extras stay unlocked because
+      # backend/pyproject.toml already pins each of them exactly.
       - name: Install dependencies
         run: |
-          uv pip install --system -r backend/src/requirements.txt
+          uv pip install --system -r backend/requirements-lock.txt
           uv pip install --system -e "backend/.[dev]"
       - name: Wait for ministack
         run: |
@@ -128,8 +194,12 @@ jobs:
           done
           echo "ministack failed to become healthy" >&2
           exit 1
+      # --no-cov: coverage is on by default from /pytest.ini, and eleven E2E
+      # tests against MiniStack cannot reach the 80% floor that applies to the
+      # unit suite. Measuring them and ignoring the number would be worse than
+      # not measuring them.
       - name: Run E2E tests
-        run: pytest tests/backend/e2e -v -m e2e
+        run: pytest tests/backend/e2e -v -m e2e --no-cov
 
   docs:
     name: Documentation Lint
@@ -141,7 +211,7 @@ jobs:
         with:
           node-version: '24'
       - name: Markdownlint
-        run: npx -y markdownlint-cli2 "**/*.md" "#node_modules" "#.claude" "#frontend/node_modules" "#docs/plans" "#.venv"
+        run: make docs-lint
 
   status-check:
     name: All Checks Passed

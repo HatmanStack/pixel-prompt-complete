@@ -17,15 +17,15 @@ from typing import Any
 import config
 from admin.auth import require_admin_request
 from users.repository import UserRepository
+from utils.http import json_response
 
 
 def _response(status_code: int, body: dict[str, Any]) -> dict[str, Any]:
-    """Build an API Gateway response."""
-    return {
-        "statusCode": status_code,
-        "headers": {"Content-Type": "application/json"},
-        "body": json.dumps(body, default=str),
-    }
+    """Build an API Gateway response.
+
+    ``default=str`` because user items carry arbitrary DynamoDB attributes.
+    """
+    return json_response(status_code, body, default=str)
 
 
 def _extract_user_id_from_path(path: str) -> str:

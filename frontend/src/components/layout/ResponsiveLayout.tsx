@@ -7,7 +7,7 @@ import type { FC, ReactNode } from 'react';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { DesktopLayout } from './DesktopLayout';
 import { MobileLayout } from './MobileLayout';
-import { TierBanner } from '@/components/TierBanner';
+import { TierBanner } from '@/components/tier/TierBanner';
 
 interface ResponsiveLayoutProps {
   gallery: ReactNode;

@@ -3,8 +3,9 @@ Unit tests for the v2 configuration module.
 """
 
 import os
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 
 class TestModelConfig:
@@ -22,6 +23,7 @@ class TestModelConfig:
         with patch.dict(os.environ, env, clear=True):
             # Re-import to pick up env
             import importlib
+
             import config
             importlib.reload(config)
 
@@ -42,6 +44,7 @@ class TestModelConfig:
         }
         with patch.dict(os.environ, env, clear=True):
             import importlib
+
             import config
             importlib.reload(config)
 
@@ -59,6 +62,7 @@ class TestModelConfig:
         }
         with patch.dict(os.environ, env, clear=True):
             import importlib
+
             import config
             importlib.reload(config)
 
@@ -72,6 +76,7 @@ class TestModelConfig:
         env = {'AUTH_ENABLED': 'false'}
         with patch.dict(os.environ, env, clear=True):
             import importlib
+
             import config
             importlib.reload(config)
 
@@ -90,6 +95,7 @@ class TestModelConfig:
         }
         with patch.dict(os.environ, env, clear=True):
             import importlib
+
             import config
             importlib.reload(config)
 
@@ -106,6 +112,7 @@ class TestModelConfig:
         env = {'AUTH_ENABLED': 'false'}
         with patch.dict(os.environ, env, clear=True):
             import importlib
+
             import config
             importlib.reload(config)
 
@@ -126,6 +133,7 @@ class TestModelConfig:
         }
         with patch.dict(os.environ, env, clear=True):
             import importlib
+
             import config
             importlib.reload(config)
 
@@ -135,6 +143,7 @@ class TestModelConfig:
     def test_iteration_limits_defined(self):
         """MAX_ITERATIONS and ITERATION_WARNING_THRESHOLD should be defined."""
         import importlib
+
         import config
         importlib.reload(config)
 

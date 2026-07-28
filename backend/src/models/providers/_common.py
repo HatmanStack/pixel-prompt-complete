@@ -83,9 +83,21 @@ def _extract_gemini_image(response: Any) -> str:
     raise ValueError("No image data found in Gemini response")
 
 
-def _download_image_as_base64(url: str, timeout: int = image_download_timeout) -> str:
-    """Download image from URL and return as base64."""
-    img_response = requests.get(url, timeout=timeout)
+def _download_image_as_base64(url: str, timeout: float | None = None) -> str:
+    """Download image from URL and return as base64.
+
+    This is the last call in every Firefly path and in both OpenAI refinement
+    paths, so it is part of their budget rather than free time after it. A
+    caller on a budgeted path passes the share the derivation allotted it;
+    ``image_download_timeout`` is the fallback for callers that have no budget
+    of their own.
+
+    Resolved at call time rather than bound as a default at import, so the
+    fallback tracks the configured value instead of whatever it was when this
+    module was first imported.
+    """
+    effective = image_download_timeout if timeout is None else timeout
+    img_response = requests.get(url, timeout=effective)
     img_response.raise_for_status()
     return base64.b64encode(img_response.content).decode("utf-8")
 

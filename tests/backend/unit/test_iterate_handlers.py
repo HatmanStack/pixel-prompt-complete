@@ -5,15 +5,14 @@ Tests for get_iterate_handler dispatcher and individual iterate_* functions
 for each provider (google_gemini, openai).
 """
 
+from unittest.mock import Mock, patch
+
 import pytest
 import responses
-import base64
-from unittest.mock import Mock, patch, MagicMock
+
 from models.providers import get_iterate_handler, iterate_gemini, iterate_openai
-from .fixtures.api_responses import (
-    SAMPLE_IMAGE_CONTENT,
-    SAMPLE_IMAGE_BASE64
-)
+
+from .fixtures.api_responses import SAMPLE_IMAGE_BASE64, SAMPLE_IMAGE_CONTENT
 
 
 class TestGetIterateHandler:

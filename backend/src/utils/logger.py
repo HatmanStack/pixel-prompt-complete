@@ -9,9 +9,28 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-# Configure Python logging for CloudWatch
-logger = logging.getLogger()
+# A NAMED logger, not the root one.
+#
+# This used to be `logging.getLogger()` at INFO, which is the root logger.
+# botocore, urllib3, the OpenAI SDK and google-genai all propagate to root and
+# set no level of their own, so every one of their INFO records was emitted to
+# CloudWatch on every invocation -- ingestion cost and 30-day retention, for
+# records nobody reads.
+#
+# The mechanism is easy to get backwards, so: a record's level is checked
+# against the EMITTING logger's effective level, and the record is then handed
+# to every ancestor's handlers regardless of those ancestors' levels. So this
+# logger at INFO still reaches the handler the Lambda runtime installs on
+# root, while root at WARNING silences the SDK loggers that inherit from it.
+# Both halves are load-bearing; tests/backend/unit/test_logger_levels.py
+# asserts each rather than trusting the reasoning.
+logger = logging.getLogger("pixel_prompt")
 logger.setLevel(logging.INFO)
+
+# Set explicitly rather than left alone: the runtime's default root level has
+# varied across Lambda Python runtimes, and "whatever the platform happens to
+# do" is not a policy anyone can review.
+logging.getLogger().setLevel(logging.WARNING)
 
 
 class StructuredLogger:
@@ -20,12 +39,7 @@ class StructuredLogger:
     """
 
     @staticmethod
-    def log(
-        level: str,
-        message: str,
-        correlation_id: Optional[str] = None,
-        **kwargs
-    ) -> None:
+    def log(level: str, message: str, correlation_id: Optional[str] = None, **kwargs) -> None:
         """
         Log a structured message to CloudWatch.
 
@@ -39,7 +53,7 @@ class StructuredLogger:
         log_entry = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "level": level,
-            "message": message
+            "message": message,
         }
 
         # Add correlation ID if provided

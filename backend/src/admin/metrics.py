@@ -7,7 +7,6 @@ Handles:
 
 from __future__ import annotations
 
-import json
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -18,6 +17,7 @@ from admin.auth import require_admin_request
 from ops.cost_meter import CostMeter
 from ops.model_counters import ModelCounterService
 from users.repository import UserRepository
+from utils.http import json_response
 
 
 def _decimal_default(obj: Any) -> Any:
@@ -28,12 +28,12 @@ def _decimal_default(obj: Any) -> Any:
 
 
 def _response(status_code: int, body: dict[str, Any]) -> dict[str, Any]:
-    """Build an API Gateway response."""
-    return {
-        "statusCode": status_code,
-        "headers": {"Content-Type": "application/json"},
-        "body": json.dumps(body, default=_decimal_default),
-    }
+    """Build an API Gateway response.
+
+    Keeps ``_decimal_default``: metrics are read straight out of DynamoDB, so
+    dropping the encoder would turn every response here into a 500.
+    """
+    return json_response(status_code, body, default=_decimal_default)
 
 
 _MODEL_NAMES = ("gemini", "nova", "openai", "firefly")
@@ -57,9 +57,7 @@ def _spend_summary(repo: UserRepository, now: int, days: int) -> dict[str, Any]:
     today_total = int(today.get("totalMicros", 0))
 
     window_total = today_total
-    window: list[dict[str, Any]] = [
-        {"date": _date_str(now), "totalMicros": today_total}
-    ]
+    window: list[dict[str, Any]] = [{"date": _date_str(now), "totalMicros": today_total}]
     for i in range(1, days):
         ts = now - (i * 86400)
         day = meter.get_daily_spend(now=ts)
@@ -80,9 +78,7 @@ def _spend_summary(repo: UserRepository, now: int, days: int) -> dict[str, Any]:
         "monthToDateUsd": round(monthly_total / 1_000_000, 4),
         "monthlyCeilingMicros": monthly_ceiling,
         "monthlyCeilingUsedPct": (
-            round(monthly_total / monthly_ceiling * 100, 1)
-            if monthly_ceiling > 0
-            else None
+            round(monthly_total / monthly_ceiling * 100, 1) if monthly_ceiling > 0 else None
         ),
         "todayUsd": round(today_total / 1_000_000, 4),
         "byModelMicros": per_model,
@@ -96,9 +92,7 @@ def _spend_summary(repo: UserRepository, now: int, days: int) -> dict[str, Any]:
         "windowDays": days,
         "daily": window,
         "dailyCeilingMicros": ceiling,
-        "dailyCeilingUsedPct": (
-            round(today_total / ceiling * 100, 1) if ceiling > 0 else None
-        ),
+        "dailyCeilingUsedPct": (round(today_total / ceiling * 100, 1) if ceiling > 0 else None),
     }
 
 

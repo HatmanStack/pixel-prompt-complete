@@ -6,6 +6,7 @@ Tests assert on observable behavior (data in S3) not call_args.
 """
 
 import json
+
 import pytest
 
 from models.context import ContextManager, create_context_entry

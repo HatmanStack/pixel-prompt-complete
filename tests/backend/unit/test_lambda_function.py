@@ -5,13 +5,31 @@ Mocks all module-level singletons to avoid real AWS calls.
 """
 
 import json
-from unittest.mock import MagicMock, patch
-
 import os
+from unittest.mock import MagicMock, patch
 
 import boto3
 import pytest
 from moto import mock_aws
+
+
+@pytest.fixture(autouse=True)
+def _synchronous_dispatch(monkeypatch):
+    """This module exercises the dispatch loop, not the transport.
+
+    GENERATE_ASYNC defaults true, and /generate now returns 503 when the
+    worker Invoke does not land instead of silently running the dispatch
+    inline -- inline runs a ~70s budget behind a 29s gateway timeout, so the
+    caller gets a 504 and never learns the sessionId. The Invoke never lands
+    under test (AWS_LAMBDA_FUNCTION_NAME is unset), so these tests pin the
+    synchronous path they were written for. Patched on the config module
+    rather than os.environ because config reads the variable once at import.
+    The asynchronous path is covered in test_generate_async_dispatch.py.
+    """
+    import config
+
+    monkeypatch.setattr(config, "generate_async", False)
+
 
 # Ensure env vars are set before import
 os.environ.setdefault('S3_BUCKET', 'test-bucket')
@@ -433,25 +451,44 @@ class TestCorsHeaders:
         self._check_cors(resp)
 
     def test_cors_origin_configurable(self, mocks):
-        """CORS origin should be configurable via CORS_ALLOWED_ORIGIN env var."""
+        """CORS origin should be configurable via CORS_ALLOWED_ORIGIN env var.
+
+        The origin is read from ``config`` at response-build time now, not
+        captured into ``lambda_function`` at import: it used to be frozen into
+        whichever module imported it first, which is also why admin and
+        billing responses could disagree with this one.
+        """
         lambda_handler = _get_lambda_handler()
         import importlib
-        import lambda_function
 
-        original = lambda_function.cors_allowed_origin
+        import config
+
+        original = config.cors_allowed_origin
         try:
             # Verify the env var wiring: set env, reload config, verify value
             with patch.dict(os.environ, {"CORS_ALLOWED_ORIGIN": "https://example.com"}):
-                import config
                 importlib.reload(config)
                 assert config.cors_allowed_origin == "https://example.com"
 
-            # Verify response() uses the module-level cors_allowed_origin
-            lambda_function.cors_allowed_origin = "https://example.com"
-            resp = lambda_handler(_make_event(method="GET", path="/nope"), None)
-            assert resp["headers"]["Access-Control-Allow-Origin"] == "https://example.com"
+                resp = lambda_handler(_make_event(method="GET", path="/nope"), None)
+                assert resp["headers"]["Access-Control-Allow-Origin"] == "https://example.com"
+                # A named origin is the only case where credentials are legal.
+                assert resp["headers"]["Access-Control-Allow-Credentials"] == "true"
         finally:
-            lambda_function.cors_allowed_origin = original
+            importlib.reload(config)
+            assert config.cors_allowed_origin == original
+
+    def test_wildcard_origin_never_carries_credentials(self, mocks):
+        """The default origin is "*", and the spec forbids it with
+        credentials -- a browser rejects the whole response, so emitting both
+        broke CORS for the client that sends credentials: 'include'."""
+        lambda_handler = _get_lambda_handler()
+        import config
+
+        assert config.cors_allowed_origin == "*"
+        resp = lambda_handler(_make_event(method="GET", path="/nope"), None)
+        assert resp["headers"]["Access-Control-Allow-Origin"] == "*"
+        assert "Access-Control-Allow-Credentials" not in resp["headers"]
 
 
 # ============================================================
@@ -617,6 +654,9 @@ class TestAdminRouting:
                 _make_event(method="GET", path="/admin/users"), None
             )
             mock_route.assert_called_once()
+            # The binding was discarded, so nothing checked that the router's
+            # response is what the caller gets back.
+            assert resp["statusCode"] == 200
 
     def test_admin_models_list_routes(self, mocks):
         lambda_handler = _get_lambda_handler()
@@ -685,3 +725,165 @@ class TestAdminRouting:
                 _make_event(method="POST", path="/admin/models/gemini/disable"), None
             )
             mock_route.assert_called_once()
+
+
+# ============================================================
+# GET /gallery/list — bounded fan-out
+# ============================================================
+
+
+class TestGalleryListBound:
+    """One unauthenticated GET used to fan out to N+1 paginating S3 LISTs, with
+    N growing with every session ever created inside the retention window.
+
+    These drive the REAL ImageStorage.list_galleries against a moto bucket, so
+    the ordering and cursor semantics under test are the ones production uses;
+    only list_gallery_images -- the per-folder fan-out being bounded -- is a
+    counting stub.
+    """
+
+    @staticmethod
+    def _seed(mocks, count=60, extra_keys=()):
+        from utils.storage import ImageStorage
+
+        s3 = boto3.client("s3", region_name="us-east-1")
+        for i in range(count):
+            folder = f"2026-01-01-00-{i // 60:02d}-{i % 60:02d}"
+            s3.put_object(Bucket="test-bucket", Key=f"sessions/{folder}/img.png", Body=b"x")
+        for key in extra_keys:
+            s3.put_object(Bucket="test-bucket", Key=key, Body=b"x")
+
+        real = ImageStorage(s3, "test-bucket", "cdn.example.com")
+        mocks["image_storage"].list_galleries.side_effect = real.list_galleries
+        mocks["image_storage"].list_gallery_images.return_value = ["sessions/x/img.png"]
+        mocks["image_storage"].get_cloudfront_url.return_value = "https://cdn/img.png"
+
+        from concurrent.futures import ThreadPoolExecutor
+
+        pool = ThreadPoolExecutor(max_workers=2)
+        mocks["_gallery_executor"].submit.side_effect = pool.submit
+        return pool
+
+    @staticmethod
+    def _get(params=None):
+        event = _make_event(method="GET", path="/gallery/list")
+        event["queryStringParameters"] = params or {}
+        return _get_lambda_handler()(event, None)
+
+    def test_no_parameters_returns_twenty_and_expands_only_those(self, mocks):
+        pool = self._seed(mocks)
+        resp = self._get()
+        pool.shutdown(wait=True)
+
+        body = _body(resp)
+        assert resp["statusCode"] == 200
+        assert len(body["galleries"]) == 20
+        assert mocks["image_storage"].list_gallery_images.call_count == 20, (
+            "the per-folder fan-out is what costs; it must not exceed the limit"
+        )
+
+    def test_the_page_is_newest_first(self, mocks):
+        pool = self._seed(mocks)
+        resp = self._get()
+        pool.shutdown(wait=True)
+
+        ids = [g["id"] for g in _body(resp)["galleries"]]
+        assert ids == sorted(ids, reverse=True)
+        assert ids[0] == "2026-01-01-00-00-59"
+
+    def test_an_explicit_limit_bounds_the_fan_out(self, mocks):
+        pool = self._seed(mocks)
+        resp = self._get({"limit": "5"})
+        pool.shutdown(wait=True)
+
+        assert len(_body(resp)["galleries"]) == 5
+        assert mocks["image_storage"].list_gallery_images.call_count == 5
+
+    def test_an_oversized_limit_is_clamped_to_fifty(self, mocks):
+        pool = self._seed(mocks)
+        resp = self._get({"limit": "500"})
+        pool.shutdown(wait=True)
+
+        assert len(_body(resp)["galleries"]) == 50
+        assert mocks["image_storage"].list_gallery_images.call_count == 50
+
+    def test_a_zero_limit_is_clamped_up_to_one(self, mocks):
+        pool = self._seed(mocks)
+        resp = self._get({"limit": "0"})
+        pool.shutdown(wait=True)
+
+        assert len(_body(resp)["galleries"]) == 1
+
+    def test_a_non_integer_limit_is_a_400(self, mocks):
+        self._seed(mocks)
+        resp = self._get({"limit": "abc"})
+        assert resp["statusCode"] == 400
+
+    def test_a_cursor_returns_only_folders_older_than_it(self, mocks):
+        pool = self._seed(mocks)
+        first = self._get({"limit": "5"})
+        cursor = _body(first)["nextCursor"]
+        second = self._get({"limit": "5", "cursor": cursor})
+        pool.shutdown(wait=True)
+
+        first_ids = [g["id"] for g in _body(first)["galleries"]]
+        second_ids = [g["id"] for g in _body(second)["galleries"]]
+        assert cursor == first_ids[-1]
+        assert set(first_ids).isdisjoint(second_ids)
+        assert max(second_ids) < min(first_ids)
+
+    def test_a_folder_whose_listing_fails_does_not_move_the_cursor(self, mocks):
+        """The cursor must anchor to what was ASKED for, not what survived.
+
+        A per-folder LIST that throws is logged and its entry omitted. Deriving
+        the boundary from the survivors is wrong in both directions: a failure
+        mid-page leaves a folder newer than the cursor and therefore excluded
+        from every later page, and a failure at the tail moves the cursor
+        forward so the next page re-serves folders the caller already has.
+        """
+        pool = self._seed(mocks)
+        # _seed writes 2026-01-01-00-00-00 .. -59; newest-first, a page of 5
+        # ends on -55, which is where the cursor must land.
+        oldest_on_page = "2026-01-01-00-00-55"
+
+        def _fail_oldest(folder):
+            if folder == oldest_on_page:
+                raise RuntimeError("s3 throttled")
+            return ["sessions/x/img.png"]
+
+        mocks["image_storage"].list_gallery_images.side_effect = _fail_oldest
+        resp = self._get({"limit": "5"})
+        pool.shutdown(wait=True)
+
+        body = _body(resp)
+        assert len(body["galleries"]) == 4, "the failed folder should be omitted"
+        assert body["dropped"] == 1, "a silent omission makes total under-count"
+        assert body["nextCursor"] == oldest_on_page, (
+            "the cursor moved to the oldest SURVIVOR, so the next page will "
+            "re-serve folders this page already returned"
+        )
+
+    def test_next_cursor_is_absent_on_the_last_page(self, mocks):
+        pool = self._seed(mocks, count=3)
+        resp = self._get({"limit": "5"})
+        pool.shutdown(wait=True)
+
+        body = _body(resp)
+        assert len(body["galleries"]) == 3
+        assert "nextCursor" not in body
+
+    def test_session_uuid_folders_do_not_consume_the_limit(self, mocks):
+        pool = self._seed(
+            mocks,
+            count=5,
+            extra_keys=[
+                "sessions/8f14e45f-ceea-467a-9f0a-1d2c3b4e5f60/status.json",
+                "sessions/00000000-0000-0000-0000-000000000000/status.json",
+            ],
+        )
+        resp = self._get({"limit": "5"})
+        pool.shutdown(wait=True)
+
+        ids = [g["id"] for g in _body(resp)["galleries"]]
+        assert len(ids) == 5
+        assert all(len(i) == 19 for i in ids)

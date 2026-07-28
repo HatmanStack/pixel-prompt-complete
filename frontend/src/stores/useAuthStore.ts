@@ -43,7 +43,7 @@ interface PersistedAuth {
  * Best-effort JWT decode (no signature verification) to pull `sub` and `email`
  * out of the ID token for UI display. Server-side verification is authoritative.
  */
-export function decodeJwt(token: string): AuthUser | null {
+function decodeJwt(token: string): AuthUser | null {
   try {
     const parts = token.split('.');
     if (parts.length !== 3) return null;

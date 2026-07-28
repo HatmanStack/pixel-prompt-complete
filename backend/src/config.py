@@ -156,6 +156,16 @@ free_window_seconds = _safe_int("FREE_WINDOW_SECONDS", 3600)
 
 # Paid tier
 paid_daily_limit = _safe_int("PAID_DAILY_LIMIT", 200)
+# Paid generation was previously unbounded — the most expensive operation in
+# the product (four providers per call) was capped only by the global spend
+# ceiling and the per-model caps, both of which are shared across every user,
+# so one account could consume the organisation's entire day.
+#
+# 50 is chosen against the cost table below: ~$0.19 per four-model generation
+# is about $9.50/day per paid account, against a $25 global daily ceiling.
+# High enough that no legitimate subscriber notices, low enough that a single
+# account cannot take the day.
+paid_daily_generate_limit = _safe_int("PAID_DAILY_GENERATE_LIMIT", 50)
 paid_window_seconds = _safe_int("PAID_WINDOW_SECONDS", 86400)
 
 # ---------------------------------------------------------------------------
@@ -183,9 +193,7 @@ free_credit_period_seconds = _safe_int("FREE_CREDIT_PERIOD_SECONDS", 2592000)  #
 # Fallback renewal window for a paid user whose Stripe period we do not have
 # (webhook missed, or subscription predates period persistence). Used only as
 # a floor so a paying customer is never left with zero credits.
-paid_credit_fallback_period_seconds = _safe_int(
-    "PAID_CREDIT_FALLBACK_PERIOD_SECONDS", 2592000
-)
+paid_credit_fallback_period_seconds = _safe_int("PAID_CREDIT_FALLBACK_PERIOD_SECONDS", 2592000)
 
 # Master switch. Off keeps the legacy call-counting quotas, so the ledger can
 # be rolled out and rolled back without a redeploy of the old code path.
@@ -397,9 +405,9 @@ MODEL_DAILY_CAPS: dict[str, int] = {
 # config change, not a code change, which is the whole point of the table.
 # ---------------------------------------------------------------------------
 _DEFAULT_MODEL_COSTS_USD_MICROS: dict[str, int] = {
-    "gemini": 39000,   # $0.039
-    "nova": 40000,     # $0.040
-    "openai": 40000,   # $0.040
+    "gemini": 39000,  # $0.039
+    "nova": 40000,  # $0.040
+    "openai": 40000,  # $0.040
     "firefly": 70000,  # $0.070 (credit-based; least certain of the four)
 }
 
@@ -433,7 +441,7 @@ def model_cost_micros(model_name: str, operation: str) -> int:
 # ---------------------------------------------------------------------------
 # Global daily spend ceiling, in micro-dollars.
 #
-# Defaults to $100/day ON, deliberately. Every other guard in this system is
+# Defaults to $25/day ON, deliberately. Every other guard in this system is
 # conditional on AUTH_ENABLED, which defaults false — so a default deploy had
 # no spend bound of any kind. This one applies unconditionally and is the last
 # thing between a misconfiguration and an unbounded provider bill.
@@ -446,18 +454,16 @@ global_daily_spend_ceiling_usd_micros = _safe_int(
 
 # Hard monthly ceiling, in micro-dollars. Default $500/month.
 #
-# The daily ceiling alone does not bound a month: at $100/day it permitted
-# roughly $3,000 across 30 days. This is the number that actually caps the
+# The daily ceiling alone does not bound a month: at $25/day it permits
+# roughly $750 across 30 days. This is the number that actually caps the
 # invoice while the product is still being figured out.
 #
 # Deliberately 20x the daily figure, not 30x, so a busy day is not throttled
 # for being busy while a single day still cannot consume the month. Set to 0
 # to disable, consciously.
-monthly_spend_ceiling_usd_micros = _safe_int(
-    "MONTHLY_SPEND_CEILING_USD_MICROS", 500_000_000
-)
+monthly_spend_ceiling_usd_micros = _safe_int("MONTHLY_SPEND_CEILING_USD_MICROS", 500_000_000)
 
-# Sub-ceiling for /enhance specifically, in micro-dollars. Default $5/day.
+# Sub-ceiling for /enhance specifically, in micro-dollars. Default $2/day.
 #
 # /enhance is unauthenticated, captcha-free and unquota'd (closing that is
 # P0-D). Metering it against the shared global budget alone would let anonymous
@@ -467,11 +473,34 @@ monthly_spend_ceiling_usd_micros = _safe_int(
 #
 # Set to 0 to disable this sub-ceiling (the global one still applies).
 # $2/day, roughly $60/month, about 12% of the monthly budget. At the previous
-# $5/day this unauthenticated endpoint could claim $150/month, 30% of the
-# total, which is not a defensible share for a path with no sign-in.
+# $5 daily figure this unauthenticated endpoint could claim $150/month, 30% of
+# the total, which is not a defensible share for a path with no sign-in.
 enhance_daily_spend_ceiling_usd_micros = _safe_int(
     "ENHANCE_DAILY_SPEND_CEILING_USD_MICROS", 2_000_000
 )
+
+# Circuit breaker over the quota/spend store. See ops/store_breaker.py, which
+# carries the reasoning and the residual risk; this is only the tuning.
+#
+# Every ceiling above reads one DynamoDB table, and every guard that reads it
+# fails open, so a partition opens all of them at once and stops the metering
+# too. These two numbers are the bound that does not need that table.
+#
+# Consecutive failures before the breaker trips. Consecutive, not a rate: the
+# case being defended against is a partition, which looks like an unbroken
+# run. Five is comfortably more than the three or four store calls a single
+# /generate makes, so one unlucky request cannot trip it.
+store_failure_threshold = _safe_int("STORE_FAILURE_THRESHOLD", 5)
+
+# Generations a tripped container may still dispatch before it sheds.
+#
+# 20 at roughly $0.19 per four-model generation is about $3.80 per container.
+# With ReservedConcurrentExecutions: 10 the fleet-wide worst case is about
+# $38, against a $25 daily and $500 monthly ceiling. Deliberately above the
+# daily ceiling: this is a backstop for the case where the ceilings cannot be
+# evaluated at all, not a second ceiling, and it should never bind while
+# DynamoDB is healthy.
+degraded_dispatch_budget = _safe_int("DEGRADED_DISPATCH_BUDGET", 20)
 
 # CAPTCHA (Cloudflare Turnstile)
 turnstile_secret_key = os.environ.get("TURNSTILE_SECRET_KEY", "")
@@ -495,14 +524,63 @@ if auth_enabled and cors_allowed_origin == "*":
     )
 
 # Operational Timeouts (seconds) - configurable via environment
+
+# API Gateway HTTP APIs cap the integration timeout at 30 seconds and the
+# quota is not adjustable. One second of margin is kept so a request that
+# is going to be abandoned is abandoned by us, with a logged reason,
+# rather than by the gateway with a 504 and no record.
+#
+# Declared first because two budgets below are derived from it.
+gateway_integration_timeout_seconds = 29
+
 api_client_timeout = _safe_float("API_CLIENT_TIMEOUT", 60.0)
 
 # Every provider must bound its own call below this, because the dispatch
-# timeout in handle_generate cannot cancel a future that has already started:
+# timeout in run_generation cannot cancel a future that has already started:
 # the call is blocking I/O inside a worker thread. If a provider outlives the
-# budget the request is abandoned, the user is told the model failed, and the
-# provider generates and bills for the image anyway.
+# budget the dispatch is abandoned, the session records the model as failed,
+# and the provider generates and bills for the image anyway.
+#
+# 70s is legitimate only because the dispatch no longer runs inside the HTTP
+# request: with GENERATE_ASYNC=true it runs in a worker invocation that has the
+# function's 900s timeout and no gateway in front of it. Synchronous mode has
+# no such headroom -- see sync_mode_fits_gateway below.
 generate_dispatch_budget_seconds = api_client_timeout + 10
+
+# /iterate, /outpaint and /enhance are answered inside the HTTP request, so
+# their whole call chain has to fit under the gateway ceiling rather than the
+# dispatch budget above -- there is no worker invocation behind them. Four
+# seconds are reserved for validation, quota, the session read/write and
+# response assembly.
+sync_dispatch_budget_seconds = float(gateway_integration_timeout_seconds - 4)
+
 image_download_timeout = _safe_int("IMAGE_DOWNLOAD_TIMEOUT", 30)
-enhance_timeout = _safe_float("ENHANCE_TIMEOUT", 30.0)
+
+# Clamped rather than merely defaulted. A 30s enhance timeout inside a 29s
+# gateway ceiling cannot succeed at its limit: the gateway returns 504 first,
+# the caller is told the request failed, and the LLM call is billed anyway.
+# ADR-A12 records why /enhance is not gated in other ways.
+enhance_timeout = min(_safe_float("ENHANCE_TIMEOUT", 30.0), sync_dispatch_budget_seconds)
 generate_thread_workers = _safe_int("GENERATE_THREAD_WORKERS", 4)
+
+# When true (the default), POST /generate answers the caller as soon as the
+# session exists and hands the provider dispatch to an asynchronous
+# self-invocation. When false, the handler runs the generation inline and
+# returns the full result -- the pre-async behaviour, and the only mode that
+# works where there is no Lambda service to invoke: `sam local start-api` and
+# the MiniStack E2E suite.
+generate_async = os.environ.get("GENERATE_ASYNC", "true").lower() == "true"
+
+
+def sync_mode_fits_gateway(budget_seconds: float) -> bool:
+    """Whether a synchronous dispatch budget clears the gateway ceiling.
+
+    Deliberately NOT called at import. GENERATE_ASYNC=false exists for the
+    environments that have no gateway at all, so failing closed there would
+    enforce a constraint that does not apply and would break the escape hatch.
+    It is also unsatisfiable in a deployed stack: API_CLIENT_TIMEOUT is neither
+    a SAM parameter nor a Lambda environment variable, so a deployment always
+    gets the 60.0 default and a budget of 70. The relationship is asserted by
+    tests/backend/unit/test_dispatch_budget.py instead. See ADR-A1.
+    """
+    return budget_seconds <= gateway_integration_timeout_seconds

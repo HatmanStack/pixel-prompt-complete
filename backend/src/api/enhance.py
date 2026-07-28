@@ -92,7 +92,6 @@ Enhance the following prompt:"""
         """
         return bool(self.prompt_model and self.prompt_model.get("api_key"))
 
-
     def adapt_per_model(
         self,
         prompt: str,
@@ -155,7 +154,17 @@ Enhance the following prompt:"""
                     ],
                     **_get_model_params(model_id),
                 }
-                if "gpt-4" in model_id or "gpt-5" in model_id:
+                # The base_url guard matches _complete's, and for the same
+                # reason: a custom base_url means an OpenAI-compatible third
+                # party, and many of those reject response_format outright.
+                # Keying only on the model id meant a third-party endpoint
+                # serving a "gpt-4"- or "gpt-5"-named model raised here, and
+                # the except below silently fell back to the original prompt
+                # for EVERY model -- disabling per-model adaptation entirely
+                # with nothing louder than a warning to show for it.
+                if ("gpt-4" in model_id or "gpt-5" in model_id) and (
+                    "base_url" not in self.prompt_model
+                ):
                     completion_params["response_format"] = {"type": "json_object"}
 
                 response = client.chat.completions.create(**completion_params)
@@ -311,8 +320,7 @@ lengths of the same sentence."""
             if short and long_ and short != long_:
                 return short, long_
             StructuredLogger.warning(
-                "Enhance variants unusable (missing or identical); "
-                "returning the original prompt"
+                "Enhance variants unusable (missing or identical); returning the original prompt"
             )
         except Exception as e:
             StructuredLogger.warning(f"Enhance variants failed: {e}")

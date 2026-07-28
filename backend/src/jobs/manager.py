@@ -12,14 +12,96 @@ import random
 import time
 import uuid
 from datetime import datetime, timezone
+from typing import TypedDict
 
 from botocore.exceptions import ClientError
 
 from config import MAX_ITERATIONS, MODELS
 
-# Maximum retries for optimistic locking conflicts
-MAX_RETRIES = 3
-RETRY_DELAY_MS = 50
+# Attempts at the conditional write before giving up. Was 3, which is thin
+# against four provider threads issuing eight conflicting writes per
+# generation -- and the write that loses is `complete_iteration`, i.e. an
+# image already generated, paid for and uploaded.
+MAX_RETRIES = 8
+# Base for the exponential backoff, in milliseconds.
+#
+# The arithmetic matters, because a lock that waits long enough becomes the
+# timeout it was meant to survive. Sleeps happen after every attempt but the
+# last, so seven of them: 25 * (2**0 + ... + 2**6) = 25 * 127 = 3175ms, plus
+# up to 7 * 25 = 175ms of jitter. Worst case ~3.35s against a
+# `generate_dispatch_budget_seconds` of 70 -- under 5%, and only on a request
+# that is about to fail anyway.
+RETRY_BASE_DELAY_MS = 25
+
+
+def _backoff_seconds(attempt: int) -> float:
+    """Exponential backoff with jitter, in seconds, for attempt ``attempt``.
+
+    Jitter is what stops four threads that collided once from colliding again
+    on the same schedule; without it, retrying writers stay in lockstep and
+    the extra attempts buy nothing.
+    """
+    jitter = random.uniform(0, RETRY_BASE_DELAY_MS)
+    return (RETRY_BASE_DELAY_MS * (2.0**attempt) + jitter) / 1000.0
+
+
+class _IterationRequired(TypedDict):
+    index: int
+    status: str
+
+
+class Iteration(_IterationRequired, total=False):
+    """One refinement of one model column.
+
+    Only ``index`` and ``status`` are required: they are the two fields every
+    reader dereferences unconditionally. Everything else is written on some
+    paths and not others -- ``imageKey`` and ``duration`` only on success,
+    ``error`` only on failure, ``adaptedPrompt`` only when adaptation changed
+    the prompt -- and records already in S3 reflect that.
+    """
+
+    prompt: str
+    startedAt: str
+    isOutpaint: bool
+    adaptedPrompt: str
+    outpaintPreset: str
+    imageKey: str
+    completedAt: str
+    duration: float
+    error: str
+
+
+class ModelColumn(TypedDict):
+    """One model's column within a session. Always written in full."""
+
+    enabled: bool
+    status: str
+    iterationCount: int
+    iterations: list[Iteration]
+
+
+class _SessionRequired(TypedDict):
+    sessionId: str
+    status: str
+    version: int
+    prompt: str
+    createdAt: str
+    updatedAt: str
+    models: dict[str, ModelColumn]
+
+
+class SessionState(_SessionRequired, total=False):
+    """The stored shape of ``sessions/{id}/status.json``.
+
+    ``ownerId`` and ``visibility`` are optional because sessions written
+    before those features existed carry neither -- ``lambda_function.
+    _session_is_private`` already reasons about exactly that case. Marking
+    them required would assert a shape that historical records in S3 do not
+    have.
+    """
+
+    ownerId: str | None
+    visibility: str
 
 
 class ConcurrencyError(Exception):
@@ -39,6 +121,22 @@ class SessionManager:
     - 4 model columns (gemini, nova, openai, firefly)
     - Up to 7 iterations per model
     - Status per model and overall
+
+    **The lock is the S3 ETag, not the ``version`` field.** ``version`` is
+    read, incremented and persisted on every mutation, and appears in no
+    condition anywhere -- it is an advisory counter, useful for spotting a
+    lost update after the fact and for reasoning about one while debugging.
+    What actually serialises concurrent writers is
+    ``_save_status_if_unmodified``, which passes the ETag from the read that
+    produced the state as ``IfMatch``. The field named for the lock has never
+    been the lock; the name is kept because the counter earns its place, and
+    this docstring exists so the name stops misleading readers.
+
+    The four provider threads are deliberately NOT serialised behind a local
+    ``threading.Lock``. It would work, and it would make the four provider
+    calls' session writes strictly sequential to avoid contention that now
+    costs two round trips per attempt and resolves within the retry budget --
+    trading real parallelism for a problem the ETag already solves.
     """
 
     def __init__(self, s3_client, bucket_name: str):
@@ -79,7 +177,7 @@ class SessionManager:
         now = datetime.now(timezone.utc).isoformat()
 
         # Initialize model states for all 4 models
-        models = {}
+        models: dict[str, ModelColumn] = {}
         for model_name in MODELS.keys():
             models[model_name] = {
                 "enabled": model_name in enabled_models,
@@ -88,7 +186,7 @@ class SessionManager:
                 "iterations": [],
             }
 
-        status = {
+        status: SessionState = {
             "sessionId": session_id,
             "status": "pending",
             "version": 1,
@@ -103,6 +201,28 @@ class SessionManager:
         self._save_status(session_id, status)
         return session_id
 
+    def _get_session_with_etag(self, session_id: str) -> tuple[SessionState, str] | None:
+        """Read the session and the ETag that identifies the version read.
+
+        The ETag is what the subsequent conditional write is guarded on. It is
+        returned from the SAME response that produced the state on purpose:
+        fetching it separately with a second HEAD request cost a third round trip
+        and, worse, opened a window in which another writer could land between
+        the two -- so ``IfMatch`` guarded a version this reader never read, and
+        the conflict it was meant to detect went undetected.
+
+        Returns None when the session does not exist.
+        """
+        try:
+            key = f"sessions/{session_id}/status.json"
+            response = self.s3.get_object(Bucket=self.bucket, Key=key)
+            state: SessionState = json.loads(response["Body"].read().decode("utf-8"))
+            return state, response["ETag"]
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "NoSuchKey":
+                return None
+            raise
+
     def get_session(self, session_id: str) -> dict | None:
         """
         Get session status from S3.
@@ -113,14 +233,8 @@ class SessionManager:
         Returns:
             Session status dict or None if not found
         """
-        try:
-            key = f"sessions/{session_id}/status.json"
-            response = self.s3.get_object(Bucket=self.bucket, Key=key)
-            return json.loads(response["Body"].read().decode("utf-8"))
-        except ClientError as e:
-            if e.response["Error"]["Code"] == "NoSuchKey":
-                return None
-            raise
+        loaded = self._get_session_with_etag(session_id)
+        return dict(loaded[0]) if loaded else None
 
     def add_iteration(
         self,
@@ -150,9 +264,10 @@ class SessionManager:
             ValueError: If session/model not found or iteration limit reached
         """
         for attempt in range(MAX_RETRIES):
-            session = self.get_session(session_id)
-            if not session:
+            loaded = self._get_session_with_etag(session_id)
+            if not loaded:
                 raise ValueError(f"Session {session_id} not found")
+            session, etag = loaded
 
             if model not in session["models"]:
                 raise ValueError(f"Unknown model: {model}")
@@ -170,7 +285,7 @@ class SessionManager:
             now = datetime.now(timezone.utc).isoformat()
 
             # Add iteration
-            iteration = {
+            iteration: Iteration = {
                 "index": iteration_index,
                 "status": "in_progress",
                 "prompt": prompt,
@@ -191,10 +306,11 @@ class SessionManager:
             session["updatedAt"] = now
             session["version"] = original_version + 1
 
-            if self._save_status_with_version(session_id, session):
+            if self._save_status_if_unmodified(session_id, session, etag):
                 return iteration_index
 
-            time.sleep(RETRY_DELAY_MS / 1000.0 + random.uniform(0, 0.05))
+            if attempt < MAX_RETRIES - 1:
+                time.sleep(_backoff_seconds(attempt))
 
         raise ConcurrencyError(
             f"Failed to add iteration after {MAX_RETRIES} retries for session {session_id}"
@@ -219,9 +335,10 @@ class SessionManager:
             duration: Processing duration in seconds (optional)
         """
         for attempt in range(MAX_RETRIES):
-            session = self.get_session(session_id)
-            if not session:
+            loaded = self._get_session_with_etag(session_id)
+            if not loaded:
                 raise ValueError(f"Session {session_id} not found")
+            session, etag = loaded
 
             original_version = session.get("version", 1)
             model_data = session["models"][model]
@@ -251,10 +368,11 @@ class SessionManager:
             session["updatedAt"] = now
             session["version"] = original_version + 1
 
-            if self._save_status_with_version(session_id, session):
+            if self._save_status_if_unmodified(session_id, session, etag):
                 return
 
-            time.sleep(RETRY_DELAY_MS / 1000.0 + random.uniform(0, 0.05))
+            if attempt < MAX_RETRIES - 1:
+                time.sleep(_backoff_seconds(attempt))
 
         raise ConcurrencyError(
             f"Failed to complete iteration after {MAX_RETRIES} retries for session {session_id}"
@@ -271,9 +389,10 @@ class SessionManager:
             error: Error message
         """
         for attempt in range(MAX_RETRIES):
-            session = self.get_session(session_id)
-            if not session:
+            loaded = self._get_session_with_etag(session_id)
+            if not loaded:
                 raise ValueError(f"Session {session_id} not found")
+            session, etag = loaded
 
             original_version = session.get("version", 1)
             model_data = session["models"][model]
@@ -301,10 +420,11 @@ class SessionManager:
             session["updatedAt"] = now
             session["version"] = original_version + 1
 
-            if self._save_status_with_version(session_id, session):
+            if self._save_status_if_unmodified(session_id, session, etag):
                 return
 
-            time.sleep(RETRY_DELAY_MS / 1000.0 + random.uniform(0, 0.05))
+            if attempt < MAX_RETRIES - 1:
+                time.sleep(_backoff_seconds(attempt))
 
         raise ConcurrencyError(
             f"Failed to fail iteration after {MAX_RETRIES} retries for session {session_id}"
@@ -321,11 +441,11 @@ class SessionManager:
         Returns:
             Current iteration count (0-7)
         """
-        session = self.get_session(session_id)
-        if not session:
+        loaded = self._get_session_with_etag(session_id)
+        if not loaded:
             return 0
 
-        model_data = session["models"].get(model)
+        model_data = loaded[0]["models"].get(model)
         if not model_data:
             return 0
 
@@ -342,11 +462,11 @@ class SessionManager:
         Returns:
             S3 image key or None if no completed iterations
         """
-        session = self.get_session(session_id)
-        if not session:
+        loaded = self._get_session_with_etag(session_id)
+        if not loaded:
             return None
 
-        model_data = session["models"].get(model)
+        model_data = loaded[0]["models"].get(model)
         if not model_data:
             return None
 
@@ -364,7 +484,7 @@ class SessionManager:
         latest = max(completed, key=lambda x: x["index"])
         return latest.get("imageKey")
 
-    def _save_status(self, session_id: str, status: dict) -> None:
+    def _save_status(self, session_id: str, status: SessionState) -> None:
         """Save session status to S3 (unconditional write for new sessions)."""
         key = f"sessions/{session_id}/status.json"
         self.s3.put_object(
@@ -374,36 +494,47 @@ class SessionManager:
             ContentType="application/json",
         )
 
-    def _save_status_with_version(
+    def _save_status_if_unmodified(
         self,
         session_id: str,
-        status: dict,
+        status: SessionState,
+        etag: str,
     ) -> bool:
-        """
-        Save with ETag-based conditional write for optimistic locking.
+        """Write the status, conditional on nobody having written since ``etag``.
 
-        Returns True if successful, False if version conflict.
+        Named for what it does rather than for ``status["version"]``. The
+        version field is advisory and appears in no condition; ``etag`` is the
+        lock. See the class docstring.
+
+        ``etag`` must come from the read that produced ``status`` -- passing a
+        separately fetched one guards against a version the caller never saw.
+
+        Returns True if the write landed, False if another writer won.
         """
         key = f"sessions/{session_id}/status.json"
         try:
-            head = self.s3.head_object(Bucket=self.bucket, Key=key)
-            current_etag = head["ETag"]
-
             self.s3.put_object(
                 Bucket=self.bucket,
                 Key=key,
                 Body=json.dumps(status),
                 ContentType="application/json",
-                IfMatch=current_etag,
+                IfMatch=etag,
             )
             return True
         except ClientError as e:
             code = e.response["Error"]["Code"]
-            if code in ("PreconditionFailed", "412"):
+            # ConditionalRequestConflict (409) is the other way S3 reports a
+            # lost conditional write: 412 means the ETag no longer matched,
+            # 409 means a concurrent conditional write to the same key was in
+            # flight. Both mean "another writer won", and both want the same
+            # answer -- re-read and retry. Re-raising the 409 surfaced a
+            # ClientError to the caller for what is a routine race on a busy
+            # session, which is exactly what the retry loop exists to absorb.
+            if code in ("PreconditionFailed", "412", "ConditionalRequestConflict", "409"):
                 return False
             raise
 
-    def _compute_model_status(self, model_data: dict) -> str:
+    def _compute_model_status(self, model_data: ModelColumn) -> str:
         """Compute status for a single model based on its iterations."""
         if not model_data["enabled"]:
             return "disabled"
@@ -427,7 +558,7 @@ class SessionManager:
         else:
             return "completed"
 
-    def _compute_session_status(self, session: dict) -> str:
+    def _compute_session_status(self, session: SessionState) -> str:
         """Compute overall session status from model statuses."""
         models = session["models"]
         enabled_models = [m for m in models.values() if m["enabled"]]

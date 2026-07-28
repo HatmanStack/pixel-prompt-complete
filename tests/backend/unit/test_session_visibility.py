@@ -398,6 +398,82 @@ def test_a_public_prompt_still_reaches_the_feed():
     assert [w["promptOwner"] for w in written] == ["GLOBAL#RECENT"]
 
 
+# --- the misconfiguration the ownership check has to survive -----------------
+
+
+def _auth_on_with_no_guest_secret(monkeypatch):
+    """AUTH_ENABLED=true with GUEST_TOKEN_SECRET unset.
+
+    ``_guest_service`` is built once at import from ``config.guest_token_secret``
+    (lambda_function.py:96), so ``None`` with auth on is the deployed shape of
+    that misconfiguration. ``resolve_tier`` is deliberately *not* patched here:
+    the point is that the real one dereferences the ``None``, and every other
+    test in this file patches it with a MagicMock that would absorb the fault.
+    """
+    import config
+    import lambda_function as lf
+
+    monkeypatch.setattr(config, "auth_enabled", True)
+    monkeypatch.setattr(lf, "_guest_service", None)
+
+
+def test_status_on_a_private_session_survives_a_missing_guest_secret(monkeypatch):
+    """The status is the assertion, not the absence of a traceback.
+
+    ``handle_status`` catches every exception and returns 500, so a handler
+    that crashed would look like "did not raise" to a weaker test.
+
+    404 rather than 500 is a deliberate choice, recorded on
+    ``_resolve_tier_or_none``: a 500 in the private branch separates "this
+    session exists and is private" from "no such session", which is exactly
+    the disclosure the 404-not-403 rule on this endpoint exists to prevent.
+    """
+    import lambda_function as lf
+
+    _auth_on_with_no_guest_secret(monkeypatch)
+    with patch.object(
+        lf.session_manager, "get_session", return_value=dict(_PRIVATE_SESSION)
+    ):
+        resp = lf.handle_status(_event("/status/s1"), "c1")
+
+    assert resp["statusCode"] == 404, resp
+
+
+def test_download_on_a_private_session_survives_a_missing_guest_secret(monkeypatch):
+    """Second call site, same missing guard, same answer."""
+    import lambda_function as lf
+
+    _auth_on_with_no_guest_secret(monkeypatch)
+    with patch.object(
+        lf.session_manager, "get_session", return_value=dict(_PRIVATE_SESSION)
+    ):
+        resp = lf.handle_download(_event("/download/s1/gemini/0"), "c1")
+
+    assert resp["statusCode"] == 404, resp
+
+
+def test_a_public_session_is_untouched_by_the_missing_guest_secret(monkeypatch):
+    """The reason the fix is not a 500 at the top of the handler.
+
+    These two endpoints also serve public sessions, which have nothing to do
+    with guest identity. Failing them would give a missing secret a blast
+    radius across the whole read path -- the gallery included.
+    """
+    import lambda_function as lf
+
+    _auth_on_with_no_guest_secret(monkeypatch)
+    public = {
+        "sessionId": "s2",
+        "visibility": "public",
+        "ownerId": None,
+        "models": {"gemini": {"iterations": []}},
+    }
+    with patch.object(lf.session_manager, "get_session", return_value=public):
+        resp = lf.handle_status(_event("/status/s2"), "c1")
+
+    assert resp["statusCode"] == 200, resp
+
+
 # --- the ownership check must actually run ----------------------------------
 
 

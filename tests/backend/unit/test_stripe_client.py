@@ -16,8 +16,9 @@ def test_get_stripe_raises_when_key_missing(monkeypatch):
 
 
 def test_get_stripe_sets_api_key_once(monkeypatch):
-    import config
     import stripe as stripe_module
+
+    import config
     from billing.stripe_client import get_stripe, reset_stripe_client
 
     reset_stripe_client()

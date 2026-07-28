@@ -11,7 +11,7 @@ import { useState, useCallback, useMemo, useEffect, type FC } from 'react';
 import { useToast } from '@/stores/useToastStore';
 import { downloadImage } from '@/utils/imageHelpers';
 import ImageCard from './ImageCard';
-import ImageModal from '@/components/features/generation/ImageModal';
+import ImageModal from '@/components/generation/ImageModal';
 import { useSound } from '@/hooks/useSound';
 
 interface ImageData {

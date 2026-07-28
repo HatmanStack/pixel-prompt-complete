@@ -1,6 +1,6 @@
 """DynamoDB-backed user repository with atomic quota updates.
 
-Implements the ``users`` table described in Phase-0.md ADR-3 / ADR-4.
+Implements the single-table design in docs/adr/003-dynamodb-single-table.md.
 All counter updates use conditional ``UpdateItem`` calls so window reset
 and increment happen atomically in a single round trip.
 """
@@ -41,7 +41,10 @@ class UserRepository:
 
     def get_user(self, user_id: str) -> dict | None:
         resp = self._table.get_item(Key={"userId": user_id})
-        return resp.get("Item")
+        # boto3 is untyped, so resp is Any. Annotate rather than let an
+        # implicit Any satisfy the declared return type.
+        item: dict | None = resp.get("Item")
+        return item
 
     def get_or_create_user(
         self,
@@ -115,7 +118,13 @@ class UserRepository:
             if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
                 raise
 
-    def touch_quota_window(self, user_id: str, window_seconds: int, now: int) -> dict:
+    def touch_quota_window(
+        self,
+        user_id: str,
+        window_seconds: int,
+        now: int,
+        daily_window_seconds: int = 86400,
+    ) -> dict:
         """Ensure the user exists and reset counters if the window expired."""
         self.get_or_create_user(user_id, now=now)
         self._reset_if_stale(
@@ -125,12 +134,22 @@ class UserRepository:
             window_seconds,
             now,
         )
-        # Also reset the daily quota window (paid users use dailyCount).
+        # Also reset the daily quota window. Paid users have two counters on
+        # this one window — refinement and generation — and both must be
+        # zeroed together, or GET /me reports a count the quota layer has
+        # already forgotten.
+        # Parameterised rather than a literal 86400. The paid tier's window is
+        # operator-tunable via PAID_WINDOW_SECONDS, and `enforce_quota` reads
+        # that value -- so a hardcoded day here reset the counters on a
+        # different schedule from the one the quota check enforces. GET /me
+        # then reported a count the quota layer had already forgotten, or
+        # refused a caller whose window this method still considered open.
+        # Defaulted so callers that genuinely mean "a day" need not thread it.
         self._reset_if_stale(
             user_id,
             "dailyResetAt",
-            ["dailyCount"],
-            86400,
+            ["dailyCount", "dailyGenerateCount"],
+            daily_window_seconds,
             now,
         )
         return self.get_user(user_id) or {}
@@ -154,10 +173,15 @@ class UserRepository:
         if create_if_missing:
             self.get_or_create_user(user_id, now=now, ttl=ttl)
 
-        # Determine sibling counters to zero on window reset.
+        # Determine sibling counters to zero on window reset. Every counter
+        # sharing a window field must appear in the other's entry: zeroing one
+        # and not the other leaves the sibling stranded at its limit for as
+        # long as the account keeps the window alive.
         _SIBLING_COUNTERS = {
             ("windowStart", "generateCount"): ["generateCount", "refineCount"],
             ("windowStart", "refineCount"): ["generateCount", "refineCount"],
+            ("dailyResetAt", "dailyCount"): ["dailyCount", "dailyGenerateCount"],
+            ("dailyResetAt", "dailyGenerateCount"): ["dailyCount", "dailyGenerateCount"],
         }
         fields_to_zero = _SIBLING_COUNTERS.get((window_field, counter), [counter])
 
@@ -200,6 +224,57 @@ class UserRepository:
                 continue
         return False, self.get_user(user_id) or {}
 
+    def decrement_counter(
+        self,
+        user_id: str,
+        counter: str,
+        window_field: str,
+        window_seconds: int,
+        now: int,
+    ) -> bool:
+        """Give one unit of a rolling-window counter back.
+
+        The counterpart to :meth:`_atomic_increment`, for a request that
+        consumed quota and produced nothing. Returns ``True`` when a unit was
+        actually returned, ``False`` when there was nothing to return.
+
+        A SINGLE conditional UpdateItem, and both halves of the condition are
+        load-bearing:
+
+        * ``{counter} > 0`` — a counter that is already at zero has nothing to
+          give back, and ``ADD -1`` would drive it negative, which reads as
+          extra allowance on the next check.
+        * ``{window_field} > now - window_seconds`` — **this is the one that
+          matters.** A window that has already rolled over has handed the
+          caller a fresh allowance; taking a unit off the new window's counter
+          would be a free extra call stacked on top of it. Refunding is meant
+          to make someone whole for the window they lost it in, not to credit
+          them in a window they never spent it in.
+
+        ``ConditionalCheckFailedException`` covers both cases plus "no such
+        record", and all three mean the same thing here — nothing to refund —
+        so it is reported, not raised. Any other ``ClientError`` (throttling,
+        access denial) propagates: that is a store failure, not an empty
+        counter, and the caller logs it.
+        """
+        try:
+            self._table.update_item(
+                Key={"userId": user_id},
+                UpdateExpression=f"SET updatedAt = :now ADD {counter} :minus_one",
+                ConditionExpression=(f"{counter} > :zero AND {window_field} > :stale"),
+                ExpressionAttributeValues={
+                    ":minus_one": -1,
+                    ":zero": 0,
+                    ":now": now,
+                    ":stale": now - window_seconds,
+                },
+            )
+            return True
+        except ClientError as e:
+            if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
+                raise
+            return False
+
     def increment_generate(
         self, user_id: str, window_seconds: int, limit: int, now: int
     ) -> tuple[bool, dict]:
@@ -219,6 +294,21 @@ class UserRepository:
     ) -> tuple[bool, dict]:
         return self._atomic_increment(
             user_id, "dailyCount", "dailyResetAt", window_seconds, limit, now
+        )
+
+    def increment_daily_generate(
+        self, user_id: str, window_seconds: int, limit: int, now: int
+    ) -> tuple[bool, dict]:
+        """Count a paid generation against its own daily bucket.
+
+        Separate from ``dailyCount`` on purpose: a generation runs four
+        providers and a refinement runs one, and they are priced apart
+        everywhere else in this codebase. Sharing a counter would make them
+        cost the same. They share ``dailyResetAt`` so the two reset together —
+        see ``_SIBLING_COUNTERS``.
+        """
+        return self._atomic_increment(
+            user_id, "dailyGenerateCount", "dailyResetAt", window_seconds, limit, now
         )
 
     # ---------- admin scan ----------
@@ -241,10 +331,28 @@ class UserRepository:
         last_key: dict | None = None,
         tier_filter: str | None = None,
         suspended_filter: bool | None = None,
+        max_pages: int = 5,
     ) -> tuple[list[dict], dict | None]:
         """Scan for real user records, excluding synthetic items.
 
-        Returns (items, LastEvaluatedKey_or_None).
+        Returns ``(items, cursor_or_None)``. The cursor is an
+        ``ExclusiveStartKey`` for the next call.
+
+        **The cursor keys off the last item RETURNED, not the last page
+        scanned.** It used to return ``collected[:limit]`` paired with the
+        ``LastEvaluatedKey`` of the page whose surplus items had just been
+        dropped -- so feeding that key back resumed *after* the items that were
+        discarded, and they reached no caller at all. The table's key schema is
+        a single ``userId`` hash (backend/template.yaml), so the key of any
+        item is a complete and valid ``ExclusiveStartKey``.
+
+        ``max_pages`` is a COST bound, not a correctness bound. Synthetic
+        records (``guest#``, ``spend#``, ``anon#``, ...) are filtered
+        client-side and vastly outnumber real users on a live table, so a
+        request for one page of users could otherwise scan the whole thing.
+        Hitting the ceiling returns a short page with the scan's own
+        ``LastEvaluatedKey``; a short page is a normal DynamoDB result and the
+        admin UI already pages.
         """
         filter_parts: list[str] = []
         values: dict[str, Any] = {}
@@ -268,11 +376,12 @@ class UserRepository:
             scan_kwargs["ExclusiveStartKey"] = last_key
 
         # We may need multiple pages to fill `limit` items after filtering
-        # synthetic records, so loop until we have enough or exhaust the table.
+        # synthetic records, so loop until we have enough, exhaust the table,
+        # or hit the page ceiling.
         collected: list[dict] = []
-        out_last_key: dict | None = None
+        page_last_key: dict | None = None
 
-        while True:
+        for _ in range(max_pages):
             resp = self._table.scan(**scan_kwargs)
             for item in resp.get("Items", []):
                 uid = item.get("userId", "")
@@ -280,12 +389,31 @@ class UserRepository:
                     continue
                 collected.append(item)
 
-            out_last_key = resp.get("LastEvaluatedKey")
-            if len(collected) >= limit or not out_last_key:
+            page_last_key = resp.get("LastEvaluatedKey")
+            if len(collected) >= limit or not page_last_key:
                 break
-            scan_kwargs["ExclusiveStartKey"] = out_last_key
+            scan_kwargs["ExclusiveStartKey"] = page_last_key
 
-        return collected[:limit], out_last_key
+        if len(collected) >= limit:
+            page = collected[:limit]
+            # Resume from the last item the caller actually receives, so the
+            # surplus this truncation drops is returned next time rather than
+            # skipped.
+            #
+            # Only when something actually remains, though. `>= limit` is also
+            # true when the table was exhausted and its size happens to divide
+            # by the page size, and handing back a cursor there fabricates a
+            # final page that always comes back empty -- the admin UI renders
+            # an enabled "Next" for it. A cursor is warranted when this
+            # truncation dropped surplus rows, or when the scan stopped with
+            # more table left to read.
+            if len(collected) > limit or page_last_key:
+                return page, {"userId": page[-1]["userId"]}
+            return page, None
+
+        # Under the limit: either the table is exhausted (no key) or the page
+        # ceiling stopped us early (key present, short page).
+        return collected, page_last_key
 
     # ---------- model runtime config ----------
 
@@ -738,9 +866,7 @@ class UserRepository:
             now = int(time.time())
         self._table.update_item(
             Key={"userId": f"event#{event_id}"},
-            UpdateExpression=(
-                "SET completedAt = :now, #ttl = :ttl REMOVE leaseExpiresAt"
-            ),
+            UpdateExpression=("SET completedAt = :now, #ttl = :ttl REMOVE leaseExpiresAt"),
             ExpressionAttributeNames={"#ttl": "ttl"},
             ExpressionAttributeValues={
                 ":now": now,
@@ -821,9 +947,7 @@ class UserRepository:
             set_parts.append("#ttl = if_not_exists(#ttl, :ttl)")
         self._table.update_item(
             Key={"userId": item_key},
-            UpdateExpression=(
-                "SET " + ", ".join(set_parts) + " ADD " + ", ".join(add_parts)
-            ),
+            UpdateExpression=("SET " + ", ".join(set_parts) + " ADD " + ", ".join(add_parts)),
             ExpressionAttributeNames=names,
             ExpressionAttributeValues=values,
         )

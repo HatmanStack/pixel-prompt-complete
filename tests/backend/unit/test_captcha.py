@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 from urllib.error import URLError
-
-import pytest
 
 
 def test_verify_turnstile_success():

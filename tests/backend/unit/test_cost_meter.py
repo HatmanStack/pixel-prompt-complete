@@ -201,3 +201,77 @@ def test_spend_records_excluded_from_user_scans(repo):
     repo.add_counters("spend#2026-07-25", {"totalMicros": 1000})
     users, _ = repo.scan_users(limit=50)
     assert [u["userId"] for u in users] == ["real-user"]
+
+
+# ---------------------------------------------------------------------------
+# _read_spend must not be switchable off by a stray attribute
+#
+# It int()-coerced every attribute of the spend item except userId, updatedAt
+# and ttl. Any non-numeric attribute raised ValueError, which the three
+# ceiling helpers catch and fail OPEN -- so the last guard against an
+# unbounded provider bill could be disabled by an attribute nobody was
+# reading, and the failure looked like a log line rather than an outage.
+# ---------------------------------------------------------------------------
+
+
+def _put(repo, key, attributes):
+    repo._table.put_item(Item={"userId": key, **attributes})
+
+
+def test_a_stray_string_attribute_does_not_raise_and_the_numbers_survive(repo, meter):
+    from ops.cost_meter import spend_item_key
+
+    _put(repo, spend_item_key(NOW), {"totalMicros": 500, "geminiMicros": 200, "note": "hello"})
+
+    spend = meter.get_daily_spend(now=NOW)
+
+    assert spend["totalMicros"] == 500
+    assert spend["geminiMicros"] == 200
+    assert "note" not in spend
+
+
+def test_a_skipped_attribute_is_logged_at_warning(repo, meter, caplog):
+    """A silently dropped attribute is how a coercion bug hides."""
+    import logging
+
+    from ops.cost_meter import spend_item_key
+
+    _put(repo, spend_item_key(NOW), {"totalMicros": 500, "note": "hello"})
+
+    with caplog.at_level(logging.WARNING):
+        meter.get_daily_spend(now=NOW)
+
+    assert any("note" in record.getMessage() for record in caplog.records)
+
+
+def test_an_unreadable_total_raises_a_distinct_error_rather_than_reading_as_zero(repo, meter):
+    """Zero spend and unknown spend are different facts.
+
+    Returning 0 for a corrupt total would report "nothing spent today" to a
+    ceiling whose whole job is to notice that something was.
+    """
+    import pytest as _pytest
+
+    from ops.cost_meter import UnreadableSpendTotal, spend_item_key
+
+    _put(repo, spend_item_key(NOW), {"totalMicros": "not-a-number"})
+
+    with _pytest.raises(UnreadableSpendTotal):
+        meter.get_daily_spend(now=NOW)
+
+
+def test_an_unreadable_enhance_total_also_raises(repo, meter):
+    """/enhance has its own sub-ceiling reading its own attribute."""
+    import pytest as _pytest
+
+    from ops.cost_meter import UnreadableSpendTotal, spend_item_key
+
+    _put(repo, spend_item_key(NOW), {"totalMicros": 1, "enhanceMicros": []})
+
+    with _pytest.raises(UnreadableSpendTotal):
+        meter.get_daily_spend(now=NOW)
+
+
+def test_a_missing_item_still_reads_as_zero(meter):
+    """No item means nothing spent yet, which is a real answer, not a failure."""
+    assert meter.get_daily_spend(now=NOW) == {"totalMicros": 0}

@@ -63,6 +63,30 @@ describe('GenerateButton', () => {
     expect(handleClick).not.toHaveBeenCalled();
   });
 
+  // Client retries no longer cover POST, so this guard is the only thing
+  // between a double-click and a second four-model dispatch. It lives in the
+  // component -- Button renders disabled={disabled || loading} and
+  // GenerateButton always passes loading={isGenerating} -- so a call site
+  // that forgets `disabled` still gets a button that cannot be clicked twice.
+  it('is disabled while generating even when the call site omits disabled', () => {
+    render(<GenerateButton onClick={vi.fn()} isGenerating />);
+
+    expect(screen.getByRole('button')).toBeDisabled();
+  });
+
+  it('issues one onClick when clicked twice in quick succession', () => {
+    const handleClick = vi.fn();
+    const { rerender } = render(<GenerateButton onClick={handleClick} />);
+
+    fireEvent.click(screen.getByRole('button'));
+    // The first click flips isGenerating, exactly as GenerationPanel does
+    // before awaiting the request.
+    rerender(<GenerateButton onClick={handleClick} isGenerating />);
+    fireEvent.click(screen.getByRole('button'));
+
+    expect(handleClick).toHaveBeenCalledTimes(1);
+  });
+
   it('does not fire onClick when disabled', () => {
     const handleClick = vi.fn();
     render(<GenerateButton onClick={handleClick} disabled />);

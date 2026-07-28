@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import importlib
+from unittest.mock import patch
 
 import boto3
 import pytest
 from moto import mock_aws
-from unittest.mock import patch
 
 from users.repository import UserRepository
 

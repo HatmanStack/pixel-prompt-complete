@@ -2,11 +2,14 @@
 Unit tests for storage utilities
 """
 
-import pytest
 import json
 from unittest.mock import patch
+
+import pytest
 from botocore.exceptions import ClientError
+
 from utils.storage import ImageStorage
+
 from .fixtures.api_responses import SAMPLE_IMAGE_BASE64
 
 
@@ -306,3 +309,80 @@ class TestGalleryHelpers:
         s3, bucket = mock_s3
         storage = ImageStorage(s3, bucket, 'cdn.example.com')
         assert storage.get_image_metadata('sessions/missing.json') is None
+
+
+class TestListGalleriesBound:
+    """list_galleries gained a limit and a cursor so the handler can stop
+    expanding folders it will not return."""
+
+    @staticmethod
+    def _seed(s3_client, bucket_name, count=30):
+        for i in range(count):
+            folder = f"2026-02-01-00-00-{i:02d}"
+            s3_client.put_object(
+                Bucket=bucket_name, Key=f"sessions/{folder}/img.png", Body=b"x"
+            )
+        from utils.storage import ImageStorage
+
+        return ImageStorage(s3_client, bucket_name, "cdn.example.com")
+
+    def test_no_limit_returns_everything_as_before(self, mock_s3):
+        s3_client, bucket_name = mock_s3
+        storage = self._seed(s3_client, bucket_name)
+
+        assert len(storage.list_galleries()) == 30
+
+    def test_a_limit_returns_the_newest_n(self, mock_s3):
+        s3_client, bucket_name = mock_s3
+        storage = self._seed(s3_client, bucket_name)
+
+        got = storage.list_galleries(limit=5)
+
+        assert got == [
+            "2026-02-01-00-00-29",
+            "2026-02-01-00-00-28",
+            "2026-02-01-00-00-27",
+            "2026-02-01-00-00-26",
+            "2026-02-01-00-00-25",
+        ]
+
+    def test_a_cursor_excludes_the_cursor_itself_and_everything_newer(self, mock_s3):
+        """Strictly less than, or the client re-renders the folder it paged from."""
+        s3_client, bucket_name = mock_s3
+        storage = self._seed(s3_client, bucket_name)
+
+        got = storage.list_galleries(limit=3, cursor="2026-02-01-00-00-25")
+
+        assert got == [
+            "2026-02-01-00-00-24",
+            "2026-02-01-00-00-23",
+            "2026-02-01-00-00-22",
+        ]
+
+    def test_a_cursor_past_the_oldest_folder_returns_nothing(self, mock_s3):
+        s3_client, bucket_name = mock_s3
+        storage = self._seed(s3_client, bucket_name)
+
+        assert storage.list_galleries(limit=5, cursor="2026-02-01-00-00-00") == []
+
+    def test_paging_the_whole_set_yields_each_folder_exactly_once(self, mock_s3):
+        s3_client, bucket_name = mock_s3
+        storage = self._seed(s3_client, bucket_name)
+
+        seen = []
+        cursor = None
+        # Bounded rather than `while True`: a cursor that is inclusive rather
+        # than exclusive re-returns the folder it paged from forever, and a
+        # test that hangs is worse evidence than one that fails.
+        for _ in range(10):
+            page = storage.list_galleries(limit=7, cursor=cursor)
+            if not page:
+                break
+            seen.extend(page)
+            cursor = page[-1]
+        else:
+            raise AssertionError("paging did not terminate within 10 pages of 30 folders")
+
+        assert len(seen) == 30
+        assert len(set(seen)) == 30
+        assert seen == sorted(seen, reverse=True)

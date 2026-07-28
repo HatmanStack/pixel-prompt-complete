@@ -8,6 +8,7 @@ once per Lambda container and raise cleanly if it is unset.
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Any
 
 import stripe
 
@@ -15,7 +16,7 @@ import config
 
 
 @lru_cache(maxsize=1)
-def get_stripe():
+def get_stripe() -> Any:
     """Return the configured ``stripe`` module.
 
     Raises:

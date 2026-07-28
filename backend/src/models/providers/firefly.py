@@ -4,6 +4,7 @@ Adobe Firefly provider handlers.
 OAuth2 access tokens are cached at module level with a 50-minute TTL
 (Adobe IMS tokens are valid for 24 hours). The cache lives within a
 single Lambda container and resets on cold start.
+See docs/adr/006-firefly-token-cache.md.
 """
 
 from __future__ import annotations
@@ -13,6 +14,10 @@ import time as _time
 from typing import Any
 
 import requests
+
+from config import api_client_timeout
+from utils.clients import FIREFLY_TOKEN_TIMEOUT as _TOKEN_TIMEOUT
+from utils.clients import firefly_call_timeout
 
 from ._common import (
     GenerationParams,
@@ -29,8 +34,21 @@ _TOKEN_URL = "https://ims-na1.adobelogin.com/ims/token/v3"
 _GENERATE_URL = "https://firefly-api.adobe.io/v3/images/generate"
 _EXPAND_URL = "https://firefly-api.adobe.io/v3/images/expand"
 _STORAGE_URL = "https://firefly-api.adobe.io/v2/storage/image"
-_TOKEN_TIMEOUT = 10
-_API_TIMEOUT = 60
+
+
+def _call_timeout(model_config: ModelConfig) -> int:
+    """Per-call timeout derived from the budget that binds this request.
+
+    ``model_config["timeout"]`` is the budget the caller has to fit inside,
+    not a per-call value: /iterate and /outpaint are answered inside the HTTP
+    request and pass the synchronous budget, while /generate runs in a worker
+    with no gateway in front of it and falls back to ``api_client_timeout``.
+    Either way the four sequential calls in the outpaint chain share it, which
+    is what ``firefly_call_timeout`` computes. It replaces a hardcoded 60 that
+    made that chain ~190s against a 70s budget.
+    """
+    return firefly_call_timeout(model_config.get("timeout", api_client_timeout))
+
 
 # Module-level token cache (lives within a single Lambda container).
 # Assumes one set of Firefly credentials per container (single config).
@@ -87,7 +105,7 @@ def _firefly_headers(token: str, client_id: str, json_body: bool = True) -> dict
     return headers
 
 
-def _upload_source_image(image_bytes: bytes, token: str, client_id: str) -> str:
+def _upload_source_image(image_bytes: bytes, token: str, client_id: str, timeout: int) -> str:
     """Upload an image to Firefly storage and return the upload ID."""
     response = requests.post(
         _STORAGE_URL,
@@ -97,7 +115,7 @@ def _upload_source_image(image_bytes: bytes, token: str, client_id: str) -> str:
             "Content-Type": "image/png",
         },
         data=image_bytes,
-        timeout=_API_TIMEOUT,
+        timeout=timeout,
     )
     response.raise_for_status()
     payload = response.json()
@@ -125,6 +143,7 @@ def handle_firefly(
     try:
         client_id = model_config.get("client_id", "")
         client_secret = model_config.get("client_secret", "")
+        timeout = _call_timeout(model_config)
         token = _get_or_refresh_token(client_id, client_secret)
 
         body = {
@@ -137,12 +156,12 @@ def handle_firefly(
             _GENERATE_URL,
             headers=_firefly_headers(token, client_id),
             json=body,
-            timeout=_API_TIMEOUT,
+            timeout=timeout,
         )
         response.raise_for_status()
 
         image_url = _extract_firefly_image_url(response.json())
-        image_base64 = _download_image_as_base64(image_url)
+        image_base64 = _download_image_as_base64(image_url, timeout=timeout)
         return _success_result(image_base64, model_config, "adobe_firefly")
 
     except Exception as e:
@@ -159,10 +178,11 @@ def iterate_firefly(
     try:
         client_id = model_config.get("client_id", "")
         client_secret = model_config.get("client_secret", "")
+        timeout = _call_timeout(model_config)
         token = _get_or_refresh_token(client_id, client_secret)
 
         image_bytes = _decode_source_image(source_image)
-        upload_id = _upload_source_image(image_bytes, token, client_id)
+        upload_id = _upload_source_image(image_bytes, token, client_id, timeout)
         context_prompt = _build_context_prompt(prompt, context)
 
         body = {
@@ -178,12 +198,12 @@ def iterate_firefly(
             _GENERATE_URL,
             headers=_firefly_headers(token, client_id),
             json=body,
-            timeout=_API_TIMEOUT,
+            timeout=timeout,
         )
         response.raise_for_status()
 
         image_url = _extract_firefly_image_url(response.json())
-        image_base64 = _download_image_as_base64(image_url)
+        image_base64 = _download_image_as_base64(image_url, timeout=timeout)
         return _success_result(image_base64, model_config, "adobe_firefly")
 
     except Exception as e:
@@ -202,12 +222,13 @@ def outpaint_firefly(
 
         client_id = model_config.get("client_id", "")
         client_secret = model_config.get("client_secret", "")
+        timeout = _call_timeout(model_config)
         token = _get_or_refresh_token(client_id, client_secret)
 
         image_bytes = _decode_source_image(source_image)
         width, height = get_image_dimensions(image_bytes)
         expansion = calculate_expansion(width, height, preset)
-        upload_id = _upload_source_image(image_bytes, token, client_id)
+        upload_id = _upload_source_image(image_bytes, token, client_id, timeout)
 
         body = {
             "prompt": prompt,
@@ -222,12 +243,12 @@ def outpaint_firefly(
             _EXPAND_URL,
             headers=_firefly_headers(token, client_id),
             json=body,
-            timeout=_API_TIMEOUT,
+            timeout=timeout,
         )
         response.raise_for_status()
 
         image_url = _extract_firefly_image_url(response.json())
-        image_base64 = _download_image_as_base64(image_url)
+        image_base64 = _download_image_as_base64(image_url, timeout=timeout)
         return _success_result(image_base64, model_config, "adobe_firefly")
 
     except Exception as e:

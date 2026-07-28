@@ -10,8 +10,6 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-import pytest
-
 
 def _make_event(groups=None, has_claims=True):
     """Build a minimal API Gateway event with optional cognito:groups."""

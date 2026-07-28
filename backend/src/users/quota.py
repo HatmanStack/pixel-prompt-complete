@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 import config
+from ops import store_breaker
 from users.repository import UserRepository
 from users.tier import TierContext
 from utils.logger import StructuredLogger
@@ -51,9 +52,33 @@ def enforce_quota(
         return _enforce_credits(ctx, endpoint, repo, now)
 
     if ctx.tier == "guest":
-        if endpoint in ("refine", "outpaint"):
-            return QuotaResult(allowed=False, reason="guest_per_user", reset_at=0, usage={})
-        # Per-IP first: it is the only guest bucket a caller cannot reset.
+        # Guest refine/outpaint is refused with a 402 in lambda_function before
+        # enforce_quota is reached, so only "generate" arrives here. Do not
+        # re-add a refine branch: it would be unreachable.
+        #
+        # Identity BEFORE metering. Ordered first because the per-IP bucket is
+        # the one a caller cannot reset -- dropping the cookie mints a fresh
+        # token, but the IP hash persists -- so consuming from it and then
+        # refusing the request spends an allowance the caller has no way to
+        # recover, for a request that was never going to be served.
+        if ctx.guest_token_id is None:
+            # Was a bare `assert`. Under `python -O` the check vanishes and an
+            # unidentifiable guest is metered against nothing, which is how a
+            # guest bucket becomes unlimited; without -O it surfaced as an
+            # AssertionError with no diagnostic, inside a fail-open wrapper, in
+            # a function whose every other failure returns a QuotaResult.
+            #
+            # Denying rather than failing open, unlike the store-error paths:
+            # an unreachable store is a transient fact about infrastructure,
+            # whereas reaching here means resolve_tier produced a guest context
+            # with no token id, which is a bug in this process.
+            StructuredLogger.error(
+                "Guest context has no token id; denying rather than metering "
+                "an unidentifiable caller against nothing"
+            )
+            return QuotaResult(allowed=False, reason="guest_identity_missing", reset_at=0)
+
+        # Per-IP next: it is the only guest bucket a caller cannot reset.
         # Dropping the cookie mints a new token with a fresh per-token
         # counter, so checking that alone bounds nothing.
         if ctx.ip_hash:
@@ -71,12 +96,9 @@ def enforce_quota(
                     "windowStart",
                     config.guest_ip_window_seconds,
                 )
-                return QuotaResult(
-                    allowed=False, reason="guest_ip", reset_at=reset, usage=usage
-                )
+                return QuotaResult(allowed=False, reason="guest_ip", reset_at=reset, usage=usage)
 
         # Per-guest next so denied guests don't consume the global pool.
-        assert ctx.guest_token_id is not None
         ok, item = repo.increment_guest_generate(
             ctx.guest_token_id,
             config.guest_generate_limit,
@@ -172,7 +194,30 @@ def enforce_quota(
 
     # paid
     if endpoint == "generate":
-        return QuotaResult(allowed=True, reason=None, reset_at=0, usage={})
+        # Was unconditionally allowed. Generation runs four providers and is
+        # the most expensive thing the product does; leaving it bounded only
+        # by ceilings shared across all users meant one account could consume
+        # the organisation's entire day. Its own counter, not dailyCount: a
+        # generation and a refinement are priced apart everywhere else.
+        ok, item = repo.increment_daily_generate(
+            ctx.user_id,
+            config.paid_window_seconds,
+            config.paid_daily_generate_limit,
+            now,
+        )
+        usage, reset = _usage(
+            item,
+            "dailyGenerateCount",
+            config.paid_daily_generate_limit,
+            "dailyResetAt",
+            config.paid_window_seconds,
+        )
+        return QuotaResult(
+            allowed=ok,
+            reason=None if ok else "paid_daily_generate",
+            reset_at=reset,
+            usage=usage,
+        )
     ok, item = repo.increment_daily(
         ctx.user_id,
         config.paid_window_seconds,
@@ -271,10 +316,11 @@ def _enforce_anon(
     key = f"anon#{ctx.ip_hash}"
 
     try:
-        ok, item = repo.increment_anon(
-            key, counter, limit, config.anon_window_seconds, now
-        )
+        ok, item = repo.increment_anon(key, counter, limit, config.anon_window_seconds, now)
     except Exception as e:
+        # Counted by the store breaker: this is one of the seven sites that
+        # swallow a store error, and they all read the same table.
+        store_breaker.record_store_result(False)
         # Fail OPEN on a store error, matching the spend ceiling. An
         # unreachable counter is not evidence the caller is over limit, and
         # 500ing every request because the quota store hiccuped is a
@@ -284,6 +330,7 @@ def _enforce_anon(
         # invisible.
         StructuredLogger.error(f"Anon quota check failed, allowing request: {e}")
         return QuotaResult(allowed=True, reason=None, reset_at=0, usage={})
+    store_breaker.record_store_result(True)
     usage, reset = _usage(item, counter, limit, "windowStart", config.anon_window_seconds)
     return QuotaResult(
         allowed=ok,

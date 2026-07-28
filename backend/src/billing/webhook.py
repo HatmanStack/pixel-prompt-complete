@@ -8,7 +8,6 @@ update the users table.
 from __future__ import annotations
 
 import base64
-import json
 import traceback
 from typing import Any
 
@@ -19,18 +18,12 @@ from billing.stripe_client import get_stripe
 from notifications import sender as email_sender
 from notifications import templates as email_templates
 from users.repository import UserRepository
+from utils.http import json_response
 from utils.logger import StructuredLogger
 
 
 def _response(status: int, body: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "statusCode": status,
-        "headers": {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": config.cors_allowed_origin,
-        },
-        "body": json.dumps(body),
-    }
+    return json_response(status, body)
 
 
 def _get_sig_header(event: dict[str, Any]) -> str:
@@ -140,9 +133,7 @@ def _billing_period(obj: dict[str, Any]) -> tuple[int | None, int | None]:
     return (int(start) if start else None, int(end) if end else None)
 
 
-def _on_checkout_completed(
-    obj: dict[str, Any], repo: UserRepository, event_type: str
-) -> None:
+def _on_checkout_completed(obj: dict[str, Any], repo: UserRepository, event_type: str) -> None:
     user_id = _user_id_from_object(obj, repo)
     if not user_id:
         _unresolved(obj, event_type)
@@ -158,9 +149,7 @@ def _on_checkout_completed(
     _send_lifecycle_email(repo, user_id, email_templates.welcome_email)
 
 
-def _on_subscription_upsert(
-    obj: dict[str, Any], repo: UserRepository, event_type: str
-) -> None:
+def _on_subscription_upsert(obj: dict[str, Any], repo: UserRepository, event_type: str) -> None:
     user_id = _user_id_from_object(obj, repo)
     if not user_id:
         _unresolved(obj, event_type)
@@ -195,9 +184,7 @@ def _on_subscription_upsert(
         _send_lifecycle_email(repo, user_id, email_templates.subscription_activated_email)
 
 
-def _on_subscription_deleted(
-    obj: dict[str, Any], repo: UserRepository, event_type: str
-) -> None:
+def _on_subscription_deleted(obj: dict[str, Any], repo: UserRepository, event_type: str) -> None:
     user_id = _user_id_from_object(obj, repo)
     if not user_id:
         _unresolved(obj, event_type)
@@ -215,9 +202,7 @@ def _on_subscription_deleted(
     _send_lifecycle_email(repo, user_id, email_templates.subscription_cancelled_email)
 
 
-def _on_payment_failed(
-    obj: dict[str, Any], repo: UserRepository, event_type: str
-) -> None:
+def _on_payment_failed(obj: dict[str, Any], repo: UserRepository, event_type: str) -> None:
     user_id = _user_id_from_object(obj, repo)
     if not user_id:
         _unresolved(obj, event_type)

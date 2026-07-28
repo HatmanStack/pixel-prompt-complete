@@ -12,8 +12,8 @@
     "test:ui": "vitest --ui",
     "test:coverage": "vitest --coverage",
     "test:watch": "vitest --watch",
-    "analyze": "vite build && echo 'Bundle analysis saved to dist/stats.html'",
-    "typecheck": "tsc --noEmit",
+    "analyze": "ANALYZE=true vite build && echo 'Bundle analysis saved to dist/stats.html'",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json",
     "format": "prettier --write 'src/**/*.{ts,tsx,js,jsx,css,json}'",
     "format:check": "prettier --check 'src/**/*.{ts,tsx,js,jsx,css,json}'"
   },
@@ -45,7 +45,9 @@
     "jsdom": "^29.1.1",
     "prettier": "^3.9.5",
     "rollup-plugin-visualizer": "^7.0.1",
+    "tailwindcss": "^4.3.3",
     "typescript": "^5.9.3",
+    "typescript-eslint": "^8.65.0",
     "vite": "^8.1.5",
     "vitest": "^4.1.10"
   }

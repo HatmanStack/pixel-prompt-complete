@@ -6,10 +6,25 @@
 // Load API endpoint from environment variable
 const apiEndpoint = import.meta.env.VITE_API_ENDPOINT as string | undefined;
 
+/**
+ * Configuration problems found while this module loaded.
+ *
+ * These used to be `throw`s at module scope. That is the earliest point the
+ * app can fail and the worst place to do it: module initialisation runs
+ * during `main.tsx`'s import chain, before `createRoot` and before any
+ * `ErrorBoundary` mounts, so a build missing `VITE_API_ENDPOINT` rendered a
+ * blank page with the reason visible only in the browser console.
+ *
+ * Collecting instead of throwing lets `main.tsx` put the reason on the
+ * screen. The app still refuses to mount — see `main.tsx` — so a broken
+ * configuration stays loud.
+ */
+export const configErrors: string[] = [];
+
 // Validate API endpoint is configured
 if (!apiEndpoint) {
   if (import.meta.env.PROD) {
-    throw new Error(
+    configErrors.push(
       'VITE_API_ENDPOINT environment variable is not configured. ' +
         'Please set it to your API Gateway URL before building for production.',
     );
@@ -34,7 +49,7 @@ export const COGNITO_CLIENT_ID: string =
   (import.meta.env.VITE_COGNITO_CLIENT_ID as string | undefined) ?? '';
 export const COGNITO_REDIRECT_URI: string =
   (import.meta.env.VITE_COGNITO_REDIRECT_URI as string | undefined) ?? '';
-export const COGNITO_LOGOUT_URI: string =
+const COGNITO_LOGOUT_URI: string =
   (import.meta.env.VITE_COGNITO_LOGOUT_URI as string | undefined) ?? '';
 
 // Admin and CAPTCHA feature flags
@@ -55,10 +70,11 @@ if (AUTH_ENABLED) {
   ]
     .filter(([, v]) => !v)
     .map(([k]) => k);
-  if (missing.length > 0) {
-    throw new Error(
-      `AUTH_ENABLED is true but the following Cognito env vars are missing: ${missing.join(', ')}`,
-    );
+  // One entry per variable rather than one combined message: the diagnostic
+  // renders these as a list, and a list is what someone fixing this works
+  // through. The wording is otherwise unchanged.
+  for (const name of missing) {
+    configErrors.push(`AUTH_ENABLED is true but the Cognito env var ${name} is missing`);
   }
 }
 
@@ -125,6 +141,9 @@ export const API_ROUTES = {
 
   // Prompt enhancement
   ENHANCE: '/enhance',
+
+  // Client-side error reporting
+  LOG: '/log',
 
   // Gallery endpoints
   GALLERY_LIST: '/gallery/list',

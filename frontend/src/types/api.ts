@@ -81,14 +81,15 @@ export interface SessionGenerateResponse {
   prompt: string;
   /**
    * Per-model outcomes, including entries that never became iterations
-   * (skipped, daily_cap_reached).
+   * (skipped, daily_cap_reached). On the 202 path every dispatched model is
+   * reported as `pending` — the provider work has not started yet.
    */
   models: Record<string, { status: string; imageKey?: string; imageUrl?: string }>;
   /**
-   * The finished session. /generate awaits every model before responding, so
-   * this is final and the client does not need to poll for it. Optional
-   * because the server attaches it best-effort — if the read-back fails the
-   * images still exist, and the client falls back to polling.
+   * The finished session, attached only when /generate ran the dispatch
+   * inline (GENERATE_ASYNC=false) and every model reached a terminal state.
+   * Absent on the default 202 path, and absent if the read-back failed — in
+   * both cases the client builds a placeholder and polls /status.
    */
   session?: Session;
 }
@@ -126,7 +127,18 @@ export interface GalleryListItem {
 
 export interface SessionGalleryListResponse {
   galleries: GalleryListItem[];
+  /** Count of galleries in THIS page, not the size of the collection. */
   total: number;
+  /**
+   * Opaque cursor for the next page. Absent on the last page — its presence
+   * is the only "there is more" signal the endpoint gives.
+   */
+  nextCursor?: string;
+  /**
+   * Galleries this page asked for whose listing failed and were omitted.
+   * Present only when non-zero, so `total` is never silently short.
+   */
+  dropped?: number;
 }
 
 // Gallery detail response (matches backend handle_gallery_detail)

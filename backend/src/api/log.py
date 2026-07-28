@@ -12,7 +12,9 @@ from utils.logger import StructuredLogger
 VALID_LOG_LEVELS = {"ERROR", "WARNING", "INFO", "DEBUG"}
 
 
-def handle_log(body: Dict, correlation_id: Optional[str] = None, ip_address: str = "unknown") -> Dict:
+def handle_log(
+    body: Dict, correlation_id: Optional[str] = None, ip_address: str = "unknown"
+) -> Dict:
     """
     Handle frontend log submission.
 
@@ -28,8 +30,8 @@ def handle_log(body: Dict, correlation_id: Optional[str] = None, ip_address: str
         ValueError: If required fields are missing or invalid
     """
     # Extract required fields
-    level = body.get('level', '').upper()
-    message = body.get('message', '')
+    level = body.get("level", "").upper()
+    message = body.get("message", "")
 
     # Validate required fields
     if not level:
@@ -40,28 +42,22 @@ def handle_log(body: Dict, correlation_id: Optional[str] = None, ip_address: str
 
     # Validate log level
     if level not in VALID_LOG_LEVELS:
-        raise ValueError(f"Invalid log level '{level}'. Must be one of: {', '.join(VALID_LOG_LEVELS)}")
+        raise ValueError(
+            f"Invalid log level '{level}'. Must be one of: {', '.join(VALID_LOG_LEVELS)}"
+        )
 
     # Extract optional fields
-    stack = body.get('stack')
-    metadata = body.get('metadata', {})
+    stack = body.get("stack")
+    metadata = body.get("metadata", {})
 
     # Add IP address to metadata
-    metadata['ip'] = ip_address
+    metadata["ip"] = ip_address
 
     # Add stack trace to metadata if provided
     if stack:
-        metadata['stack'] = stack
+        metadata["stack"] = stack
 
     # Log to CloudWatch with structured format
-    StructuredLogger.log(
-        level=level,
-        message=message,
-        correlation_id=correlation_id,
-        **metadata
-    )
+    StructuredLogger.log(level=level, message=message, correlation_id=correlation_id, **metadata)
 
-    return {
-        'success': True,
-        'message': 'Log received successfully'
-    }
+    return {"success": True, "message": "Log received successfully"}

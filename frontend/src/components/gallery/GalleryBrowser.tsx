@@ -28,7 +28,17 @@ interface GalleryBrowserProps {
 
 export const GalleryBrowser: FC<GalleryBrowserProps> = ({ onGallerySelect }) => {
   const { playSound } = useSound();
-  const { galleries, selectedGallery, loading, error, loadGallery, clearSelection } = useGallery();
+  const {
+    galleries,
+    selectedGallery,
+    loading,
+    error,
+    loadGallery,
+    clearSelection,
+    loadingMore,
+    hasMore,
+    loadMore,
+  } = useGallery();
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -116,7 +126,10 @@ export const GalleryBrowser: FC<GalleryBrowserProps> = ({ onGallerySelect }) => 
       <div className="flex justify-between items-baseline mb-4 pb-2 border-b border-accent/20 flex-col md:flex-row gap-1">
         <h3 className="m-0 text-lg font-semibold text-text">Gallery</h3>
         <p className="m-0 text-sm text-text-secondary">
+          {/* "N loaded" rather than a bare count: the endpoint is paginated,
+              so this is what has been fetched, not what exists. */}
           {galleries.length} {galleries.length === 1 ? 'generation' : 'generations'}
+          {hasMore ? ' loaded' : ''}
         </p>
       </div>
 
@@ -135,6 +148,22 @@ export const GalleryBrowser: FC<GalleryBrowserProps> = ({ onGallerySelect }) => 
               onClick={() => handleSelect(gallery)}
             />
           ))}
+          {hasMore && (
+            <button
+              type="button"
+              onClick={loadMore}
+              disabled={loadingMore}
+              aria-label="Load more generations"
+              className="
+                flex-shrink-0 self-center px-4 py-2 rounded-md
+                bg-accent/10 text-text border border-accent/30
+                hover:bg-accent/20 disabled:opacity-50 disabled:cursor-not-allowed
+                text-sm font-medium transition-colors
+              "
+            >
+              {loadingMore ? 'Loading…' : 'Load more'}
+            </button>
+          )}
         </div>
       </div>
 

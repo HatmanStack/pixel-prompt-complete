@@ -58,6 +58,8 @@ Metadata:
           - MonthlySpendCeilingUsdMicros
           - GlobalDailySpendCeilingUsdMicros
           - EnhanceDailySpendCeilingUsdMicros
+          - StoreFailureThreshold
+          - DegradedDispatchBudget
       - Label:
           default: "Per-Model Daily Caps"
         Parameters:
@@ -367,6 +369,14 @@ Parameters:
     Default: 200
     Description: Refinements per paid user per day
 
+  PaidDailyGenerateLimit:
+    Type: Number
+    Default: 50
+    Description: >-
+      Generations per paid user per day. Generation runs four providers, so at
+      roughly $0.19 a call 50/day is about $9.50 per account against the $25
+      global daily ceiling.
+
   PaidWindowSeconds:
     Type: Number
     Default: 86400
@@ -491,6 +501,32 @@ Parameters:
       day still cannot consume the month. Applies in every configuration,
       including AUTH_ENABLED=false. Set to 0 to disable (not recommended).
 
+  StoreFailureThreshold:
+    Type: Number
+    Default: 5
+    Description: >-
+      Consecutive quota-store failures before the per-container circuit
+      breaker trips. Every spend ceiling and quota guard reads one DynamoDB
+      table and fails open when it is unreachable, so a partition opens all of
+      them at once and stops the spend accounting too; this breaker is the
+      only bound that does not need that table. Consecutive rather than a
+      rate, because the case being defended against is a partition. Five is
+      comfortably above the three or four store calls one /generate makes, so
+      a single unlucky request cannot trip it.
+
+  DegradedDispatchBudget:
+    Type: Number
+    Default: 20
+    Description: >-
+      Generations a tripped container may still dispatch before /generate
+      sheds with a 503. About $3.80 per container at $0.19 a generation, and
+      with ReservedConcurrentExecutions of 10 roughly $38 fleet-wide, against
+      a $25 daily and $500 monthly ceiling. Deliberately above the daily
+      ceiling: this is a backstop for when the ceilings cannot be evaluated at
+      all, not a second ceiling, and it should never bind while DynamoDB is
+      healthy. NOTE the bound is PER CONTAINER, not global -- a global one
+      would need the store that is down.
+
   EnhanceDailySpendCeilingUsdMicros:
     Type: Number
     Default: 2000000
@@ -520,6 +556,18 @@ Parameters:
     Type: Number
     Default: 500
     Description: Daily generation cap for Firefly model
+
+  GenerateAsync:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Dispatch /generate provider work via an asynchronous self-invocation and
+      answer the caller with 202. Set false only where there is no Lambda
+      service to invoke (sam local, the MiniStack E2E suite): the inline path
+      runs a 70s dispatch budget behind the 30s gateway ceiling below.
 
   # CAPTCHA
   CaptchaEnabled:
@@ -602,6 +650,26 @@ Resources:
       MemorySize: 3008
       Timeout: 900
       ReservedConcurrentExecutions: 10
+      # The asynchronous /generate hand-off is an Event invocation, and an
+      # Event invocation that Lambda accepts but cannot place -- the account
+      # throttling against the reservation above -- is retried on Lambda's own
+      # schedule and then DROPPED. A dropped event leaves a session created, a
+      # 202 already returned, quota consumed, and no worker to write a result
+      # or refund it, so the client polls a session that never terminates.
+      #
+      # Retries here are safe in a way a botocore-level retry of the Invoke is
+      # not: Lambda re-delivers only when the invocation did not run to
+      # completion, and the worker branch catches every exception and acks, so
+      # a partial generation is never re-run. A retried *send*, by contrast,
+      # can have both copies delivered and generate the images twice -- which
+      # is why _INVOKE_MAX_ATTEMPTS is 1.
+      #
+      # MaximumEventAgeInSeconds bounds staleness: past it the caller is long
+      # gone and generating four images would bill for output nobody can be
+      # waiting for.
+      EventInvokeConfig:
+        MaximumRetryAttempts: 2
+        MaximumEventAgeInSeconds: 900
       Environment:
         Variables:
           # Model Configuration
@@ -651,6 +719,7 @@ Resources:
           FREE_WINDOW_SECONDS: !Ref FreeWindowSeconds
           # Paid tier limits
           PAID_DAILY_LIMIT: !Ref PaidDailyLimit
+          PAID_DAILY_GENERATE_LIMIT: !Ref PaidDailyGenerateLimit
           PAID_WINDOW_SECONDS: !Ref PaidWindowSeconds
           # Stripe
           STRIPE_SECRET_KEY: !Ref StripeSecretKey
@@ -673,6 +742,8 @@ Resources:
           MONTHLY_SPEND_CEILING_USD_MICROS: !Ref MonthlySpendCeilingUsdMicros
           GLOBAL_DAILY_SPEND_CEILING_USD_MICROS: !Ref GlobalDailySpendCeilingUsdMicros
           ENHANCE_DAILY_SPEND_CEILING_USD_MICROS: !Ref EnhanceDailySpendCeilingUsdMicros
+          STORE_FAILURE_THRESHOLD: !Ref StoreFailureThreshold
+          DEGRADED_DISPATCH_BUDGET: !Ref DegradedDispatchBudget
           MODEL_GEMINI_DAILY_CAP: !Ref ModelGeminiDailyCap
           MODEL_NOVA_DAILY_CAP: !Ref ModelNovaDailyCap
           MODEL_OPENAI_DAILY_CAP: !Ref ModelOpenaiDailyCap
@@ -687,6 +758,8 @@ Resources:
           SES_REGION: !Ref SesRegion
           # Admin
           ADMIN_ENABLED: !Ref AdminEnabled
+          # Async generate dispatch
+          GENERATE_ASYNC: !Ref GenerateAsync
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref UsersTable
@@ -699,7 +772,7 @@ Resources:
                 - s3:PutObject
               Resource:
                 - !Sub '${PixelPromptBucket.Arn}/sessions/*'
-                - !Sub '${PixelPromptBucket.Arn}/rate-limit/*'
+                - !Sub '${PixelPromptBucket.Arn}/private/*'
             - Sid: S3ListBucket
               Effect: Allow
               Action: s3:ListBucket
@@ -720,19 +793,38 @@ Resources:
               Effect: Allow
               Action: ses:SendEmail
               Resource: "*"
+            # The literal !Sub form is required. A !GetAtt on this
+            # function's own Arn would be a circular dependency -- the policy
+            # is attached to that same function -- and the stack would not
+            # deploy. The literal form works because FunctionName above is
+            # itself !Sub '${AWS::StackName}-function'; if that ever changes,
+            # this must change with it.
+            - Sid: SelfInvokeForGeneration
+              Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${AWS::StackName}-function"
       Events:
+        # The integration timeout is stated explicitly on the three routes
+        # that can do provider work. 30000ms is an AWS hard cap on HTTP API
+        # integrations and is not adjustable via a quota increase; declaring
+        # 29000 puts the real bound where a reader looks for it instead of
+        # leaving it an invisible service default. Keep it equal to
+        # config.gateway_integration_timeout_seconds * 1000 --
+        # tests/backend/unit/test_dispatch_budget.py fails if the two drift.
         GenerateApi:
           Type: HttpApi
           Properties:
             Path: /generate
             Method: POST
             ApiId: !Ref HttpApi
+            TimeoutInMillis: 29000
         IterateApi:
           Type: HttpApi
           Properties:
             Path: /iterate
             Method: POST
             ApiId: !Ref HttpApi
+            TimeoutInMillis: 29000
             Auth: !If
               - AuthEnabledCondition
               - Authorizer: CognitoJwt
@@ -743,6 +835,7 @@ Resources:
             Path: /outpaint
             Method: POST
             ApiId: !Ref HttpApi
+            TimeoutInMillis: 29000
             Auth: !If
               - AuthEnabledCondition
               - Authorizer: CognitoJwt
@@ -966,6 +1059,18 @@ Resources:
           - GET
           - POST
           - OPTIONS
+        # The gateway overrides the integration's CORS headers, so the
+        # Access-Control-Expose-Headers the Lambda sets does not survive on its
+        # own. Retry-After is not CORS-safelisted: without this a browser reads
+        # null for it and the backoff hint is unreadable cross-origin.
+        # Only headers a response actually carries. X-Correlation-ID was
+        # listed here and on the Lambda's own CORS block, but nothing sets it
+        # on a response -- the client mints its own and sends it, and the
+        # server only reads it off the request. The gateway's CORS config
+        # replaces the integration's headers, so the two must agree or the
+        # deployed behaviour silently differs from what the unit tests assert.
+        ExposeHeaders:
+          - Retry-After
         MaxAge: 86400
         AllowCredentials: true
       DefaultRouteSettings:

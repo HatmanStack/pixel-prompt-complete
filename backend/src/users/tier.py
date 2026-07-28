@@ -65,7 +65,7 @@ def extract_claims(event: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _cookie_header(event: dict[str, Any]) -> str | None:
-    headers = event.get("headers") or {}
+    headers: dict[str, str] = event.get("headers") or {}
     # headers may be any-case
     for k, v in headers.items():
         if k.lower() == "cookie":
@@ -85,9 +85,25 @@ def _source_ip(event: dict[str, Any]) -> str:
 def resolve_tier(
     event: dict[str, Any],
     repo: UserRepository,
-    guest_service: GuestTokenService,
+    guest_service: GuestTokenService | None,
 ) -> TierContext:
-    """Return the :class:`TierContext` for the given request."""
+    """Return the :class:`TierContext` for the given request.
+
+    ``guest_service`` is optional because this function's own first statement
+    proves it is: with ``AUTH_ENABLED=false`` it returns before the parameter
+    is read, and ``lambda_function.py:92`` already relies on that in writing
+    ("Safe to construct when AUTH_ENABLED=false; neither is touched in that
+    case because resolve_tier() / enforce_quota() short-circuit"). The
+    signature said ``GuestTokenService`` and callers duly passed
+    ``GuestTokenService | None``, so the type was carrying a claim the code
+    contradicted.
+
+    Raises:
+        RuntimeError: if the guest path is reached without a service. Every
+            current caller guards, so this is a contract assertion at the
+            boundary rather than a branch anyone reaches -- and it is what
+            makes widening the type safe instead of merely quieter.
+    """
     if not config.auth_enabled:
         return anon_tier(event)
 
@@ -109,6 +125,11 @@ def resolve_tier(
         )
 
     # Guest path.
+    if guest_service is None:
+        raise RuntimeError(
+            "resolve_tier reached the guest path without a GuestTokenService. "
+            "GUEST_TOKEN_SECRET is required when AUTH_ENABLED=true."
+        )
     cookie_header = _cookie_header(event)
     existing = guest_service.extract_from_cookie_header(cookie_header)
     token_id = guest_service.verify(existing) if existing else None

@@ -3,9 +3,16 @@ E2E test fixtures providing real S3-backed components via MiniStack.
 
 All external model API calls are stubbed with fake image generators,
 but all S3 state management runs against real MiniStack S3.
+
+GENERATE_ASYNC is forced false for the same reason: MiniStack provides S3 only,
+so there is no Lambda service to self-invoke. With the production default,
+/generate would answer 202 and hand the provider dispatch to an invocation that
+never happens, and every workflow assertion downstream would read an empty
+session. Synchronous mode runs the identical dispatch in-process, so the suite
+still exercises the whole path -- it is the transport that is stubbed out, not
+the work.
 """
 
-import json
 import os
 import uuid
 from unittest.mock import patch
@@ -13,6 +20,10 @@ from unittest.mock import patch
 import boto3
 import pytest
 import requests
+
+# Set before anything imports config: config reads the variable once, at import,
+# and nothing above this line pulls it in.
+os.environ["GENERATE_ASYNC"] = "false"
 
 # ── MiniStack connectivity check ──────────────────────────────────────
 
@@ -95,6 +106,10 @@ def e2e_handler(ministack_s3):
     cf = ContentFilter()
 
     patches = {
+        # Redundant with the GENERATE_ASYNC env var above, deliberately: the
+        # env var only takes effect if nothing imported config first, and this
+        # does not care about import order.
+        "config.generate_async": False,
         "lambda_function.s3_client": s3,
         "lambda_function.session_manager": sm,
         "lambda_function.context_manager": cm,

@@ -5,4 +5,4 @@ Provides session lifecycle management.
 
 from .manager import SessionManager
 
-__all__ = ['SessionManager']
+__all__ = ["SessionManager"]

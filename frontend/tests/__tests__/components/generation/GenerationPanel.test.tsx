@@ -52,7 +52,7 @@ vi.mock('../../../../src/components/generation/PromptEnhancer', () => ({
   __esModule: true,
   default: () => <div data-testid="prompt-enhancer" />,
 }));
-vi.mock('../../../../src/components/features/generation/RandomPromptButton', () => ({
+vi.mock('../../../../src/components/generation/RandomPromptButton', () => ({
   __esModule: true,
   default: () => <div data-testid="random-prompt" />,
 }));
@@ -77,13 +77,13 @@ vi.mock('../../../../src/components/gallery/GalleryBrowser', () => ({
   __esModule: true,
   default: () => <div data-testid="gallery" />,
 }));
-vi.mock('../../../../src/components/features/generation/ImageModal', () => ({
+vi.mock('../../../../src/components/generation/ImageModal', () => ({
   ImageModal: () => <div />,
 }));
 vi.mock('../../../../src/components/generation/CompareModal', () => ({
   CompareModal: () => <div />,
 }));
-vi.mock('../../../../src/components/features/CaptchaWidget', () => ({
+vi.mock('../../../../src/components/gating/CaptchaWidget', () => ({
   CaptchaWidget: () => <div data-testid="captcha" />,
 }));
 
@@ -164,6 +164,75 @@ describe('GenerationPanel', () => {
 
       await waitFor(() => expect(useAppStore.getState().isGenerating).toBe(false));
       expect(mockGetSessionStatus).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('the 202 async-dispatch response', () => {
+    // This is now the DEFAULT server response, not a degraded one. /generate
+    // answers as soon as the session exists and hands the provider dispatch to
+    // a worker invocation, because the previous ~70s dispatch ran behind a 30s
+    // API Gateway ceiling and the caller got a 504 for work that completed and
+    // was billed anyway.
+    //
+    // The panel needed no change for this -- the branch already existed for the
+    // read-back-failed case. These tests exist because a path that carries
+    // every generation deserves to be pinned by something other than luck.
+    const ACCEPTED = {
+      sessionId: 's1',
+      prompt: 'a cat',
+      models: { gemini: { status: 'pending' }, nova: { status: 'pending' } },
+    };
+
+    beforeEach(() => {
+      // Hold the first poll open. The placeholder is what the user sees for
+      // the whole dispatch, and the outer beforeEach resolves /status
+      // immediately, which would overwrite it before it could be inspected.
+      mockGetSessionStatus.mockReturnValue(new Promise(() => {}));
+      mockGenerateSession.mockResolvedValue(ACCEPTED);
+    });
+
+    it('builds a placeholder session when the response carries no session', async () => {
+      await clickGenerate();
+
+      await waitFor(() => expect(useAppStore.getState().currentSession).not.toBeNull());
+      const session = useAppStore.getState().currentSession;
+      expect(session?.sessionId).toBe('s1');
+      expect(session?.status).toBe('pending');
+    });
+
+    it('starts polling /status', async () => {
+      await clickGenerate();
+
+      await waitFor(() => expect(mockGetSessionStatus).toHaveBeenCalledWith('s1'));
+    });
+
+    it('stays in the generating state so late images are not lost', async () => {
+      await clickGenerate();
+
+      await waitFor(() => expect(mockGetSessionStatus).toHaveBeenCalled());
+      expect(useAppStore.getState().isGenerating).toBe(true);
+    });
+
+    it('gives the placeholder a column for every model', async () => {
+      // The columns render before any provider has run. Without them the user
+      // sees an empty panel for the whole generation.
+      await clickGenerate();
+
+      await waitFor(() => expect(useAppStore.getState().currentSession).not.toBeNull());
+      const columns = Object.values(useAppStore.getState().currentSession?.models ?? {});
+      expect(columns.length).toBeGreaterThan(0);
+      for (const column of columns) {
+        expect(column).toMatchObject({ iterations: [] });
+      }
+    });
+
+    it('does not mistake the pending models map for a session', async () => {
+      // `models` is a sibling of `session`, not a substitute for it. Reading it
+      // as one would show four completed-looking columns with no images.
+      await clickGenerate();
+
+      await waitFor(() => expect(useAppStore.getState().currentSession).not.toBeNull());
+      expect(useAppStore.getState().currentSession?.status).not.toBe('completed');
     });
   });
 
