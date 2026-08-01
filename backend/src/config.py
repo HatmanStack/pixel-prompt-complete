@@ -149,6 +149,27 @@ anon_generate_limit = _safe_int("ANON_GENERATE_LIMIT", 5)
 anon_refine_limit = _safe_int("ANON_REFINE_LIMIT", 10)
 anon_window_seconds = _safe_int("ANON_WINDOW_SECONDS", 3600)
 
+# Per-IP bounds for the two public endpoints that skip tier quota entirely.
+#
+# Both already had a global bound -- the /enhance daily spend sub-ceiling and
+# API Gateway throttling -- and a global bound caps everyone together, so it
+# cannot stop one caller consuming the share of all the others. Exhausting
+# the enhance allocation 503s every legitimate enhance request until reset,
+# which turns a cost guard into a denial-of-service amplifier; that is what
+# these bound.
+#
+# An IP is not a person, so like the anon and guest IP buckets these are
+# abuse ceilings, not fair-use quotas. Sized accordingly: 10 enhancements an
+# hour is far above what composing a prompt takes and far below what spending
+# the day's budget takes.
+enhance_ip_limit = _safe_int("ENHANCE_IP_LIMIT", 10)
+enhance_ip_window_seconds = _safe_int("ENHANCE_IP_WINDOW_SECONDS", 3600)
+
+# /log is a client error reporter, so the ceiling is set for a browser having
+# a genuinely bad session rather than for a healthy one.
+log_ip_limit = _safe_int("LOG_IP_LIMIT", 120)
+log_ip_window_seconds = _safe_int("LOG_IP_WINDOW_SECONDS", 3600)
+
 # Free tier
 free_generate_limit = _safe_int("FREE_GENERATE_LIMIT", 1)
 free_refine_limit = _safe_int("FREE_REFINE_LIMIT", 2)

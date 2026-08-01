@@ -324,6 +324,7 @@ class UserRepository:
         "spend#",
         "anon#",
         "gallery#",
+        "iplimit#",
     )
 
     def scan_users(

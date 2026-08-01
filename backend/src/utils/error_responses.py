@@ -168,6 +168,15 @@ def guest_global_limit(**kwargs) -> Dict[str, Any]:
     )
 
 
+def ip_rate_limit(scope: str, **kwargs) -> Dict[str, Any]:
+    """429 Too many requests to a public endpoint from one source address."""
+    return error_response(
+        error_code="IP_RATE_LIMIT",
+        message=f"Too many {scope} requests from this network. Please try again later.",
+        **kwargs,
+    )
+
+
 def invalid_json(**kwargs) -> Dict[str, Any]:
     """400 Invalid JSON in request body"""
     return error_response(

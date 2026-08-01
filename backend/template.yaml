@@ -326,6 +326,33 @@ Parameters:
     Default: 3600
     Description: Rolling window for anonymous limits, in seconds
 
+  EnhanceIpLimit:
+    Type: Number
+    Default: 10
+    Description: >-
+      /enhance calls per source IP per window. /enhance is unauthenticated and
+      skips tier quota, and its daily spend sub-ceiling is GLOBAL -- it bounds
+      the money but lets one caller spend all of it, after which every
+      legitimate enhance request 503s until reset. This is the per-caller half.
+
+  EnhanceIpWindowSeconds:
+    Type: Number
+    Default: 3600
+    Description: Rolling window for the per-IP /enhance limit, in seconds
+
+  LogIpLimit:
+    Type: Number
+    Default: 120
+    Description: >-
+      /log calls per source IP per window. CloudWatch ingestion is billed and
+      the log is where an incident gets diagnosed, so an unmetered writer buys
+      both cost and cover. Sized for a browser having a genuinely bad session.
+
+  LogIpWindowSeconds:
+    Type: Number
+    Default: 3600
+    Description: Rolling window for the per-IP /log limit, in seconds
+
   GuestIpGenerateLimit:
     Type: Number
     Default: 3
@@ -709,6 +736,11 @@ Resources:
           ANON_GENERATE_LIMIT: !Ref AnonGenerateLimit
           ANON_REFINE_LIMIT: !Ref AnonRefineLimit
           ANON_WINDOW_SECONDS: !Ref AnonWindowSeconds
+          # Per-IP bounds for the public endpoints that skip tier quota
+          ENHANCE_IP_LIMIT: !Ref EnhanceIpLimit
+          ENHANCE_IP_WINDOW_SECONDS: !Ref EnhanceIpWindowSeconds
+          LOG_IP_LIMIT: !Ref LogIpLimit
+          LOG_IP_WINDOW_SECONDS: !Ref LogIpWindowSeconds
           GUEST_IP_GENERATE_LIMIT: !Ref GuestIpGenerateLimit
           GUEST_IP_WINDOW_SECONDS: !Ref GuestIpWindowSeconds
           GUEST_GLOBAL_LIMIT: !Ref GuestGlobalLimit

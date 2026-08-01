@@ -5,6 +5,7 @@ iteration, outpainting, and session status.
 """
 
 import base64
+import hashlib
 import json
 import os
 import re
@@ -674,6 +675,87 @@ def _parse_and_validate_request(
             )
 
     return ValidatedRequest(body=body, ip=ip, prompt=prompt, tier=tier_ctx), None
+
+
+def _source_ip_hash(event: LambdaEvent) -> str | None:
+    """Stable, non-reversible bucket for the caller's source IP.
+
+    Returns None when the event carries no address, which the callers treat
+    as "cannot meter" rather than as a bucket of its own. Deliberately unlike
+    ``users.tier``, which hashes the literal ``"unknown"`` so an unidentified
+    caller still lands in *some* tier -- here there is no tier to fall back
+    to, and metering every proxy-stripped request into one shared bucket
+    would rate-limit them as if they were a single caller.
+    """
+    ip = (event.get("requestContext") or {}).get("http", {}).get("sourceIp")
+    if not ip:
+        return None
+    return hashlib.sha256(str(ip).encode()).hexdigest()[:16]
+
+
+def _public_ip_rate_limited(
+    event: LambdaEvent,
+    scope: str,
+    limit: int,
+    window_seconds: int,
+    correlation_id: str | None = None,
+) -> ApiResponse | None:
+    """Bound one public endpoint per source IP. Returns a 429, or None to allow.
+
+    For the endpoints that reach a shared billable resource without an
+    identity: ``/enhance`` calls a paid LLM and ``/log`` writes billed
+    CloudWatch records, and both skip tier quota. Each already had a *global*
+    bound -- the enhance daily sub-ceiling, API Gateway throttling -- and a
+    global bound caps everyone together, so it cannot stop one caller
+    consuming the share of all the others. Exhausting the enhance allocation
+    503s every legitimate enhance request until reset, which turns a cost
+    guard into a denial-of-service amplifier.
+
+    ``scope`` gives each endpoint its own bucket, so a browser reporting
+    errors cannot exhaust anyone's prompt enhancement.
+
+    Fails **open**, matching every other guard over this table: an unreachable
+    counter is not evidence the caller is over limit, and failing a public
+    endpoint because DynamoDB hiccuped is a self-inflicted outage. Logged at
+    ERROR so persistently unmetered traffic is alarmable rather than
+    invisible, and counted by the store breaker like the other six sites that
+    swallow a store error.
+
+    An IP is not a person. Like the anon and guest IP buckets, this is an
+    abuse ceiling rather than a fair-use quota.
+    """
+    ip_hash = _source_ip_hash(event)
+    if not ip_hash:
+        # Nothing to meter against. Allowing is the lesser evil, exactly as in
+        # users.quota._enforce_anon: denying would break every caller behind a
+        # proxy that strips the address.
+        return None
+
+    now = int(time.time())
+    try:
+        ok, item = _user_repo.increment_anon(
+            f"iplimit#{scope}#{ip_hash}", "requestCount", limit, window_seconds, now
+        )
+    except Exception as e:
+        store_breaker.record_store_result(False)
+        StructuredLogger.error(
+            f"{scope} IP rate limit check failed, allowing request: {e}",
+            correlation_id=correlation_id,
+        )
+        return None
+    store_breaker.record_store_result(True)
+    if ok:
+        return None
+
+    window_start = int(item.get("windowStart", now) or now)
+    retry_after = max(1, window_start + window_seconds - now)
+    StructuredLogger.warning(
+        f"{scope} IP rate limit reached",
+        correlation_id=correlation_id,
+        scope=scope,
+        limit=limit,
+    )
+    return response(429, error_responses.ip_rate_limit(scope, retry_after=retry_after))
 
 
 def _release_model_slot(model_name: str, correlation_id: str | None = None) -> None:
@@ -2191,6 +2273,19 @@ def handle_enhance(event: LambdaEvent, correlation_id: str | None = None) -> Api
     if err:
         return err
 
+    # Before the LLM call, because the point of the bound is the spend. The
+    # daily sub-ceiling above bounds the money in aggregate; this stops one
+    # caller spending all of it and 503ing enhancement for everyone else.
+    limited = _public_ip_rate_limited(
+        event,
+        "enhance",
+        config.enhance_ip_limit,
+        config.enhance_ip_window_seconds,
+        correlation_id,
+    )
+    if limited:
+        return limited
+
     try:
         # Two genuinely different variants from one call. This used to return
         # the same string twice while the UI rendered a toggle over it.
@@ -2324,11 +2419,19 @@ def handle_log_endpoint(event: LambdaEvent) -> ApiResponse:
     if len(raw_body) > MAX_LOG_BODY_SIZE:
         return response(413, {"error": "Request body too large"})
 
+    # Per-request size was already bounded; this bounds the rate. CloudWatch
+    # ingestion is billed and the log is where an incident gets diagnosed, so
+    # an unmetered writer buys both cost and cover. Checked before the record
+    # is written, or it bounds nothing.
+    limited = _public_ip_rate_limited(
+        event, "log", config.log_ip_limit, config.log_ip_window_seconds
+    )
+    if limited:
+        return limited
+
     try:
         body = json.loads(raw_body or "{}")
         ip = event.get("requestContext", {}).get("http", {}).get("sourceIp", "unknown")
-
-        # /log relies on API Gateway throttling (not per-tier quotas).
 
         # Sanitize metadata: remove reserved keys that could overwrite structured log fields
         if "metadata" in body and isinstance(body["metadata"], dict):
