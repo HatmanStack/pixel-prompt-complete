@@ -341,3 +341,80 @@ def test_the_bucket_still_expires_with_its_window(wired):
     items = wired._user_repo._table.scan().get("Items", [])
     assert len(items) == 1
     assert int(items[0]["ttl"]) > 0
+
+
+# --------------------------------------------------------------------------
+# The window reset must not hand out an allowance nobody earned
+# --------------------------------------------------------------------------
+
+
+def test_a_late_reset_cannot_zero_a_live_counter(wired):
+    """The read and the reset are not one operation.
+
+    A request that reads a rolled window can issue its reset *after* another
+    request has already rolled the window forward and started counting
+    against it. An unconditional SET wipes those counts, so repeating it at
+    the boundary lets a caller exceed the per-IP ceiling — in the limiter
+    added to stop exactly that.
+    """
+    repo = wired._user_repo
+    key = "iplimit#log#victim"
+
+    # One request lands in the old window.
+    repo.increment_ip_rate_bucket(key, limit=3, window_seconds=100, now=1000)
+
+    # Another caller rolls the window forward and spends the new allowance.
+    for _ in range(3):
+        repo.increment_ip_rate_bucket(key, limit=3, window_seconds=100, now=2000)
+    assert repo.increment_ip_rate_bucket(key, limit=3, window_seconds=100, now=2000)[0] is False
+
+    # The first caller, still holding its stale read, now resets. Modelled by
+    # replaying the reset with the old clock, which is what a racing request
+    # inside _MAX_RETRIES would issue.
+    repo._reset_ip_rate_window(key, window_seconds=100, now=1000, ttl=999999)
+
+    item = repo.get_user(key)
+    assert int(item["requestCount"]) == 3, "a live counter was zeroed"
+    assert (
+        repo.increment_ip_rate_bucket(key, limit=3, window_seconds=100, now=2000)[0] is False
+    ), "the per-IP ceiling was bypassed"
+
+
+def test_a_genuinely_rolled_window_still_resets(wired):
+    """The guard must reject only a reset that has been overtaken."""
+    repo = wired._user_repo
+    key = "iplimit#log#roller"
+
+    for _ in range(3):
+        repo.increment_ip_rate_bucket(key, limit=3, window_seconds=100, now=1000)
+    assert repo.increment_ip_rate_bucket(key, limit=3, window_seconds=100, now=1000)[0] is False
+
+    # Well past the window: the next request rolls it and is allowed.
+    ok, item = repo.increment_ip_rate_bucket(key, limit=3, window_seconds=100, now=5000)
+    assert ok is True
+    assert int(item["requestCount"]) == 1
+
+
+def test_a_zero_window_is_refused_at_import(monkeypatch):
+    """The limit knob is the off switch; the window is not.
+
+    A non-positive window makes `:stale` equal to now, so `windowStart >
+    :stale` never holds and every request reads as a rolled window — the
+    endpoint 429s for everybody. An operator setting this to 0 by analogy
+    with ENHANCE_IP_LIMIT one line above would take /enhance down.
+    """
+    import config as cfg
+
+    monkeypatch.setenv("ENHANCE_IP_WINDOW_SECONDS", "0")
+    with pytest.raises(RuntimeError, match="ENHANCE_IP_WINDOW_SECONDS"):
+        importlib.reload(cfg)
+
+    monkeypatch.delenv("ENHANCE_IP_WINDOW_SECONDS", raising=False)
+    monkeypatch.setenv("LOG_IP_WINDOW_SECONDS", "-1")
+    with pytest.raises(RuntimeError, match="LOG_IP_WINDOW_SECONDS"):
+        importlib.reload(cfg)
+
+    monkeypatch.delenv("LOG_IP_WINDOW_SECONDS", raising=False)
+    importlib.reload(cfg)
+    assert cfg.enhance_ip_window_seconds > 0
+    assert cfg.log_ip_window_seconds > 0

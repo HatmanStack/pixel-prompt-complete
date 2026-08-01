@@ -694,17 +694,48 @@ class UserRepository:
                 if window_start and window_start > now - window_seconds:
                     # Inside the window: genuinely at the limit.
                     return False, item
-                # The window has rolled. Reset it and take the slot.
-                self._table.update_item(
-                    Key={"userId": key},
-                    UpdateExpression=(
-                        "SET windowStart = :now, requestCount = :zero, "
-                        "#ttl = :ttl, updatedAt = :now"
-                    ),
-                    ExpressionAttributeNames={"#ttl": "ttl"},
-                    ExpressionAttributeValues={":now": now, ":zero": 0, ":ttl": ttl},
-                )
+                # The window has rolled. Reset it, then take a slot against
+                # the new window on the next iteration.
+                self._reset_ip_rate_window(key, window_seconds, now, ttl)
         return False, self.get_user(key) or {}
+
+    def _reset_ip_rate_window(self, key: str, window_seconds: int, now: int, ttl: int) -> bool:
+        """Roll an expired per-IP window over. Returns whether it applied.
+
+        **Conditional, and that is the whole point.** The read that decided
+        the window had rolled and this write are separate operations, so
+        another request can roll the window forward and start counting
+        against it in between. An unconditional ``SET requestCount = 0`` then
+        wipes counts that belong to the live window, and repeating that at
+        the boundary hands out an allowance nobody earned — a bypass of the
+        very ceiling this bucket exists to impose.
+
+        ``windowStart <= :stale`` is the same condition
+        :meth:`_reset_if_stale` uses for the tier counters, for the same
+        reason. A rejected reset means someone else rolled it first, which is
+        not an error: the caller's next iteration simply takes a slot against
+        the window that now exists.
+        """
+        try:
+            self._table.update_item(
+                Key={"userId": key},
+                UpdateExpression=(
+                    "SET windowStart = :now, requestCount = :zero, #ttl = :ttl, updatedAt = :now"
+                ),
+                ConditionExpression=("attribute_not_exists(windowStart) OR windowStart <= :stale"),
+                ExpressionAttributeNames={"#ttl": "ttl"},
+                ExpressionAttributeValues={
+                    ":now": now,
+                    ":zero": 0,
+                    ":ttl": ttl,
+                    ":stale": now - window_seconds,
+                },
+            )
+            return True
+        except ClientError as e:
+            if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
+                raise
+            return False
 
     def has_affirmed_age(self, identity_key: str) -> bool:
         """Return True if this identity has previously affirmed being 18+.

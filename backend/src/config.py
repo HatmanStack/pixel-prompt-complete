@@ -169,6 +169,23 @@ enhance_ip_window_seconds = _safe_int("ENHANCE_IP_WINDOW_SECONDS", 3600)
 # a genuinely bad session rather than for a healthy one.
 log_ip_limit = _safe_int("LOG_IP_LIMIT", 120)
 log_ip_window_seconds = _safe_int("LOG_IP_WINDOW_SECONDS", 3600)
+for _window_name, _window_value in (
+    ("ENHANCE_IP_WINDOW_SECONDS", enhance_ip_window_seconds),
+    ("LOG_IP_WINDOW_SECONDS", log_ip_window_seconds),
+):
+    if _window_value <= 0:
+        # The limit knobs above follow the documented "0 disables" convention.
+        # The windows cannot: a non-positive window makes `:stale` equal to
+        # now, so `windowStart > :stale` never holds, every request reads as a
+        # rolled window and the endpoint answers 429 to everybody. An operator
+        # reaching for the off switch one line up would take the endpoint down
+        # instead. Raised rather than clamped, so the mistake is visible at
+        # deploy rather than as a silently different window.
+        raise RuntimeError(
+            f"{_window_name} must be greater than zero (got {_window_value}). "
+            "To disable the limiter set its *_IP_LIMIT to 0; the window is not "
+            "the off switch."
+        )
 
 # Free tier
 free_generate_limit = _safe_int("FREE_GENERATE_LIMIT", 1)
