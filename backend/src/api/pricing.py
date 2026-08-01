@@ -86,8 +86,13 @@ def _stripe_price_usd_cents() -> int | None:
         # the TTL — and the two are allowed to disagree, which is the whole
         # reason this function exists. An outage is not a price change.
         last_known = _price_cache[0] if _price_cache else None
+        # `is not None`, matching the branch above: a confirmed price of 0 is
+        # a real price and is what gets served here, so reporting it as the
+        # "configured" value would tell an operator reading this during an
+        # outage the opposite of what happened.
         StructuredLogger.warning(
-            f"Could not read price from Stripe, serving {'last known' if last_known else 'configured'} value: {e}",
+            "Could not read price from Stripe, serving "
+            f"{'last known' if last_known is not None else 'configured'} value: {e}",
             stripePriceId=config.stripe_price_id,
             lastKnownCents=last_known,
         )

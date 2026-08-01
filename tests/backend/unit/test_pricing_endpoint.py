@@ -404,3 +404,31 @@ def test_a_zero_unit_amount_is_a_real_price(monkeypatch):
     paid = next(t for t in pricing._tiers() if t["id"] == "paid")
     assert paid["priceUsdCents"] == 0
     pricing.reset_price_cache()
+
+
+def test_the_outage_log_reports_a_known_price_of_zero_correctly(monkeypatch, caplog):
+    """A confirmed price of 0 is served; the log must not call it configured."""
+    import config
+    from api import pricing
+
+    pricing.reset_price_cache()
+    monkeypatch.setattr(config, "billing_enabled", True)
+    monkeypatch.setattr(config, "stripe_price_id", "price_test")
+
+    calls = {"n": 0}
+
+    def retrieve(price_id):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return {"unit_amount": 0}
+        raise RuntimeError("stripe unreachable")
+
+    _stub_stripe(monkeypatch, retrieve)
+
+    assert pricing._stripe_price_usd_cents() == 0
+    pricing._price_cache = (0, 0)
+    with caplog.at_level("WARNING"):
+        assert pricing._stripe_price_usd_cents() == 0
+    assert "last known" in caplog.text
+    assert "configured" not in caplog.text
+    pricing.reset_price_cache()
