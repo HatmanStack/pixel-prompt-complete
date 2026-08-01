@@ -1083,3 +1083,144 @@ def test_same_second_events_both_apply(wired):
     assert item["tier"] == "free"
     assert item["subscriptionStatus"] == "canceled"
     assert wired._user_repo.get_revenue().get("monthlyChurn", 0) == 1
+
+
+# ---- Checkout completion is not the same as payment ----
+#
+# checkout.session.completed fires when the session finishes, which is not
+# the same as the customer having paid. A delayed payment method (ACH debit,
+# bank transfer, some wallets) completes the session with
+# payment_status="unpaid" and settles minutes-to-days later, or never.
+# Granting paid access on completion alone hands out the product before —
+# and, on failure, without — payment.
+
+
+def test_unpaid_checkout_does_not_grant_paid(wired):
+    """The finding: a signed, complete session that has not been paid for."""
+    wired._user_repo.get_or_create_user("u_unpaid")
+    r = _send(
+        wired,
+        build_event(
+            "checkout.session.completed",
+            checkout_session(
+                user_id="u_unpaid", customer="cus_unpaid", payment_status="unpaid"
+            ),
+        ),
+    )
+    assert r["statusCode"] == 200
+    assert wired._user_repo.get_user("u_unpaid").get("tier", "free") == "free"
+
+
+def test_unpaid_checkout_books_no_revenue_and_no_welcome(wired, monkeypatch):
+    """A grant that did not happen must not be counted or announced."""
+    from notifications import sender as email_sender
+
+    wired._user_repo.get_or_create_user("u_unpaid2", email="u@x.com")
+    sent: list[str] = []
+    monkeypatch.setattr(email_sender, "send_email", lambda to, s, h, t: sent.append(s))
+
+    _send(
+        wired,
+        build_event(
+            "checkout.session.completed",
+            checkout_session(
+                user_id="u_unpaid2", customer="cus_unpaid2", payment_status="unpaid"
+            ),
+        ),
+    )
+    assert wired._user_repo.get_revenue().get("activeSubscribers", 0) == 0
+    assert sent == []
+
+
+def test_incomplete_checkout_session_does_not_grant_paid(wired):
+    """``status`` is the session's own lifecycle; only "complete" qualifies."""
+    wired._user_repo.get_or_create_user("u_open")
+    _send(
+        wired,
+        build_event(
+            "checkout.session.completed",
+            checkout_session(user_id="u_open", customer="cus_open", status="open"),
+        ),
+    )
+    assert wired._user_repo.get_user("u_open").get("tier", "free") == "free"
+
+
+def test_non_subscription_checkout_does_not_grant_paid(wired):
+    """/billing/checkout only ever creates subscription-mode sessions.
+
+    A one-off payment-mode session reaching this handler is not the thing the
+    paid tier is sold as, and granting on it would price a subscription at
+    one payment.
+    """
+    wired._user_repo.get_or_create_user("u_mode")
+    _send(
+        wired,
+        build_event(
+            "checkout.session.completed",
+            checkout_session(user_id="u_mode", customer="cus_mode", mode="payment"),
+        ),
+    )
+    assert wired._user_repo.get_user("u_mode").get("tier", "free") == "free"
+
+
+def test_no_payment_required_checkout_grants_paid(wired):
+    """A full-coupon or trial checkout is legitimately paid-equivalent.
+
+    Stripe reports ``no_payment_required`` rather than ``paid`` for these, so
+    a naive ``payment_status == "paid"`` check would refuse real customers.
+    """
+    wired._user_repo.get_or_create_user("u_free_sub")
+    _send(
+        wired,
+        build_event(
+            "checkout.session.completed",
+            checkout_session(
+                user_id="u_free_sub",
+                customer="cus_free_sub",
+                payment_status="no_payment_required",
+            ),
+        ),
+    )
+    assert wired._user_repo.get_user("u_free_sub")["tier"] == "paid"
+
+
+def test_delayed_payment_grants_paid_on_async_success(wired):
+    """The settlement event is what grants a delayed-method checkout.
+
+    Refusing the unpaid completion above is only correct if the customer
+    still gets what they bought once the payment clears.
+    """
+    wired._user_repo.get_or_create_user("u_async")
+    session = checkout_session(
+        user_id="u_async", customer="cus_async", subscription="sub_async"
+    )
+
+    unpaid = dict(session, payment_status="unpaid")
+    _send(wired, build_event("checkout.session.completed", unpaid, created=1679609700))
+    assert wired._user_repo.get_user("u_async").get("tier", "free") == "free"
+
+    _send(
+        wired,
+        build_event(
+            "checkout.session.async_payment_succeeded", session, created=1679609800
+        ),
+    )
+    item = wired._user_repo.get_user("u_async")
+    assert item["tier"] == "paid"
+    assert item["subscriptionStatus"] == "active"
+    assert item["stripeSubscriptionId"] == "sub_async"
+
+
+def test_async_payment_failure_leaves_the_user_free(wired):
+    """A failed settlement must not be a second chance at the grant."""
+    wired._user_repo.get_or_create_user("u_async_fail")
+    _send(
+        wired,
+        build_event(
+            "checkout.session.async_payment_failed",
+            checkout_session(
+                user_id="u_async_fail", customer="cus_async_fail", payment_status="unpaid"
+            ),
+        ),
+    )
+    assert wired._user_repo.get_user("u_async_fail").get("tier", "free") == "free"

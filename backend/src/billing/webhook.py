@@ -148,12 +148,65 @@ def _stale(user_id: str, event_type: str, event_created: int | None) -> None:
     )
 
 
+# Checkout states that qualify for paid access.
+#
+# ``paid`` is the ordinary card outcome. ``no_payment_required`` is what
+# Stripe reports for a full-coupon or trial subscription, which is a real
+# customer with a real subscription — checking only for ``paid`` would refuse
+# them. Everything else, notably ``unpaid``, does not qualify.
+_PAID_CHECKOUT_STATES = frozenset({"paid", "no_payment_required"})
+
+
+def _checkout_qualifies(obj: dict[str, Any], event_type: str) -> bool:
+    """Whether a Checkout Session has actually bought the paid tier.
+
+    ``checkout.session.completed`` fires when the *session* finishes, which
+    is not the same as the customer having paid. A delayed payment method
+    (ACH debit, bank transfer, some wallets) completes the session with
+    ``payment_status="unpaid"`` and settles minutes-to-days later — or never.
+    Granting on completion alone hands out the product before payment, and on
+    a failed settlement, without it. The settlement is delivered separately as
+    ``checkout.session.async_payment_succeeded``, which is in ``_DISPATCH``
+    and passes through this same gate.
+
+    A Stripe signature proves the event is authentic; it says nothing about
+    whether this particular state qualifies for entitlement. That is what
+    this checks.
+
+    ``mode`` is checked because ``handle_billing_checkout`` creates
+    subscription-mode sessions and nothing else: a payment-mode session here
+    would price a subscription at a single payment. The configured price is
+    bound at session creation for the same reason — the webhook payload does
+    not carry ``line_items`` unless expanded, so creation is the only place
+    that binding can be made.
+    """
+    mode = obj.get("mode")
+    payment_status = obj.get("payment_status")
+    status = obj.get("status")
+    if (
+        mode != "subscription"
+        or payment_status not in _PAID_CHECKOUT_STATES
+        or status != "complete"
+    ):
+        StructuredLogger.warning(
+            f"Webhook {event_type}: checkout does not qualify for paid access — ignored",
+            stripe_object_id=obj.get("id"),
+            mode=mode,
+            paymentStatus=payment_status,
+            sessionStatus=status,
+        )
+        return False
+    return True
+
+
 def _on_checkout_completed(
     obj: dict[str, Any], repo: UserRepository, event_type: str, event_created: int | None
 ) -> None:
     user_id = _user_id_from_object(obj, repo)
     if not user_id:
         _unresolved(obj, event_type)
+        return
+    if not _checkout_qualifies(obj, event_type):
         return
     fields: dict[str, Any] = {}
     if obj.get("customer"):
@@ -252,6 +305,12 @@ def _on_payment_failed(
 
 _DISPATCH = {
     "checkout.session.completed": _on_checkout_completed,
+    # A delayed payment method settling. Refusing the unpaid completion above
+    # is only correct if the customer still gets what they bought once the
+    # payment clears, and this is the event that says it did. The matching
+    # failure event is deliberately absent: there is nothing to revoke,
+    # because nothing was granted.
+    "checkout.session.async_payment_succeeded": _on_checkout_completed,
     "customer.subscription.created": _on_subscription_upsert,
     "customer.subscription.updated": _on_subscription_upsert,
     "customer.subscription.deleted": _on_subscription_deleted,

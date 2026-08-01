@@ -76,11 +76,20 @@ def checkout_session(
     customer: str,
     subscription: str = "sub_test_default",
     session_id: str = "cs_test_default",
+    mode: str = "subscription",
+    payment_status: str = "paid",
+    status: str = "complete",
 ) -> dict[str, Any]:
     """A real ``checkout.session.completed`` data.object.
 
     This is the one object type that legitimately carries
     ``client_reference_id`` — the handler sets it at checkout.
+
+    ``mode``, ``payment_status`` and ``status`` default to the values a
+    completed subscription checkout actually carries. They are overridable
+    because ``checkout.session.completed`` fires for sessions that are *not*
+    paid: a delayed payment method completes the session with
+    ``payment_status="unpaid"`` and settles later.
     """
     return {
         "id": session_id,
@@ -93,9 +102,9 @@ def checkout_session(
         "customer_details": {"email": "customer@example.com"},
         "livemode": False,
         "metadata": {},
-        "mode": "subscription",
-        "payment_status": "paid",
-        "status": "complete",
+        "mode": mode,
+        "payment_status": payment_status,
+        "status": status,
         "subscription": subscription,
         "success_url": "https://example.com/success",
     }
