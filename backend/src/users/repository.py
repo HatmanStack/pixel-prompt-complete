@@ -323,6 +323,7 @@ class UserRepository:
         "prompt#",
         "spend#",
         "anon#",
+        "gallery#",
     )
 
     def scan_users(

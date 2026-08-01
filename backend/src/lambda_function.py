@@ -36,6 +36,7 @@ from config import (
     get_model_config_dict,
     s3_bucket,
 )
+from gallery.repository import GalleryIndexRepository
 from jobs.manager import SessionManager
 from models.context import ContextManager, create_context_entry
 from models.providers import (
@@ -56,7 +57,7 @@ from utils import error_responses
 from utils.content_filter import ContentFilter
 from utils.http import invocation_ack, json_response
 from utils.logger import StructuredLogger
-from utils.storage import ImageStorage
+from utils.storage import PUBLIC_PREFIX, ImageStorage
 
 # Type aliases for Lambda events and responses
 LambdaEvent = dict[str, Any]
@@ -101,6 +102,10 @@ _cost_meter = CostMeter(_user_repo)
 
 # Prompt history repository
 _prompt_history = PromptHistoryRepository(config.users_table_name)
+
+# Newest-first index of public gallery folders. Rides the same GSI as prompt
+# history; see gallery/repository.py for why the read has to be indexed.
+_gallery_index = GalleryIndexRepository(config.users_table_name)
 
 # Content filter
 content_filter = ContentFilter()
@@ -671,6 +676,61 @@ def _parse_and_validate_request(
     return ValidatedRequest(body=body, ip=ip, prompt=prompt, tier=tier_ctx), None
 
 
+def _index_public_gallery(image_key: str) -> None:
+    """Record a public image's gallery folder in the bounded gallery index.
+
+    Derived from the key rather than passed in, so the one place that decides
+    an image is public -- ``ImageStorage.upload_image``, which encodes
+    visibility in the prefix -- stays the only place that decides it. A
+    private key has no gallery folder and is skipped structurally, not by a
+    flag a future call site could forget to pass.
+
+    Best-effort. The index is a read optimisation over data S3 already holds,
+    so a DynamoDB failure must not fail a generation the user has been
+    charged for; the reader falls back to listing S3 when the index has
+    nothing to say.
+    """
+    try:
+        if image_storage.is_private_key(image_key):
+            return
+        parts = image_key.split("/")
+        if len(parts) < 3 or parts[0] != PUBLIC_PREFIX:
+            return
+        folder = parts[1]
+        if not image_storage.validate_gallery_id(folder):
+            return
+        _gallery_index.record_gallery(folder)
+    except Exception as e:
+        StructuredLogger.warning(f"Could not index gallery folder for {image_key}: {e}")
+
+
+def _list_gallery_page(count: int, cursor: str | None) -> list[str]:
+    """Newest-first gallery ids, indexed where possible.
+
+    The index makes the read proportional to the page. The S3 fallback keeps
+    folders written before the index existed listable, so an existing
+    deployment's gallery does not go blank the moment this ships.
+
+    The fallback is reached only when the index returns nothing AND no cursor
+    was supplied -- that is, on a deployment whose index has not been written
+    yet. Once a single generation lands, the bounded path answers every
+    request. A cursor implies the caller already received a page, so an empty
+    result there is the end of the feed, not a missing index, and falling
+    back would restart it from the top.
+
+    Both paths order by gallery id, so a cursor issued by one is valid for
+    the other -- which is why the index derives its sort key from the folder
+    name instead of the clock.
+    """
+    try:
+        indexed = _gallery_index.list_recent(count, cursor)
+        if indexed or cursor:
+            return indexed
+    except Exception as e:
+        StructuredLogger.warning(f"Gallery index unavailable, listing S3 instead: {e}")
+    return image_storage.list_galleries(limit=count, cursor=cursor)
+
+
 def _handle_successful_result(
     session_id: str,
     model_name: str,
@@ -703,6 +763,7 @@ def _handle_successful_result(
         session_id=session_id,
         visibility=visibility,
     )
+    _index_public_gallery(image_key)
 
     session_manager.complete_iteration(
         session_id,
@@ -2110,6 +2171,11 @@ def handle_gallery_list(event: LambdaEvent, correlation_id: str | None = None) -
     Unauthenticated and unquota'd, so the work one request can ask for has to
     be bounded by the request itself. Clamped exactly as /prompts/recent and
     /prompts/history clamp, so the three endpoints are visibly consistent.
+
+    The clamp bounds the per-folder fan-out below; ``_list_gallery_page``
+    bounds the listing that feeds it. Both are needed -- clamping only the
+    fan-out still left every public request paging the whole ``sessions/``
+    prefix, because S3 returns it ascending and the newest page is last.
     """
     params = event.get("queryStringParameters") or {}
     try:
@@ -2120,9 +2186,9 @@ def handle_gallery_list(event: LambdaEvent, correlation_id: str | None = None) -
 
     try:
         # One folder more than asked for. That extra name is how the response
-        # knows whether a next page exists without a second LIST, and it is
+        # knows whether a next page exists without a second read, and it is
         # dropped before anything is expanded.
-        gallery_folders = image_storage.list_galleries(limit=limit + 1, cursor=cursor)
+        gallery_folders = _list_gallery_page(limit + 1, cursor)
         has_more = len(gallery_folders) > limit
         # Slice BEFORE the fan-out. This is the whole finding: each surviving
         # folder costs its own paginating LIST, and expanding folders that

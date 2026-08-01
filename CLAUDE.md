@@ -148,6 +148,8 @@ backend/src/
 │   ├── portal.py            # /billing/portal handler
 │   ├── stripe_client.py     # Cached Stripe client
 │   └── webhook.py           # /stripe/webhook handler + event dispatch
+├── gallery/
+│   └── repository.py        # Newest-first index of public gallery folders
 ├── jobs/
 │   └── manager.py           # SessionManager: S3 session state, ETag-conditional writes
 ├── models/
@@ -628,6 +630,18 @@ shipped a broken gate once already — the spelling is load-bearing.
 `[1, 50]`; a non-integer `limit` is 400. `cursor` continues from a previous
 page, and the response carries `nextCursor` when more pages exist. It is
 unauthenticated and unquota'd, which is why the bound is on the request.
+
+The clamp bounds the per-folder fan-out; it does **not** bound the listing
+that feeds it. S3 returns `CommonPrefixes` ascending, so the newest page is
+the last one and reaching it meant paging the whole `sessions/` prefix on
+every public request — cost proportional to every retained session rather
+than to the page. `gallery/repository.py` indexes each public gallery folder
+under `GLOBAL#GALLERY` on the **existing** `PromptHistoryIndex` GSI, so the
+read is one bounded query. The index sort key is derived from the folder's
+own timestamp, not from the write clock, which is what lets a cursor be a
+plain gallery id and keeps the S3 fallback cursor-compatible. That fallback
+runs only when the index is empty and no cursor was given, so folders
+written before the index existed still list.
 
 **`MODEL_DISABLED`.** The admin runtime kill switch is honoured on `/iterate`
 and `/outpaint` as well as `/generate`: a refinement request naming a disabled
