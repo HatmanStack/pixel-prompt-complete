@@ -676,6 +676,33 @@ def _parse_and_validate_request(
     return ValidatedRequest(body=body, ip=ip, prompt=prompt, tier=tier_ctx), None
 
 
+def _release_model_slot(model_name: str, correlation_id: str | None = None) -> None:
+    """Return a per-model daily slot taken by work that never reached a provider.
+
+    The per-user quota refund next to every call of this has a matching
+    invariant; this is the shared half of it. A slot left spent is capacity
+    taken from every other user of the service, not just from the caller who
+    lost the race.
+
+    Best-effort and never raised: this runs on a path that is already
+    returning an error, and failing to give a slot back must not turn one
+    error into two. A missed release costs one slot off a daily cap until the
+    window rolls, which is the safe direction.
+    """
+    try:
+        released = _model_counter_service.release_model_slot(model_name, int(time.time()))
+        if released:
+            StructuredLogger.info(
+                f"Released a {model_name} slot for a refinement that never dispatched",
+                correlation_id=correlation_id,
+            )
+    except Exception as e:
+        StructuredLogger.warning(
+            f"Could not release the {model_name} model slot: {e}",
+            correlation_id=correlation_id,
+        )
+
+
 def _index_public_gallery(image_key: str) -> None:
     """Record a public image's gallery folder in the bounded gallery index.
 
@@ -1726,6 +1753,10 @@ def _handle_refinement(
     """
     iteration_index = None
     session_id = model_name = None
+    # Hoisted above the try so the handler below can read them however early
+    # the failure lands.
+    slot_consumed = False
+    dispatched = False
     # Same flag that selects the price, so a refund can never differ from the
     # charge.
     refund_kind = "outpaint" if (add_iteration_kwargs or {}).get("is_outpaint") else "refine"
@@ -1777,8 +1808,23 @@ def _handle_refinement(
         # in progress, `_compute_session_status` the session, and the client
         # would poll a spinner that never resolves while one of the model's
         # MAX_ITERATIONS slots stayed spent on work that never ran.
+        #
+        # That ordering leaves a gap this alone does not close. `add_iteration`
+        # re-reads the session under its ETag and re-checks the iteration
+        # limit, so concurrent refinements can all pass the earlier read above,
+        # one wins the last slot, and the losers raise -- having already taken
+        # a slot off a cap shared by every user of the service. `slot_consumed`
+        # is what lets the failure paths below hand it back; `dispatched` is
+        # what stops them handing it back once a provider has run, because at
+        # that point the image was generated and billed whatever the outcome.
+        #
+        # It tracks the slot actually being taken rather than `slot_ok`: the
+        # fail-open branch below reports success without incrementing anything,
+        # and releasing there would decrement a counter this request never
+        # touched, stealing capacity from whoever did.
         try:
             slot_ok = _model_counter_service.consume_model_slot(model_name, int(time.time()))
+            slot_consumed = slot_ok
         except Exception as e:
             StructuredLogger.error(
                 f"Per-model cap check failed, allowing refinement: {e}",
@@ -1827,6 +1873,11 @@ def _handle_refinement(
             session_id,
             model_name,
         )
+        # Set before the call, not after: a provider that raises mid-call may
+        # well have generated and billed for the image already, so the slot
+        # stays spent. Over-counting a cost ceiling is safe; under-counting is
+        # the thing the ceiling exists to prevent.
+        dispatched = True
         result = handler(*handler_args)
 
         duration = time.time() - start_time
@@ -1921,6 +1972,12 @@ def _handle_refinement(
             correlation_id=correlation_id,
             traceback=traceback.format_exc(),
         )
+        # The shared cap, alongside the per-user quota below. This request took
+        # a model slot and never reached a provider, so the slot bought
+        # nothing -- and unlike the quota, which only costs its owner, a slot
+        # left spent is capacity taken from every other user of the service.
+        if slot_consumed and not dispatched and model_name:
+            _release_model_slot(model_name, correlation_id)
         _refund_usage(validated.tier, refund_kind, correlation_id)
         return response(500, error_responses.internal_server_error())
 
