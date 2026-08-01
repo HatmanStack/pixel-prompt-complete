@@ -342,3 +342,99 @@ def test_a_store_failure_taking_the_slot_releases_nothing(wired):
         wired.lambda_handler(_iterate_event(), None)
 
         assert m_release.call_count == 0
+
+
+# --------------------------------------------------------------------------
+# /generate reserves a slot per model before the session exists
+# --------------------------------------------------------------------------
+
+
+def _generate_event():
+    return {
+        "rawPath": "/generate",
+        "requestContext": {
+            "http": {"method": "POST", "sourceIp": "1.2.3.4"},
+            "authorizer": {"jwt": {"claims": _CLAIMS}},
+        },
+        "headers": {},
+        "body": json.dumps({"prompt": "a cat", "ageAffirmed": True}),
+    }
+
+
+def _all_slot_counts(wired):
+    counts = wired._model_counter_service.get_model_counts(0)
+    return {name: counts[name]["dailyCount"] for name in counts}
+
+
+@pytest.fixture
+def wired_generate(wired, monkeypatch):
+    """`wired`, with every model enabled and the async dispatch path on."""
+    monkeypatch.setattr(wired.config, "generate_async", True)
+    monkeypatch.setattr(wired.config, "age_gate_enabled", False)
+    return wired
+
+
+def test_a_failed_async_dispatch_returns_every_reserved_slot(wired_generate):
+    """The finding: the 503 refunded the user but kept the shared slots.
+
+    A missing lambda:InvokeFunction grant is the case this branch exists for,
+    and it fails every /generate — so leaking here drives all four models to
+    their daily cap without a single image being generated.
+    """
+    wired = wired_generate
+    with (
+        patch.object(wired, "_dispatch_generation_async", return_value=False),
+        patch.object(wired, "session_manager") as m_sm,
+    ):
+        m_sm.create_session.return_value = "sess-x"
+
+        resp = wired.lambda_handler(_generate_event(), None)
+
+        assert resp["statusCode"] == 503
+        assert json.loads(resp["body"])["error"] == "GENERATION_DISPATCH_FAILED"
+        assert _all_slot_counts(wired) == dict.fromkeys(
+            ("gemini", "nova", "openai", "firefly"), 0
+        ), "a dispatch that reached no provider kept its model slots"
+
+
+def test_a_failure_before_dispatch_returns_every_reserved_slot(wired_generate):
+    """create_session raising on an S3 blip is the same shape."""
+    wired = wired_generate
+    with patch.object(wired, "session_manager") as m_sm:
+        m_sm.create_session.side_effect = RuntimeError("s3 unavailable")
+
+        resp = wired.lambda_handler(_generate_event(), None)
+
+        assert resp["statusCode"] == 500
+        assert _all_slot_counts(wired) == dict.fromkeys(("gemini", "nova", "openai", "firefly"), 0)
+
+
+def test_a_dispatched_generation_keeps_its_slots(wired_generate):
+    """The reservation bought what it exists to meter.
+
+    Asserted against the models the response says were dispatched rather than
+    against all four: which models are config-enabled depends on which API
+    keys the fixture sets, and a test that hard-codes four would pass or fail
+    on that instead of on the slot accounting.
+    """
+    wired = wired_generate
+    with (
+        patch.object(wired, "_dispatch_generation_async", return_value=True),
+        patch.object(wired, "session_manager") as m_sm,
+    ):
+        m_sm.create_session.return_value = "sess-ok"
+
+        resp = wired.lambda_handler(_generate_event(), None)
+
+        assert resp["statusCode"] == 202
+        dispatched = {
+            name
+            for name, info in json.loads(resp["body"])["models"].items()
+            if info.get("status") == "pending"
+        }
+        assert dispatched, "nothing was dispatched, so this proves nothing"
+
+        counts = _all_slot_counts(wired)
+        for name in counts:
+            expected = 1 if name in dispatched else 0
+            assert counts[name] == expected, f"{name}: {counts[name]} != {expected}"
