@@ -302,9 +302,9 @@ Prompt enhancement uses separate config: `PROMPT_MODEL_PROVIDER`, `PROMPT_MODEL_
 | `ANON_GENERATE_LIMIT`                   | No       | `5`                  | `/generate` calls per source IP per window when `AUTH_ENABLED=false`                                                                                                                                                                                              |
 | `ANON_REFINE_LIMIT`                     | No       | `10`                 | `/iterate` + `/outpaint` calls per source IP per window when `AUTH_ENABLED=false`                                                                                                                                                                                 |
 | `ANON_WINDOW_SECONDS`                   | No       | `3600`               | Rolling window for anonymous limits                                                                                                                                                                                                                               |
-| `ENHANCE_IP_LIMIT`                      | No       | `10`                 | `/enhance` calls per source IP per window. `/enhance` skips tier quota, and the daily spend sub-ceiling is global — it bounds the money but lets one caller spend all of it and 503 enhancement for everyone                                                       |
+| `ENHANCE_IP_LIMIT`                      | No       | `10`                 | `/enhance` calls per source IP per window. `/enhance` skips tier quota, and the daily spend sub-ceiling is global — it bounds the money but lets one caller spend all of it and 503 enhancement for everyone. `0` disables the check                              |
 | `ENHANCE_IP_WINDOW_SECONDS`             | No       | `3600`               | Rolling window for the per-IP `/enhance` limit                                                                                                                                                                                                                    |
-| `LOG_IP_LIMIT`                          | No       | `120`                | `/log` calls per source IP per window. Sized for a browser having a genuinely bad session, not a healthy one                                                                                                                                                       |
+| `LOG_IP_LIMIT`                          | No       | `120`                | `/log` calls per source IP per window. Sized for a browser having a genuinely bad session, not a healthy one. `0` disables the check                                                                                                                              |
 | `LOG_IP_WINDOW_SECONDS`                 | No       | `3600`               | Rolling window for the per-IP `/log` limit                                                                                                                                                                                                                        |
 | `GUEST_IP_GENERATE_LIMIT`               | No       | `3`                  | Guest generates per source IP. Must be below `GUEST_GLOBAL_LIMIT` or it never binds                                                                                                                                                                               |
 | `GUEST_IP_WINDOW_SECONDS`               | No       | `3600`               | Rolling window for the per-IP guest limit                                                                                                                                                                                                                         |
@@ -331,7 +331,7 @@ Prompt enhancement uses separate config: `PROMPT_MODEL_PROVIDER`, `PROMPT_MODEL_
 | `STRIPE_SUCCESS_URL`                    | Yes**    | `""`                 | Redirect URL after successful checkout                                                                                                                                                                                                                            |
 | `STRIPE_CANCEL_URL`                     | Yes**    | `""`                 | Redirect URL after cancelled checkout                                                                                                                                                                                                                             |
 | `STRIPE_PORTAL_RETURN_URL`              | Yes**    | `""`                 | Return URL from Stripe customer portal                                                                                                                                                                                                                            |
-| `STRIPE_TIMEOUT_SECONDS`                | No       | `5.0`                | Timeout for a single Stripe API call. The SDK default is **80s**, which behind the 29s gateway ceiling means an unbounded call outlives the request it serves                                                                                                     |
+| `STRIPE_TIMEOUT_SECONDS`                | No       | `5.0`                | Budget for one Stripe attempt, **connect and read together**. The SDK default is 80s _per phase_; `requests` applies a scalar to each, so this is split into an explicit pair. Must be > 0 — config raises at import, since `requests` reads 0 as fail-immediately |
 | `STRIPE_MAX_NETWORK_RETRIES`            | No       | `1`                  | Stripe retry budget. Multiplies with the timeout — the SDK default of 2 makes a 5s timeout a 15s worst case                                                                                                                                                       |
 
 *Required when `AUTH_ENABLED=true`. **Required when `BILLING_ENABLED=true`.
@@ -644,10 +644,22 @@ every public request — cost proportional to every retained session rather
 than to the page. `gallery/repository.py` indexes each public gallery folder
 under `GLOBAL#GALLERY` on the **existing** `PromptHistoryIndex` GSI, so the
 read is one bounded query. The index sort key is derived from the folder's
-own timestamp, not from the write clock, which is what lets a cursor be a
-plain gallery id and keeps the S3 fallback cursor-compatible. That fallback
-runs only when the index is empty and no cursor was given, so folders
-written before the index existed still list.
+own timestamp, not from the write clock, which is what lets the public cursor
+stay a plain gallery id.
+
+Reading the index as the whole truth is only correct if it **is** the whole
+truth, so the first request against an unpopulated index runs one full
+`sessions/` walk, writes an entry per folder, and records a `gallery#meta`
+marker; every request after that is one query. Preferring S3 whenever the
+index looked short instead would have restored the unbounded scan, and
+preferring the index while it was short made every pre-existing folder
+unreachable for the rest of its retention.
+
+There is deliberately **no S3 fallback on index failure**: this endpoint is
+unauthenticated, so a fallback would hand the whole-bucket walk to anyone who
+could make DynamoDB fail. An index error is a `503`, an unparseable cursor a
+`400`, and a folder whose images the S3 lifecycle has already deleted is
+dropped from the response rather than rendered as a blank tile.
 
 **`MODEL_DISABLED`.** The admin runtime kill switch is honoured on `/iterate`
 and `/outpaint` as well as `/generate`: a refinement request naming a disabled

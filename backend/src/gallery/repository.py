@@ -26,6 +26,7 @@ contract a gallery id instead of an opaque blob.
 
 from __future__ import annotations
 
+import threading
 from datetime import datetime, timezone
 from typing import Any
 
@@ -38,9 +39,25 @@ FEED_KEY = "GLOBAL#GALLERY"
 # ``UserRepository._NON_USER_PREFIXES`` so the admin user scan skips these.
 ITEM_PREFIX = "gallery#"
 
-# Matches the 30-day S3 lifecycle on session objects. An index entry that
-# outlived its images would advertise a gallery whose every preview 404s.
-_TTL_SECONDS = 30 * 86400
+# Marks the index as covering every folder S3 still retains, not just those
+# written since it shipped. Until this exists the index is INCOMPLETE and
+# reading from it would silently hide every pre-existing gallery.
+BACKFILL_MARKER_KEY = f"{ITEM_PREFIX}meta#backfill"
+
+# The S3 lifecycle deletes session objects after 30 days
+# (``template.yaml``: ``DeleteOldSessions``, ``ExpirationInDays: 30``).
+#
+# The index entry has to disappear FIRST, not at the same moment. DynamoDB
+# reaps expired items lazily -- this repository's own ``_IP_BUCKET_TTL_GRACE``
+# comment puts it at up to ~48h -- and an expired-but-unreaped item is still
+# returned by queries. Matching the two exactly therefore guarantees a window
+# where the index advertises folders whose images S3 has already deleted, and
+# the gallery renders blank tiles. Expiring two days early closes it from this
+# side; ``handle_gallery_list`` drops empty folders from the response as the
+# belt to this braces, because no TTL can be relied on to fire on time.
+_LIFECYCLE_SECONDS = 30 * 86400
+_TTL_LEAD_SECONDS = 2 * 86400
+_TTL_SECONDS = _LIFECYCLE_SECONDS - _TTL_LEAD_SECONDS
 
 # A query returns at most 1MB per page. These items are a few hundred bytes,
 # so one page covers any allowed limit many times over; the loop exists so a
@@ -72,6 +89,24 @@ class GalleryIndexRepository:
         self.table_name = table_name
         self._dynamodb = dynamodb_resource or boto3.resource("dynamodb")
         self._table = self._dynamodb.Table(table_name)
+        # boto3 resources are documented as not thread-safe, and
+        # ``run_generation`` fans out over four worker threads that each write
+        # here on success -- all of them the same folder, in the same instant.
+        # Serialising the writes is cheap next to the provider call that
+        # precedes each one.
+        self._write_lock = threading.Lock()
+
+    def _item_for(self, gallery_id: str) -> dict[str, Any] | None:
+        created_at = created_at_from_gallery_id(gallery_id)
+        if created_at is None:
+            return None
+        return {
+            "userId": f"{ITEM_PREFIX}{gallery_id}",
+            "promptOwner": FEED_KEY,
+            "createdAt": created_at,
+            "galleryId": gallery_id,
+            "ttl": created_at + _TTL_SECONDS,
+        }
 
     def record_gallery(self, gallery_id: str) -> None:
         """Index one public gallery folder.
@@ -85,18 +120,47 @@ class GalleryIndexRepository:
         unparseable one is a bug on our side, and failing an upload the user
         has already been billed for is the wrong way to report it.
         """
-        created_at = created_at_from_gallery_id(gallery_id)
-        if created_at is None:
+        item = self._item_for(gallery_id)
+        if item is None:
             return
-        self._table.put_item(
-            Item={
-                "userId": f"{ITEM_PREFIX}{gallery_id}",
-                "promptOwner": FEED_KEY,
-                "createdAt": created_at,
-                "galleryId": gallery_id,
-                "ttl": created_at + _TTL_SECONDS,
-            }
-        )
+        with self._write_lock:
+            self._table.put_item(Item=item)
+
+    def is_backfilled(self) -> bool:
+        """Whether the index covers folders written before it existed.
+
+        Until this is true the index is a partial view, and reading from it
+        would hide every pre-existing gallery for the rest of its retention.
+        """
+        response = self._table.get_item(Key={"userId": BACKFILL_MARKER_KEY})
+        return bool(response.get("Item"))
+
+    def backfill(self, gallery_ids: list[str]) -> int:
+        """Index folders that predate the index, then mark it complete.
+
+        The marker is written **last and only on success**, so a backfill that
+        dies part-way is retried rather than leaving a partial index treated
+        as authoritative. Individual writes are idempotent, so the retry costs
+        duplicate puts and nothing else.
+
+        Returns the number of folders indexed.
+        """
+        indexed = 0
+        with self._write_lock:
+            with self._table.batch_writer() as batch:
+                for gallery_id in gallery_ids:
+                    item = self._item_for(gallery_id)
+                    if item is None:
+                        continue
+                    batch.put_item(Item=item)
+                    indexed += 1
+            self._table.put_item(
+                Item={
+                    "userId": BACKFILL_MARKER_KEY,
+                    "backfilledCount": indexed,
+                }
+            )
+        return indexed
 
     def list_recent(self, limit: int, cursor: str | None = None) -> list[str]:
         """Return at most ``limit`` gallery ids, newest first.
@@ -104,6 +168,16 @@ class GalleryIndexRepository:
         ``cursor`` is a gallery id from a previous page; folders strictly
         older than it are returned. Its index position is derived from the id
         itself, so no server-side cursor state is kept.
+
+        Raises:
+            ValueError: if ``cursor`` is not a parseable gallery id. Ignoring
+                it and querying from the top instead would answer "page 7"
+                with page 1 and a fresh cursor, so an infinite-scroll client
+                would render the newest galleries again below the older ones
+                and never terminate. The S3 path treats any cursor as a
+                lexicographic bound and cannot silently restart this way, so
+                ignoring it here would also make the two paths disagree on the
+                same input.
         """
         if limit <= 0:
             return []
@@ -117,12 +191,13 @@ class GalleryIndexRepository:
         }
         if cursor:
             created_at = created_at_from_gallery_id(cursor)
-            if created_at is not None:
-                kwargs["ExclusiveStartKey"] = {
-                    "promptOwner": FEED_KEY,
-                    "createdAt": created_at,
-                    "userId": f"{ITEM_PREFIX}{cursor}",
-                }
+            if created_at is None:
+                raise ValueError(f"Unparseable gallery cursor: {cursor!r}")
+            kwargs["ExclusiveStartKey"] = {
+                "promptOwner": FEED_KEY,
+                "createdAt": created_at,
+                "userId": f"{ITEM_PREFIX}{cursor}",
+            }
 
         found: list[str] = []
         for _ in range(_MAX_QUERY_PAGES):
