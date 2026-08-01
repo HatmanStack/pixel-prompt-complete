@@ -274,3 +274,70 @@ def test_missing_unit_amount_is_also_cached():
         _get()
     assert fake.Price.retrieve.call_count == 1
     _reset()
+
+
+# ---- A Stripe outage must not change the advertised price ----
+
+
+def test_a_stripe_failure_serves_the_last_known_price(monkeypatch):
+    """Caching None over a good amount silently changes what is advertised.
+
+    The configured fallback is there for when Stripe has never been read.
+    Once the real amount is known, an outage is not a reason to start quoting
+    a different number to every visitor for the next 15 minutes.
+    """
+    import config
+    from api import pricing
+
+    pricing.reset_price_cache()
+    monkeypatch.setattr(config, "billing_enabled", True)
+    monkeypatch.setattr(config, "stripe_price_id", "price_test")
+    monkeypatch.setattr(config, "paid_price_usd_cents", 1900)
+
+    calls = {"n": 0}
+
+    class _Stripe:
+        class Price:
+            @staticmethod
+            def retrieve(price_id):
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    return {"unit_amount": 2500}
+                raise RuntimeError("stripe unreachable")
+
+    monkeypatch.setattr(pricing, "get_stripe", lambda: _Stripe(), raising=False)
+    monkeypatch.setitem(
+        __import__("sys").modules, "billing.stripe_client", type(
+            "M", (), {"get_stripe": staticmethod(lambda: _Stripe())}
+        )
+    )
+
+    assert pricing._stripe_price_usd_cents() == 2500
+
+    # Expire the cache so the next read goes upstream and fails.
+    pricing._price_cache = (2500, 0)
+    assert pricing._stripe_price_usd_cents() == 2500, "an outage changed the price"
+
+
+def test_a_stripe_failure_before_any_success_uses_the_configured_price(monkeypatch):
+    """With nothing known, the configured value is the only honest answer."""
+    import config
+    from api import pricing
+
+    pricing.reset_price_cache()
+    monkeypatch.setattr(config, "billing_enabled", True)
+    monkeypatch.setattr(config, "stripe_price_id", "price_test")
+
+    class _Stripe:
+        class Price:
+            @staticmethod
+            def retrieve(price_id):
+                raise RuntimeError("stripe unreachable")
+
+    monkeypatch.setitem(
+        __import__("sys").modules, "billing.stripe_client", type(
+            "M", (), {"get_stripe": staticmethod(lambda: _Stripe())}
+        )
+    )
+    assert pricing._stripe_price_usd_cents() is None
+    pricing.reset_price_cache()

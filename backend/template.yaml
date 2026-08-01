@@ -442,6 +442,24 @@ Parameters:
     Default: "http://localhost:5173/"
     Description: Return URL from Stripe Customer Portal
 
+  StripeTimeoutSeconds:
+    Type: Number
+    Default: 5
+    Description: >-
+      Timeout in seconds for a single Stripe API call. The SDK default is 80
+      seconds with 2 retries, which behind the 29s gateway ceiling means an
+      unbounded call outlives the request it serves. GET /pricing is public
+      and hit on every page load, so a slow Stripe is amplified by ordinary
+      traffic into the execution pool the paid endpoints share.
+
+  StripeMaxNetworkRetries:
+    Type: Number
+    Default: 1
+    Description: >-
+      Stripe retry budget. Multiplies with the timeout -- the SDK default of 2
+      turns a 5s timeout into a 15s worst case, so bounding one without the
+      other only looks bounded.
+
   # Per-Model Daily Caps
   CreditsEnabled:
     Type: String
@@ -760,6 +778,8 @@ Resources:
           STRIPE_SUCCESS_URL: !Ref StripeSuccessUrl
           STRIPE_CANCEL_URL: !Ref StripeCancelUrl
           STRIPE_PORTAL_RETURN_URL: !Ref StripePortalReturnUrl
+          STRIPE_TIMEOUT_SECONDS: !Ref StripeTimeoutSeconds
+          STRIPE_MAX_NETWORK_RETRIES: !Ref StripeMaxNetworkRetries
           # Per-model daily caps
           CREDITS_ENABLED: !Ref CreditsEnabled
           PAID_PRICE_USD_CENTS: !Ref PaidPriceUsdCents

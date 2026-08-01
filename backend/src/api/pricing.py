@@ -64,15 +64,22 @@ def _stripe_price_usd_cents() -> int | None:
         _price_cache = (int(amount), now)
         return int(amount)
     except Exception as e:
+        # Serve the last amount Stripe actually confirmed, if there is one.
+        # Falling back to the configured value once the real price is known
+        # would quietly change what every visitor is quoted for the length of
+        # the TTL — and the two are allowed to disagree, which is the whole
+        # reason this function exists. An outage is not a price change.
+        last_known = _price_cache[0] if _price_cache else None
         StructuredLogger.warning(
-            f"Could not read price from Stripe, using configured value: {e}",
+            f"Could not read price from Stripe, serving {'last known' if last_known else 'configured'} value: {e}",
             stripePriceId=config.stripe_price_id,
+            lastKnownCents=last_known,
         )
-        # Cache the failure for the same TTL. /pricing is public and hit on
+        # Cache the outcome for the same TTL. /pricing is public and hit on
         # every page load, so without this a Stripe outage means every single
         # visitor blocks on a failing upstream call.
-        _price_cache = (None, now)
-        return None
+        _price_cache = (last_known, now)
+        return last_known
 
 
 def _tiers() -> list[dict[str, Any]]:

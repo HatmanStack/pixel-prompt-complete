@@ -294,6 +294,21 @@ stripe_success_url = os.environ.get("STRIPE_SUCCESS_URL", "")
 stripe_cancel_url = os.environ.get("STRIPE_CANCEL_URL", "")
 stripe_portal_return_url = os.environ.get("STRIPE_PORTAL_RETURN_URL", "")
 
+# How long a Stripe call may hold a Lambda execution.
+#
+# The SDK ships an 80-second default timeout and retries twice, so an
+# unbounded call can occupy an execution for four minutes behind a 29s
+# gateway ceiling and 10 reserved concurrent executions. GET /pricing is
+# public and hit on every page load, so a slow Stripe is amplified by
+# ordinary traffic into the pool the paid endpoints share.
+#
+# The two multiply: 5s with the default two retries is a 15s worst case.
+# Bounding one without the other only looks bounded, so both are set, and
+# test_timeout_is_well_inside_the_gateway_ceiling asserts their product stays
+# under the gateway's.
+stripe_timeout_seconds = _safe_float("STRIPE_TIMEOUT_SECONDS", 5.0)
+stripe_max_network_retries = _safe_int("STRIPE_MAX_NETWORK_RETRIES", 1)
+
 # Prompt enhancement model configuration
 prompt_model_provider = os.environ.get("PROMPT_MODEL_PROVIDER", "openai")
 prompt_model_id = os.environ.get("PROMPT_MODEL_ID", "gpt-4o")
