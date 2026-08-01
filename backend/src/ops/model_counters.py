@@ -67,3 +67,29 @@ class ModelCounterService:
         """
         ok, _ = self.increment_model_count(model_name, now)
         return ok
+
+    def release_model_slot(self, model_name: str, now: int) -> bool:
+        """Give one slot back to the model's daily cap.
+
+        The compensating half of :meth:`consume_model_slot`, for a request
+        that took a slot and then failed before any provider was reached. The
+        cap is shared by every user of the service, so a slot left spent on
+        work that never ran is capacity taken from everybody -- unlike the
+        per-user quota, which only costs its owner.
+
+        Call this **only** when nothing was dispatched. Once a provider has
+        been called the image has been generated and billed whatever the
+        outcome, and the slot has done exactly the job it exists to do.
+
+        Returns True when a slot was actually returned. False means there was
+        nothing to return -- an empty counter, or a window that has since
+        rolled over and already handed out a fresh allowance. Both are
+        no-ops by design: see :meth:`UserRepository.decrement_counter`.
+        """
+        return self._repo.decrement_counter(
+            user_id=f"model#{model_name}",
+            counter="dailyCount",
+            window_field="dailyResetAt",
+            window_seconds=86400,
+            now=now,
+        )

@@ -5,6 +5,7 @@ iteration, outpainting, and session status.
 """
 
 import base64
+import hashlib
 import json
 import os
 import re
@@ -36,6 +37,7 @@ from config import (
     get_model_config_dict,
     s3_bucket,
 )
+from gallery.repository import GalleryIndexRepository
 from jobs.manager import SessionManager
 from models.context import ContextManager, create_context_entry
 from models.providers import (
@@ -56,7 +58,7 @@ from utils import error_responses
 from utils.content_filter import ContentFilter
 from utils.http import invocation_ack, json_response
 from utils.logger import StructuredLogger
-from utils.storage import ImageStorage
+from utils.storage import PUBLIC_PREFIX, ImageStorage
 
 # Type aliases for Lambda events and responses
 LambdaEvent = dict[str, Any]
@@ -101,6 +103,10 @@ _cost_meter = CostMeter(_user_repo)
 
 # Prompt history repository
 _prompt_history = PromptHistoryRepository(config.users_table_name)
+
+# Newest-first index of public gallery folders. Rides the same GSI as prompt
+# history; see gallery/repository.py for why the read has to be indexed.
+_gallery_index = GalleryIndexRepository(config.users_table_name)
 
 # Content filter
 content_filter = ContentFilter()
@@ -671,6 +677,313 @@ def _parse_and_validate_request(
     return ValidatedRequest(body=body, ip=ip, prompt=prompt, tier=tier_ctx), None
 
 
+def _source_ip_hash(event: LambdaEvent) -> str | None:
+    """Stable, non-reversible bucket for the caller's source IP.
+
+    Returns None when the event carries no address, which the callers treat
+    as "cannot meter" rather than as a bucket of its own. Deliberately unlike
+    ``users.tier``, which hashes the literal ``"unknown"`` so an unidentified
+    caller still lands in *some* tier -- here there is no tier to fall back
+    to, and metering every proxy-stripped request into one shared bucket
+    would rate-limit them as if they were a single caller.
+    """
+    ip = (event.get("requestContext") or {}).get("http", {}).get("sourceIp")
+    if not ip:
+        return None
+    return hashlib.sha256(str(ip).encode()).hexdigest()[:16]
+
+
+def _public_ip_rate_limited(
+    event: LambdaEvent,
+    scope: str,
+    limit: int,
+    window_seconds: int,
+    correlation_id: str | None = None,
+) -> ApiResponse | None:
+    """Bound one public endpoint per source IP. Returns a 429, or None to allow.
+
+    For the endpoints that reach a shared billable resource without an
+    identity: ``/enhance`` calls a paid LLM and ``/log`` writes billed
+    CloudWatch records, and both skip tier quota. Each already had a *global*
+    bound -- the enhance daily sub-ceiling, API Gateway throttling -- and a
+    global bound caps everyone together, so it cannot stop one caller
+    consuming the share of all the others. Exhausting the enhance allocation
+    503s every legitimate enhance request until reset, which turns a cost
+    guard into a denial-of-service amplifier.
+
+    ``scope`` gives each endpoint its own bucket, so a browser reporting
+    errors cannot exhaust anyone's prompt enhancement.
+
+    Fails **open**, matching every other guard over this table: an unreachable
+    counter is not evidence the caller is over limit, and failing a public
+    endpoint because DynamoDB hiccuped is a self-inflicted outage. Logged at
+    ERROR so persistently unmetered traffic is alarmable rather than
+    invisible, and counted by the store breaker like the other six sites that
+    swallow a store error.
+
+    A ``limit`` of zero or less **disables** the check. That is the convention
+    ``ENHANCE_DAILY_SPEND_CEILING_USD_MICROS`` already documents two knobs
+    away, and the alternative is worse than inconsistent: the counter
+    condition is ``requestCount < :limit``, so a limit of 0 fails on the very
+    first request and an operator reaching for the off switch takes the
+    endpoint offline for everybody instead.
+
+    An IP is not a person. Like the anon and guest IP buckets, this is an
+    abuse ceiling rather than a fair-use quota.
+    """
+    if limit <= 0:
+        return None
+
+    ip_hash = _source_ip_hash(event)
+    if not ip_hash:
+        # Nothing to meter against. Allowing is the lesser evil, exactly as in
+        # users.quota._enforce_anon: denying would break every caller behind a
+        # proxy that strips the address.
+        return None
+
+    now = int(time.time())
+    try:
+        ok, item = _user_repo.increment_ip_rate_bucket(
+            f"iplimit#{scope}#{ip_hash}", limit, window_seconds, now
+        )
+    except Exception as e:
+        store_breaker.record_store_result(False)
+        StructuredLogger.error(
+            f"{scope} IP rate limit check failed, allowing request: {e}",
+            correlation_id=correlation_id,
+        )
+        return None
+    store_breaker.record_store_result(True)
+    if ok:
+        return None
+
+    window_start = int(item.get("windowStart", now) or now)
+    retry_after = max(1, window_start + window_seconds - now)
+    StructuredLogger.warning(
+        f"{scope} IP rate limit reached",
+        correlation_id=correlation_id,
+        scope=scope,
+        limit=limit,
+    )
+    return response(429, error_responses.ip_rate_limit(scope, retry_after=retry_after))
+
+
+def _release_model_slot(model_name: str, correlation_id: str | None = None) -> None:
+    """Return a per-model daily slot taken by work that never reached a provider.
+
+    The per-user quota refund next to every call of this has a matching
+    invariant; this is the shared half of it. A slot left spent is capacity
+    taken from every other user of the service, not just from the caller who
+    lost the race.
+
+    Best-effort and never raised: this runs on a path that is already
+    returning an error, and failing to give a slot back must not turn one
+    error into two. A missed release costs one slot off a daily cap until the
+    window rolls, which is the safe direction.
+    """
+    try:
+        released = _model_counter_service.release_model_slot(model_name, int(time.time()))
+        if released:
+            StructuredLogger.info(
+                f"Released a {model_name} slot for a refinement that never dispatched",
+                correlation_id=correlation_id,
+            )
+    except Exception as e:
+        StructuredLogger.warning(
+            f"Could not release the {model_name} model slot: {e}",
+            correlation_id=correlation_id,
+        )
+
+
+def _release_model_slots(model_names: list[str], correlation_id: str | None = None) -> None:
+    """Return every per-model slot a request reserved and then never spent.
+
+    ``/generate`` reserves one slot per model *before* the session exists, so
+    a request that dies between the reservation and the worker taking it over
+    leaks up to four slots off a cap shared by the whole service. The
+    per-user quota is refunded on those paths already; this is the shared
+    half, and the shared half is the one that costs other people.
+    """
+    for name in model_names:
+        _release_model_slot(name, correlation_id)
+
+
+def _index_public_gallery(image_key: str) -> None:
+    """Record a public image's gallery folder in the bounded gallery index.
+
+    Derived from the key rather than passed in, so the one place that decides
+    an image is public -- ``ImageStorage.upload_image``, which encodes
+    visibility in the prefix -- stays the only place that decides it. A
+    private key has no gallery folder and is skipped structurally, not by a
+    flag a future call site could forget to pass.
+
+    Best-effort, but not consequence-free, and the docstring said otherwise
+    until the read path changed underneath it. A DynamoDB failure must not
+    fail a generation the user has been charged for -- so this swallows.
+    There is no read-side fallback to S3 any more, though, and the backfill
+    marker is already written by the time a session generates, so a dropped
+    write costs that folder its place in the gallery until its retention
+    expires. Logged at ERROR for that reason rather than passed over.
+    """
+    try:
+        if image_storage.is_private_key(image_key):
+            return
+        parts = image_key.split("/")
+        if len(parts) < 3 or parts[0] != PUBLIC_PREFIX:
+            return
+        folder = parts[1]
+        if not image_storage.validate_gallery_id(folder):
+            return
+        _gallery_index.record_gallery(folder)
+    except Exception as e:
+        StructuredLogger.error(f"Could not index gallery folder for {image_key}: {e}")
+
+
+# Folders indexed by one backfill pass. Above any plausible 30-day retention
+# Folders indexed per batch write, and the wall-clock the backfill may spend
+# inside one request. The deadline is what keeps the first pass from
+# overrunning the gateway; the resume cursor is what stops the next request
+# starting the corpus again.
+_GALLERY_BACKFILL_CHUNK = 200
+_GALLERY_BACKFILL_BUDGET_SECONDS = 10.0
+
+# Per container: once the marker says complete it never goes back, so
+# re-reading it on every gallery request would be a GetItem to learn a
+# constant.
+_gallery_backfilled = False
+
+# The folder list a backfill is working through, held for the life of the
+# container. `list_galleries()` pages the ENTIRE `sessions/` prefix -- its
+# `limit` and `cursor` filter the result afterwards rather than shortening the
+# walk -- so without this every resumed pass re-pays the full listing, and a
+# corpus needing many passes pays it once per request. That is the same
+# amplification on the same unauthenticated route this index exists to remove,
+# merely scoped to the backfill window.
+#
+# Caching it makes the walk once-per-container instead: with ten reserved
+# executions the whole backfill costs at most ten walks, not one per request.
+# Folders created *during* the window are indexed live by
+# `_index_public_gallery`, so a list that predates them is not stale for this
+# purpose.
+_gallery_backfill_pending: list[str] | None = None
+
+
+def _ensure_gallery_index_backfilled(correlation_id: str | None = None) -> None:
+    """Complete the index from S3, so reading it cannot hide folders.
+
+    The index is only safe to read as the whole truth if it *is* the whole
+    truth. Folders written before it shipped have no entry, so serving the
+    index alone would make an existing deployment's entire gallery vanish for
+    the rest of its 30-day retention -- and preferring S3 whenever the index
+    looked short would just restore the unbounded scan this exists to remove.
+    So the index is completed rather than second-guessed.
+
+    **Resumable, and bounded by wall-clock rather than by count.** An earlier
+    version walked the corpus and wrote up to 5000 folders in one go, marking
+    the index complete at the end. That had two failure modes: a pass too slow
+    to finish left no marker at all, so the next request began the whole walk
+    again -- and the load is heaviest exactly when the pass is slowest -- while
+    a corpus over the cap was marked complete with the oldest folders never
+    indexed, hiding them permanently.
+
+    Each pass now writes in chunks, records the oldest folder it reached, and
+    stops when its budget is spent. The next request resumes from that cursor,
+    so the work converges instead of restarting, and ``complete`` is written
+    only when the walk is genuinely exhausted.
+
+    Newest-first is deliberate: page one of the gallery is what a caller
+    actually sees, so the first chunk makes the endpoint useful and later
+    passes deepen it.
+
+    Concurrent cold requests can each run a pass. Reserved concurrency caps
+    that at ten, the writes are idempotent, and they share the cursor -- so
+    they overlap rather than multiply. The alternative, a lock over the store
+    this is trying not to depend on, is worse.
+    """
+    global _gallery_backfilled, _gallery_backfill_pending
+    if _gallery_backfilled:
+        return
+    complete, resume_after = _gallery_index.get_backfill_state()
+    if complete:
+        _gallery_backfilled = True
+        _gallery_backfill_pending = None
+        return
+
+    started = time.time()
+    # Newest-first, and the same ordering the index uses, so `resume_after`
+    # means "everything lexicographically above this is already indexed".
+    #
+    # Listed once per container, not once per pass. The budget below bounds
+    # the writes; without this cache it would not bound the listing, and the
+    # listing is the expensive half -- `list_galleries()` pages the whole
+    # prefix regardless of what is asked of it.
+    if _gallery_backfill_pending is None:
+        _gallery_backfill_pending = image_storage.list_galleries()
+    pending = _gallery_backfill_pending
+    if resume_after:
+        # Re-filtered rather than consumed destructively: another container
+        # may have advanced the cursor further than this one's last pass.
+        pending = [g for g in pending if g < resume_after]
+
+    indexed = 0
+    cursor = resume_after
+    for offset in range(0, len(pending), _GALLERY_BACKFILL_CHUNK):
+        chunk = pending[offset : offset + _GALLERY_BACKFILL_CHUNK]
+        indexed += _gallery_index.backfill_chunk(chunk)
+        cursor = chunk[-1]
+        # After the chunk, never before: progress must not claim coverage that
+        # was not written.
+        exhausted = offset + _GALLERY_BACKFILL_CHUNK >= len(pending)
+        out_of_time = time.time() - started >= _GALLERY_BACKFILL_BUDGET_SECONDS
+        if exhausted or out_of_time:
+            _gallery_index.record_backfill_progress(cursor, complete=exhausted)
+            break
+    else:
+        # Nothing pending: the walk is already exhausted.
+        _gallery_index.record_backfill_progress(cursor, complete=True)
+        exhausted = True
+
+    if exhausted:
+        _gallery_backfilled = True
+        # Released rather than left to sit for the life of the container: it
+        # is a backfill scratchpad, and the backfill is over.
+        _gallery_backfill_pending = None
+        StructuredLogger.info(
+            f"Gallery index backfill complete; indexed {indexed} folders this pass",
+            correlation_id=correlation_id,
+        )
+    else:
+        StructuredLogger.info(
+            f"Gallery index backfill paused after {indexed} folders; "
+            "the next request resumes from the cursor",
+            correlation_id=correlation_id,
+            resumeAfter=cursor,
+        )
+
+
+def _list_gallery_page(
+    count: int, cursor: str | None, correlation_id: str | None = None
+) -> list[str]:
+    """Newest-first gallery ids, from the bounded index.
+
+    One query against ``PromptHistoryIndex``, so the work is proportional to
+    the page rather than to every session the service still retains.
+
+    There is deliberately **no fallback to S3 on failure**. This endpoint is
+    unauthenticated and unquota'd, and the whole point of the index is that a
+    public GET cannot be made to walk the entire bucket; a fallback would hand
+    that back to anyone who could make DynamoDB fail, and would do it for
+    every request for the duration. Failing the request keeps the bound, and
+    the caller gets a 503 they can retry.
+
+    Raises:
+        ValueError: on an unparseable cursor (surfaced as 400).
+        Exception: on any index failure (surfaced as 503).
+    """
+    _ensure_gallery_index_backfilled(correlation_id)
+    return _gallery_index.list_recent(count, cursor)
+
+
 def _handle_successful_result(
     session_id: str,
     model_name: str,
@@ -703,6 +1016,7 @@ def _handle_successful_result(
         session_id=session_id,
         visibility=visibility,
     )
+    _index_public_gallery(image_key)
 
     session_manager.complete_iteration(
         session_id,
@@ -1277,6 +1591,13 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
     # the handler can read it however early the failure lands.
     refund_owned_downstream = False
 
+    # Per-model cap slots this request has reserved but not yet handed to a
+    # provider. Bound here for the same reason as the flag above: the failure
+    # paths need to read it however early the failure lands. It stays
+    # authoritative through the fail-open branch below, where slots consumed
+    # before the store broke are still genuinely consumed.
+    reserved_slots: list[str] = []
+
     try:
         # Every cost guard above this line reads one DynamoDB table and fails
         # OPEN when it is unreachable, so a partition opens all of them at
@@ -1330,6 +1651,10 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
                 # overdraw the cap.
                 if _model_counter_service.consume_model_slot(model.name, now_ts):
                     models_to_dispatch.append(model)
+                    # Tracked so the failure paths below can hand it back. A
+                    # slot reserved for a generation that never reaches a
+                    # provider is capacity taken from every other user.
+                    reserved_slots.append(model.name)
                 else:
                     skipped_models[model.name] = {
                         "status": "skipped",
@@ -1434,6 +1759,14 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
             # Narrowed to generate_async deliberately: when the operator has
             # chosen synchronous mode the inline path below is the intended
             # behaviour, not a fallback, and tests/backend/e2e depends on it.
+            #
+            # The reserved slots go back with the quota. Without this a broken
+            # lambda:InvokeFunction grant -- the exact cause this branch exists
+            # for -- burns four slots per attempt off a shared daily cap, so a
+            # deploy that fails every /generate would drive every model to
+            # daily_cap_reached and answer 429 MODEL_COST_CEILING until
+            # midnight UTC, having generated nothing.
+            _release_model_slots(reserved_slots, correlation_id)
             _refund_usage(validated.tier, "generate", correlation_id)
             return response(
                 503, error_responses.generation_dispatch_failed(), set_cookie=set_cookie
@@ -1536,7 +1869,14 @@ def handle_generate(event: LambdaEvent, correlation_id: str | None = None) -> Ap
         # caller who actually received images. Asynchronous mode never reaches
         # that call in the request path, so the flag is still False and the
         # refund fires -- which is the case this handler exists for.
+        #
+        # The reserved model slots ride the same flag. Once run_generation has
+        # returned, the providers were dispatched and the slots bought exactly
+        # what they exist to meter; before that -- create_session raising on an
+        # S3 blip, the payload failing to serialise -- they bought nothing, and
+        # holding them penalises every other user rather than this caller.
         if not refund_owned_downstream:
+            _release_model_slots(reserved_slots, correlation_id)
             _refund_usage(validated.tier, "generate", correlation_id)
         StructuredLogger.error(
             f"Error in handle_generate: {e}",
@@ -1665,6 +2005,10 @@ def _handle_refinement(
     """
     iteration_index = None
     session_id = model_name = None
+    # Hoisted above the try so the handler below can read them however early
+    # the failure lands.
+    slot_consumed = False
+    dispatched = False
     # Same flag that selects the price, so a refund can never differ from the
     # charge.
     refund_kind = "outpaint" if (add_iteration_kwargs or {}).get("is_outpaint") else "refine"
@@ -1716,8 +2060,23 @@ def _handle_refinement(
         # in progress, `_compute_session_status` the session, and the client
         # would poll a spinner that never resolves while one of the model's
         # MAX_ITERATIONS slots stayed spent on work that never ran.
+        #
+        # That ordering leaves a gap this alone does not close. `add_iteration`
+        # re-reads the session under its ETag and re-checks the iteration
+        # limit, so concurrent refinements can all pass the earlier read above,
+        # one wins the last slot, and the losers raise -- having already taken
+        # a slot off a cap shared by every user of the service. `slot_consumed`
+        # is what lets the failure paths below hand it back; `dispatched` is
+        # what stops them handing it back once a provider has run, because at
+        # that point the image was generated and billed whatever the outcome.
+        #
+        # It tracks the slot actually being taken rather than `slot_ok`: the
+        # fail-open branch below reports success without incrementing anything,
+        # and releasing there would decrement a counter this request never
+        # touched, stealing capacity from whoever did.
         try:
             slot_ok = _model_counter_service.consume_model_slot(model_name, int(time.time()))
+            slot_consumed = slot_ok
         except Exception as e:
             StructuredLogger.error(
                 f"Per-model cap check failed, allowing refinement: {e}",
@@ -1766,6 +2125,11 @@ def _handle_refinement(
             session_id,
             model_name,
         )
+        # Set before the call, not after: a provider that raises mid-call may
+        # well have generated and billed for the image already, so the slot
+        # stays spent. Over-counting a cost ceiling is safe; under-counting is
+        # the thing the ceiling exists to prevent.
+        dispatched = True
         result = handler(*handler_args)
 
         duration = time.time() - start_time
@@ -1860,6 +2224,12 @@ def _handle_refinement(
             correlation_id=correlation_id,
             traceback=traceback.format_exc(),
         )
+        # The shared cap, alongside the per-user quota below. This request took
+        # a model slot and never reached a provider, so the slot bought
+        # nothing -- and unlike the quota, which only costs its owner, a slot
+        # left spent is capacity taken from every other user of the service.
+        if slot_consumed and not dispatched and model_name:
+            _release_model_slot(model_name, correlation_id)
         _refund_usage(validated.tier, refund_kind, correlation_id)
         return response(500, error_responses.internal_server_error())
 
@@ -2073,6 +2443,19 @@ def handle_enhance(event: LambdaEvent, correlation_id: str | None = None) -> Api
     if err:
         return err
 
+    # Before the LLM call, because the point of the bound is the spend. The
+    # daily sub-ceiling above bounds the money in aggregate; this stops one
+    # caller spending all of it and 503ing enhancement for everyone else.
+    limited = _public_ip_rate_limited(
+        event,
+        "enhance",
+        config.enhance_ip_limit,
+        config.enhance_ip_window_seconds,
+        correlation_id,
+    )
+    if limited:
+        return limited
+
     try:
         # Two genuinely different variants from one call. This used to return
         # the same string twice while the UI rendered a toggle over it.
@@ -2110,6 +2493,11 @@ def handle_gallery_list(event: LambdaEvent, correlation_id: str | None = None) -
     Unauthenticated and unquota'd, so the work one request can ask for has to
     be bounded by the request itself. Clamped exactly as /prompts/recent and
     /prompts/history clamp, so the three endpoints are visibly consistent.
+
+    The clamp bounds the per-folder fan-out below; ``_list_gallery_page``
+    bounds the listing that feeds it. Both are needed -- clamping only the
+    fan-out still left every public request paging the whole ``sessions/``
+    prefix, because S3 returns it ascending and the newest page is last.
     """
     params = event.get("queryStringParameters") or {}
     try:
@@ -2117,12 +2505,18 @@ def handle_gallery_list(event: LambdaEvent, correlation_id: str | None = None) -
     except (ValueError, TypeError):
         return response(400, {"error": "Invalid limit parameter"})
     cursor = params.get("cursor") or None
+    # Validated here rather than ignored downstream. A cursor the index cannot
+    # parse would otherwise query from the top and answer "page 7" with page 1
+    # plus a fresh cursor, which an infinite-scroll client renders as the
+    # newest galleries repeating below the older ones, forever.
+    if cursor is not None and not image_storage.validate_gallery_id(cursor):
+        return response(400, {"error": "Invalid cursor parameter"})
 
     try:
         # One folder more than asked for. That extra name is how the response
-        # knows whether a next page exists without a second LIST, and it is
+        # knows whether a next page exists without a second read, and it is
         # dropped before anything is expanded.
-        gallery_folders = image_storage.list_galleries(limit=limit + 1, cursor=cursor)
+        gallery_folders = _list_gallery_page(limit + 1, cursor, correlation_id)
         has_more = len(gallery_folders) > limit
         # Slice BEFORE the fan-out. This is the whole finding: each surviving
         # folder costs its own paginating LIST, and expanding folders that
@@ -2132,6 +2526,15 @@ def handle_gallery_list(event: LambdaEvent, correlation_id: str | None = None) -
 
         def _build_gallery_entry(folder):
             images = image_storage.list_gallery_images(folder)
+            if not images:
+                # The index outliving its images is expected, not exceptional:
+                # S3's lifecycle deletes the objects on a schedule and DynamoDB
+                # reaps the matching index entry lazily, so there is always a
+                # window where a folder is indexed and empty. Returning it
+                # would render a blank tile, which the S3-derived listing could
+                # never produce because S3 was the source of truth for both
+                # existence and content. Dropped rather than surfaced.
+                return None
 
             preview_url = None
             # Prefer .png images for previews (browsers can't render .json)
@@ -2154,7 +2557,9 @@ def handle_gallery_list(event: LambdaEvent, correlation_id: str | None = None) -
         futures = {_gallery_executor.submit(_build_gallery_entry, f): f for f in gallery_folders}
         for future in as_completed(futures):
             try:
-                galleries.append(future.result())
+                entry = future.result()
+                if entry is not None:
+                    galleries.append(entry)
             except Exception as e:
                 StructuredLogger.warning(
                     f"Failed to load gallery {futures[future]}: {e}",
@@ -2186,13 +2591,25 @@ def handle_gallery_list(event: LambdaEvent, correlation_id: str | None = None) -
             body["dropped"] = dropped
         return response(200, body)
 
+    except ValueError as e:
+        # An unparseable cursor that got past validate_gallery_id.
+        StructuredLogger.warning(
+            f"Rejected gallery cursor: {e}",
+            correlation_id=correlation_id,
+        )
+        return response(400, {"error": "Invalid cursor parameter"})
     except Exception as e:
         StructuredLogger.error(
             f"Error in handle_gallery_list: {e}",
             correlation_id=correlation_id,
             traceback=traceback.format_exc(),
         )
-        return response(500, {"error": "Internal server error"})
+        # 503, not a fallback to listing S3. This endpoint is unauthenticated
+        # and unquota'd, and the index exists precisely so a public GET cannot
+        # be made to walk the whole bucket. Falling back on failure would hand
+        # that back to anyone who could make DynamoDB fail, for every request,
+        # for the duration of the outage. A retryable error keeps the bound.
+        return response(503, {"error": "Gallery temporarily unavailable", "retryAfter": 30})
 
 
 def handle_log_endpoint(event: LambdaEvent) -> ApiResponse:
@@ -2201,11 +2618,19 @@ def handle_log_endpoint(event: LambdaEvent) -> ApiResponse:
     if len(raw_body) > MAX_LOG_BODY_SIZE:
         return response(413, {"error": "Request body too large"})
 
+    # Per-request size was already bounded; this bounds the rate. CloudWatch
+    # ingestion is billed and the log is where an incident gets diagnosed, so
+    # an unmetered writer buys both cost and cover. Checked before the record
+    # is written, or it bounds nothing.
+    limited = _public_ip_rate_limited(
+        event, "log", config.log_ip_limit, config.log_ip_window_seconds
+    )
+    if limited:
+        return limited
+
     try:
         body = json.loads(raw_body or "{}")
         ip = event.get("requestContext", {}).get("http", {}).get("sourceIp", "unknown")
-
-        # /log relies on API Gateway throttling (not per-tier quotas).
 
         # Sanitize metadata: remove reserved keys that could overwrite structured log fields
         if "metadata" in body and isinstance(body["metadata"], dict):

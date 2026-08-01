@@ -80,6 +80,37 @@ _TARGETS = [
 ]
 
 
+_GALLERY_TABLE = "pixel-prompt-users-lambdatest"
+
+
+def _make_gallery_table():
+    """The users table plus the PromptHistoryIndex GSI the gallery reads."""
+    ddb = boto3.resource("dynamodb", region_name="us-east-1")
+    try:
+        ddb.create_table(
+            TableName=_GALLERY_TABLE,
+            KeySchema=[{"AttributeName": "userId", "KeyType": "HASH"}],
+            AttributeDefinitions=[
+                {"AttributeName": "userId", "AttributeType": "S"},
+                {"AttributeName": "promptOwner", "AttributeType": "S"},
+                {"AttributeName": "createdAt", "AttributeType": "N"},
+            ],
+            GlobalSecondaryIndexes=[
+                {
+                    "IndexName": "PromptHistoryIndex",
+                    "KeySchema": [
+                        {"AttributeName": "promptOwner", "KeyType": "HASH"},
+                        {"AttributeName": "createdAt", "KeyType": "RANGE"},
+                    ],
+                    "Projection": {"ProjectionType": "ALL"},
+                }
+            ],
+            BillingMode="PAY_PER_REQUEST",
+        )
+    except Exception:
+        pass
+
+
 @pytest.fixture(autouse=True)
 def mocks():
     """Patch module-level singletons for every test.
@@ -92,6 +123,12 @@ def mocks():
         # Ensure the S3 bucket exists for lambda_function module-level init
         boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="test-bucket")
 
+        # The gallery listing reads a DynamoDB index rather than walking the
+        # sessions/ prefix, so these need a real table: the endpoint fails
+        # closed on an index error and would otherwise 503 rather than
+        # exercising the cursor and limit semantics under test.
+        _make_gallery_table()
+
         patchers = []
         m = {}
         for target in _TARGETS:
@@ -103,6 +140,14 @@ def mocks():
         # Sane defaults
         m["content_filter"].check_prompt.return_value = False
         m["get_enabled_models"].return_value = []
+
+        import lambda_function as _lf
+        from gallery.repository import GalleryIndexRepository
+
+        _lf._gallery_index = GalleryIndexRepository(
+            _GALLERY_TABLE, dynamodb_resource=boto3.resource("dynamodb", region_name="us-east-1")
+        )
+        _lf._gallery_backfilled = False
 
         yield m
 

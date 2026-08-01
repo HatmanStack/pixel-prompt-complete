@@ -133,44 +133,121 @@ def _billing_period(obj: dict[str, Any]) -> tuple[int | None, int | None]:
     return (int(start) if start else None, int(end) if end else None)
 
 
-def _on_checkout_completed(obj: dict[str, Any], repo: UserRepository, event_type: str) -> None:
+def _stale(user_id: str, event_type: str, event_created: int | None) -> None:
+    """Log a transition refused for being older than the applied state.
+
+    Not an error: Stripe does not order distinct events, so this is the
+    control working. Logged at INFO because a sudden run of them means
+    deliveries are arriving badly out of order and is worth seeing.
+    """
+    StructuredLogger.info(
+        f"Webhook {event_type}: older than the last applied event — ignored",
+        userId=user_id,
+        event_type=event_type,
+        eventCreated=event_created,
+    )
+
+
+# Checkout states that qualify for paid access.
+#
+# ``paid`` is the ordinary card outcome. ``no_payment_required`` is what
+# Stripe reports for a full-coupon or trial subscription, which is a real
+# customer with a real subscription — checking only for ``paid`` would refuse
+# them. Everything else, notably ``unpaid``, does not qualify.
+_PAID_CHECKOUT_STATES = frozenset({"paid", "no_payment_required"})
+
+
+def _checkout_qualifies(obj: dict[str, Any], event_type: str) -> bool:
+    """Whether a Checkout Session has actually bought the paid tier.
+
+    ``checkout.session.completed`` fires when the *session* finishes, which
+    is not the same as the customer having paid. A delayed payment method
+    (ACH debit, bank transfer, some wallets) completes the session with
+    ``payment_status="unpaid"`` and settles minutes-to-days later — or never.
+    Granting on completion alone hands out the product before payment, and on
+    a failed settlement, without it. The settlement is delivered separately as
+    ``checkout.session.async_payment_succeeded``, which is in ``_DISPATCH``
+    and passes through this same gate.
+
+    A Stripe signature proves the event is authentic; it says nothing about
+    whether this particular state qualifies for entitlement. That is what
+    this checks.
+
+    ``mode`` is checked because ``handle_billing_checkout`` creates
+    subscription-mode sessions and nothing else: a payment-mode session here
+    would price a subscription at a single payment. The configured price is
+    bound at session creation for the same reason — the webhook payload does
+    not carry ``line_items`` unless expanded, so creation is the only place
+    that binding can be made.
+    """
+    mode = obj.get("mode")
+    payment_status = obj.get("payment_status")
+    status = obj.get("status")
+    if (
+        mode != "subscription"
+        or payment_status not in _PAID_CHECKOUT_STATES
+        or status != "complete"
+    ):
+        StructuredLogger.warning(
+            f"Webhook {event_type}: checkout does not qualify for paid access — ignored",
+            stripe_object_id=obj.get("id"),
+            mode=mode,
+            paymentStatus=payment_status,
+            sessionStatus=status,
+        )
+        return False
+    return True
+
+
+def _on_checkout_completed(
+    obj: dict[str, Any], repo: UserRepository, event_type: str, event_created: int | None
+) -> None:
     user_id = _user_id_from_object(obj, repo)
     if not user_id:
         _unresolved(obj, event_type)
         return
-    fields: dict[str, Any] = {}
-    if obj.get("customer"):
-        fields["stripeCustomerId"] = obj["customer"]
-    if obj.get("subscription"):
-        fields["stripeSubscriptionId"] = obj["subscription"]
-    fields["subscriptionStatus"] = "active"
-    repo.set_tier(user_id, "paid", **fields)
+    if not _checkout_qualifies(obj, event_type):
+        return
+    # Facts first, unconditionally: a late event still knows the customer id.
+    repo.record_billing_facts(
+        user_id,
+        stripeCustomerId=obj.get("customer"),
+        stripeSubscriptionId=obj.get("subscription"),
+    )
+    if not repo.set_tier(
+        user_id,
+        "paid",
+        event_created=event_created,
+        subscriptionStatus="active",
+    ):
+        _stale(user_id, event_type, event_created)
+    # Outside the guard on purpose. The watermark answers "is this the newest
+    # word on the tier"; it does not answer "did this purchase happen". It
+    # did — the event is signed and `claim_webhook_event` has already
+    # guaranteed it is applied exactly once, which is the property these two
+    # need. Gating them on the tier write instead meant a checkout that lost a
+    # race to its own customer.subscription.created silently never counted the
+    # subscriber and never sent the welcome email, while the eventual
+    # cancellation still decremented — so activeSubscribers drifted negative
+    # across ordinary subscribe/cancel cycles.
     repo.increment_revenue_counter("activeSubscribers", 1)
     _send_lifecycle_email(repo, user_id, email_templates.welcome_email)
 
 
-def _on_subscription_upsert(obj: dict[str, Any], repo: UserRepository, event_type: str) -> None:
+def _on_subscription_upsert(
+    obj: dict[str, Any], repo: UserRepository, event_type: str, event_created: int | None
+) -> None:
     user_id = _user_id_from_object(obj, repo)
     if not user_id:
         _unresolved(obj, event_type)
         return
     status = obj.get("status", "active")
     tier = "paid" if status in ("active", "trialing") else "free"
-    fields: dict[str, Any] = {
-        "subscriptionStatus": status,
-        "stripeSubscriptionId": obj.get("id", ""),
-    }
-    if obj.get("customer"):
-        fields["stripeCustomerId"] = obj["customer"]
     # Credit allotments renew on Stripe's own period boundary, not a fixed
     # 30-day clock: Stripe's monthly cycles run 28-31 days, so a fixed window
     # would grant credits before the customer is billed in some months and
     # leave them short after renewal in others.
     period_start, period_end = _billing_period(obj)
-    if period_end:
-        fields["stripeCurrentPeriodEnd"] = period_end
-    if period_start:
-        fields["stripeCurrentPeriodStart"] = period_start
     if not period_end:
         # Not fatal — quota falls back to a fixed window — but it silently
         # means paid users never get Stripe-anchored renewal, so say so.
@@ -179,22 +256,50 @@ def _on_subscription_upsert(obj: dict[str, Any], repo: UserRepository, event_typ
             "fall back to a fixed window",
             stripe_subscription_id=obj.get("id"),
         )
-    repo.set_tier(user_id, tier, **fields)
+    # Unconditional: these are what Stripe reported, not a transition. This
+    # event is the ONLY source of the billing period, so letting the ordering
+    # guard discard it left paying customers renewing on the fixed fallback
+    # clock — and the warning above fires before the rejected write, so the
+    # operator saw nothing.
+    repo.record_billing_facts(
+        user_id,
+        stripeCustomerId=obj.get("customer"),
+        stripeCurrentPeriodEnd=period_end,
+        stripeCurrentPeriodStart=period_start,
+    )
+    if not repo.set_tier(
+        user_id,
+        tier,
+        event_created=event_created,
+        subscriptionStatus=status,
+        stripeSubscriptionId=obj.get("id", ""),
+    ):
+        _stale(user_id, event_type, event_created)
+        return
     if status == "active":
         _send_lifecycle_email(repo, user_id, email_templates.subscription_activated_email)
 
 
-def _on_subscription_deleted(obj: dict[str, Any], repo: UserRepository, event_type: str) -> None:
+def _on_subscription_deleted(
+    obj: dict[str, Any], repo: UserRepository, event_type: str, event_created: int | None
+) -> None:
     user_id = _user_id_from_object(obj, repo)
     if not user_id:
         _unresolved(obj, event_type)
         return
-    repo.set_tier(
+    if not repo.set_tier(
         user_id,
         "free",
+        event_created=event_created,
         subscriptionStatus="canceled",
         stripeSubscriptionId="",
-    )
+    ):
+        _stale(user_id, event_type, event_created)
+    # Outside the guard, and it must pair with the increment in
+    # _on_checkout_completed: gating one on the ordering watermark and not the
+    # other is what makes activeSubscribers drift. The cancellation happened
+    # whatever order it arrived in, and dedup already bounds it to once.
+    #
     # One atomic UpdateItem, not two sequential ones: a failure between
     # them would release the idempotency claim with the first delta already
     # applied, and Stripe's retry would apply it a second time.
@@ -202,7 +307,9 @@ def _on_subscription_deleted(obj: dict[str, Any], repo: UserRepository, event_ty
     _send_lifecycle_email(repo, user_id, email_templates.subscription_cancelled_email)
 
 
-def _on_payment_failed(obj: dict[str, Any], repo: UserRepository, event_type: str) -> None:
+def _on_payment_failed(
+    obj: dict[str, Any], repo: UserRepository, event_type: str, event_created: int | None
+) -> None:
     user_id = _user_id_from_object(obj, repo)
     if not user_id:
         _unresolved(obj, event_type)
@@ -212,12 +319,28 @@ def _on_payment_failed(obj: dict[str, Any], repo: UserRepository, event_type: st
         return
     current_tier = user.get("tier", "free")
     # Keep tier as-is; only mark status as past_due.
-    repo.set_tier(user_id, current_tier, subscriptionStatus="past_due")
+    if not repo.set_tier(
+        user_id, current_tier, event_created=event_created, subscriptionStatus="past_due"
+    ):
+        _stale(user_id, event_type, event_created)
+    # Outside the guard. A declined renewal routinely emits
+    # customer.subscription.updated (status=past_due) a second AFTER the
+    # invoice event that caused it, and Stripe delivers them concurrently — so
+    # the subscription event commonly wins the watermark and this one reads as
+    # stale. The payment still failed. Gating the warning on the write meant
+    # the customer was never told their card was declined and simply lost
+    # access when Stripe's dunning retries ran out.
     _send_lifecycle_email(repo, user_id, email_templates.payment_failed_email)
 
 
 _DISPATCH = {
     "checkout.session.completed": _on_checkout_completed,
+    # A delayed payment method settling. Refusing the unpaid completion above
+    # is only correct if the customer still gets what they bought once the
+    # payment clears, and this is the event that says it did. The matching
+    # failure event is deliberately absent: there is nothing to revoke,
+    # because nothing was granted.
+    "checkout.session.async_payment_succeeded": _on_checkout_completed,
     "customer.subscription.created": _on_subscription_upsert,
     "customer.subscription.updated": _on_subscription_upsert,
     "customer.subscription.deleted": _on_subscription_deleted,
@@ -261,6 +384,14 @@ def handle_stripe_webhook(
         event_id = str(stripe_event["id"] or "")
     except (KeyError, AttributeError):
         event_id = ""
+    # When Stripe generated the event, which is not the order it arrives in.
+    # None disables the monotonic guard for this event rather than treating a
+    # missing timestamp as "older than everything", which would silently drop
+    # every event from an account whose payloads omit it.
+    try:
+        event_created: int | None = int(stripe_event["created"])
+    except (KeyError, AttributeError, TypeError, ValueError):
+        event_created = None
     handler = _DISPATCH.get(event_type)
     if handler:
         # Stripe delivers at-least-once. Claim the event id before mutating
@@ -291,7 +422,7 @@ def handle_stripe_webhook(
                 obj = raw_obj.to_dict()
             else:
                 obj = raw_obj
-            handler(obj, repo, event_type)
+            handler(obj, repo, event_type, event_created)
             # Only a completed record suppresses redelivery. Until this lands
             # the claim is just a lease, so a crash mid-handler is retried.
             repo.complete_webhook_event(event_id)

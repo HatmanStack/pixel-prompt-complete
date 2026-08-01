@@ -323,6 +323,8 @@ class UserRepository:
         "prompt#",
         "spend#",
         "anon#",
+        "gallery#",
+        "iplimit#",
     )
 
     def scan_users(
@@ -459,12 +461,111 @@ class UserRepository:
 
     # ---------- tier / stripe ----------
 
-    def set_tier(self, user_id: str, tier: str, **stripe_fields: Any) -> None:
+    def set_tier(
+        self,
+        user_id: str,
+        tier: str,
+        *,
+        event_created: int | None = None,
+        **stripe_fields: Any,
+    ) -> bool:
+        """Write the tier and any Stripe fields. Returns whether it applied.
+
+        ``event_created`` is the Stripe ``event.created`` timestamp of the
+        webhook driving this change, and passing it makes the write a
+        **monotonic** one: it records the timestamp as ``lastBillingEventAt``
+        and refuses any later write carrying an older one.
+
+        This is the bound that signature verification and event dedup do not
+        provide. A signature proves an event is authentic; the dedup claim
+        stops one event id applying twice. Neither orders two *distinct*
+        authentic events, and Stripe guarantees delivery, not order — so a
+        ``customer.subscription.updated`` generated before a cancellation but
+        delivered after it used to overwrite the cancellation and hand paid
+        access back.
+
+        ``<=`` rather than ``<``: Stripe stamps ``created`` to the second and a
+        cancellation routinely emits ``customer.subscription.updated`` and
+        ``.deleted`` within the same one. Rejecting equality would drop the
+        second of every such pair. Same-second reordering therefore remains
+        unordered — a far narrower window than the one this closes, and not one
+        any store this side of a Stripe re-fetch can resolve.
+
+        Keyword-only so it cannot be mistaken for a Stripe field name and
+        silently written to the record as one.
+
+        **Scope.** The guard protects the entitlement transition and nothing
+        else. Fields that merely record what Stripe told us — the customer id,
+        the subscription's billing period — are written by
+        :meth:`record_billing_facts` on a separate unconditional update,
+        because rejecting them would drop information that only the losing
+        event carried. A stale ``customer.subscription.created`` is the wrong
+        answer about the *tier* and the only source of
+        ``stripeCurrentPeriodEnd``; discarding both because one is stale left
+        paying customers renewing on a fixed fallback clock with no signal.
+
+        Returns:
+            True when the write landed. False when it was rejected as stale.
+            Callers must not read this as "the event did not happen": event
+            dedup already guarantees apply-once, so revenue counters and
+            lifecycle emails belong to the delivery, not to this write.
+        """
         now = int(time.time())
         parts = ["tier = :tier", "updatedAt = :now"]
         values: dict[str, Any] = {":tier": tier, ":now": now}
         for i, (k, v) in enumerate(stripe_fields.items()):
             placeholder = f":v{i}"
+            parts.append(f"{k} = {placeholder}")
+            values[placeholder] = v
+
+        kwargs: dict[str, Any] = {}
+        if event_created is not None:
+            parts.append("lastBillingEventAt = :evt")
+            values[":evt"] = event_created
+            kwargs["ConditionExpression"] = (
+                "attribute_not_exists(lastBillingEventAt) OR lastBillingEventAt <= :evt"
+            )
+
+        try:
+            self._table.update_item(
+                Key={"userId": user_id},
+                UpdateExpression="SET " + ", ".join(parts),
+                ExpressionAttributeValues=values,
+                **kwargs,
+            )
+            return True
+        except ClientError as e:
+            if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
+                raise
+            return False
+
+    def record_billing_facts(self, user_id: str, **fields: Any) -> None:
+        """Record what Stripe reported, unconditionally.
+
+        The ordering watermark on :meth:`set_tier` exists to stop an older
+        event regressing the *tier*. These fields are not a transition — the
+        customer id and the subscription's billing period are facts about the
+        account that only ever get more accurate — so an event being late is
+        no reason to throw them away.
+
+        Applying them separately is what lets the guard stay narrow. A single
+        conditional write meant a stale ``customer.subscription.created`` took
+        its ``stripeCurrentPeriodEnd`` down with it, and that field is the
+        *only* source of Stripe-anchored credit renewal: losing it silently
+        drops the customer onto the fixed fallback clock, and the warning that
+        would have said so fires before the rejected write, not after.
+
+        Empty ``fields`` is a no-op rather than an empty UpdateExpression,
+        which DynamoDB rejects.
+        """
+        present = {k: v for k, v in fields.items() if v not in (None, "")}
+        if not present:
+            return
+        now = int(time.time())
+        parts = ["updatedAt = :now"]
+        values: dict[str, Any] = {":now": now}
+        for i, (k, v) in enumerate(present.items()):
+            placeholder = f":f{i}"
             parts.append(f"{k} = {placeholder}")
             values[placeholder] = v
         self._table.update_item(
@@ -534,6 +635,107 @@ class UserRepository:
                 raise
             return self.get_user(key) or item
         return item
+
+    def increment_ip_rate_bucket(
+        self, key: str, limit: int, window_seconds: int, now: int
+    ) -> tuple[bool, dict]:
+        """Count one request against a per-IP bucket in a single write.
+
+        Deliberately not :meth:`increment_anon`. That path calls
+        ``get_or_create_user`` first, which is a GetItem plus a conditional
+        PutItem that materialises a full user-shaped record before the
+        counter is even touched -- three or four operations per request, and
+        one persisted row per distinct source address, on the same table the
+        spend ceilings read. For the public ``/log`` and ``/enhance`` bounds
+        that is a guard costing more than the thing it guards, and it puts the
+        load on a table whose availability those ceilings depend on.
+
+        UpdateItem creates the item when it is absent, so nothing has to be
+        pre-created; the TTL is written in the same expression via
+        ``if_not_exists`` so an abuse bucket still expires with its window
+        rather than accumulating forever. ``#ttl`` is aliased because ``TTL``
+        is a DynamoDB reserved word -- the existing writers set it through
+        ``put_item``, where reservation does not apply, so this is the first
+        place it bites.
+
+        Returns ``(allowed, item)``.
+        """
+        ttl = now + window_seconds + _IP_BUCKET_TTL_GRACE_SECONDS
+        for _ in range(_MAX_RETRIES):
+            try:
+                resp = self._table.update_item(
+                    Key={"userId": key},
+                    UpdateExpression=(
+                        "SET windowStart = if_not_exists(windowStart, :now), "
+                        "#ttl = if_not_exists(#ttl, :ttl), "
+                        "updatedAt = :now "
+                        "ADD requestCount :one"
+                    ),
+                    ConditionExpression=(
+                        "(attribute_not_exists(requestCount) OR requestCount < :limit) "
+                        "AND (attribute_not_exists(windowStart) OR windowStart > :stale)"
+                    ),
+                    ExpressionAttributeNames={"#ttl": "ttl"},
+                    ExpressionAttributeValues={
+                        ":one": 1,
+                        ":limit": limit,
+                        ":now": now,
+                        ":ttl": ttl,
+                        ":stale": now - window_seconds,
+                    },
+                    ReturnValues="ALL_NEW",
+                )
+                return True, resp.get("Attributes", {})
+            except ClientError as e:
+                if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
+                    raise
+                item = self.get_user(key) or {}
+                window_start = int(item.get("windowStart", 0) or 0)
+                if window_start and window_start > now - window_seconds:
+                    # Inside the window: genuinely at the limit.
+                    return False, item
+                # The window has rolled. Reset it, then take a slot against
+                # the new window on the next iteration.
+                self._reset_ip_rate_window(key, window_seconds, now, ttl)
+        return False, self.get_user(key) or {}
+
+    def _reset_ip_rate_window(self, key: str, window_seconds: int, now: int, ttl: int) -> bool:
+        """Roll an expired per-IP window over. Returns whether it applied.
+
+        **Conditional, and that is the whole point.** The read that decided
+        the window had rolled and this write are separate operations, so
+        another request can roll the window forward and start counting
+        against it in between. An unconditional ``SET requestCount = 0`` then
+        wipes counts that belong to the live window, and repeating that at
+        the boundary hands out an allowance nobody earned — a bypass of the
+        very ceiling this bucket exists to impose.
+
+        ``windowStart <= :stale`` is the same condition
+        :meth:`_reset_if_stale` uses for the tier counters, for the same
+        reason. A rejected reset means someone else rolled it first, which is
+        not an error: the caller's next iteration simply takes a slot against
+        the window that now exists.
+        """
+        try:
+            self._table.update_item(
+                Key={"userId": key},
+                UpdateExpression=(
+                    "SET windowStart = :now, requestCount = :zero, #ttl = :ttl, updatedAt = :now"
+                ),
+                ConditionExpression=("attribute_not_exists(windowStart) OR windowStart <= :stale"),
+                ExpressionAttributeNames={"#ttl": "ttl"},
+                ExpressionAttributeValues={
+                    ":now": now,
+                    ":zero": 0,
+                    ":ttl": ttl,
+                    ":stale": now - window_seconds,
+                },
+            )
+            return True
+        except ClientError as e:
+            if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
+                raise
+            return False
 
     def has_affirmed_age(self, identity_key: str) -> bool:
         """Return True if this identity has previously affirmed being 18+.

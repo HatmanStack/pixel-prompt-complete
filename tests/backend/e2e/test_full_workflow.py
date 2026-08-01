@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-from .conftest import skip_no_ministack
+from .conftest import requires_dynamodb, skip_no_ministack
 
 pytestmark = [pytest.mark.e2e, skip_no_ministack]
 
@@ -235,8 +235,16 @@ class TestContextWindow:
 
 
 class TestGalleryAfterGeneration:
-    """Gallery endpoints work with real S3 data."""
+    """Gallery endpoints work with real S3 data.
 
+    The listing is index-backed now: it reads DynamoDB and fails closed on an
+    index error, because falling back to walking the whole ``sessions/``
+    prefix would hand an unbounded scan to an unauthenticated caller. So this
+    needs a MiniStack build that serves DynamoDB; the `light` edition does
+    not, and skipping is more honest than asserting the 503.
+    """
+
+    @requires_dynamodb
     def test_gallery_list_after_generation(self, e2e_handler):
         handler, *_ = e2e_handler
 

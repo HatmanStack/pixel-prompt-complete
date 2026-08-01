@@ -149,6 +149,44 @@ anon_generate_limit = _safe_int("ANON_GENERATE_LIMIT", 5)
 anon_refine_limit = _safe_int("ANON_REFINE_LIMIT", 10)
 anon_window_seconds = _safe_int("ANON_WINDOW_SECONDS", 3600)
 
+# Per-IP bounds for the two public endpoints that skip tier quota entirely.
+#
+# Both already had a global bound -- the /enhance daily spend sub-ceiling and
+# API Gateway throttling -- and a global bound caps everyone together, so it
+# cannot stop one caller consuming the share of all the others. Exhausting
+# the enhance allocation 503s every legitimate enhance request until reset,
+# which turns a cost guard into a denial-of-service amplifier; that is what
+# these bound.
+#
+# An IP is not a person, so like the anon and guest IP buckets these are
+# abuse ceilings, not fair-use quotas. Sized accordingly: 10 enhancements an
+# hour is far above what composing a prompt takes and far below what spending
+# the day's budget takes.
+enhance_ip_limit = _safe_int("ENHANCE_IP_LIMIT", 10)
+enhance_ip_window_seconds = _safe_int("ENHANCE_IP_WINDOW_SECONDS", 3600)
+
+# /log is a client error reporter, so the ceiling is set for a browser having
+# a genuinely bad session rather than for a healthy one.
+log_ip_limit = _safe_int("LOG_IP_LIMIT", 120)
+log_ip_window_seconds = _safe_int("LOG_IP_WINDOW_SECONDS", 3600)
+for _window_name, _window_value in (
+    ("ENHANCE_IP_WINDOW_SECONDS", enhance_ip_window_seconds),
+    ("LOG_IP_WINDOW_SECONDS", log_ip_window_seconds),
+):
+    if _window_value <= 0:
+        # The limit knobs above follow the documented "0 disables" convention.
+        # The windows cannot: a non-positive window makes `:stale` equal to
+        # now, so `windowStart > :stale` never holds, every request reads as a
+        # rolled window and the endpoint answers 429 to everybody. An operator
+        # reaching for the off switch one line up would take the endpoint down
+        # instead. Raised rather than clamped, so the mistake is visible at
+        # deploy rather than as a silently different window.
+        raise RuntimeError(
+            f"{_window_name} must be greater than zero (got {_window_value}). "
+            "To disable the limiter set its *_IP_LIMIT to 0; the window is not "
+            "the off switch."
+        )
+
 # Free tier
 free_generate_limit = _safe_int("FREE_GENERATE_LIMIT", 1)
 free_refine_limit = _safe_int("FREE_REFINE_LIMIT", 2)
@@ -272,6 +310,44 @@ stripe_price_id = os.environ.get("STRIPE_PRICE_ID", "")
 stripe_success_url = os.environ.get("STRIPE_SUCCESS_URL", "")
 stripe_cancel_url = os.environ.get("STRIPE_CANCEL_URL", "")
 stripe_portal_return_url = os.environ.get("STRIPE_PORTAL_RETURN_URL", "")
+
+# How long a Stripe call may hold a Lambda execution.
+#
+# The SDK ships an 80-second default timeout and retries twice, so an
+# unbounded call can occupy an execution for four minutes behind a 29s
+# gateway ceiling and 10 reserved concurrent executions. GET /pricing is
+# public and hit on every page load, so a slow Stripe is amplified by
+# ordinary traffic into the pool the paid endpoints share.
+#
+# The two multiply: 5s with the default two retries is a 15s worst case.
+# Bounding one without the other only looks bounded, so both are set, and
+# test_timeout_is_well_inside_the_gateway_ceiling asserts the total stays
+# under the gateway's.
+#
+# This is the budget for one ATTEMPT, connect and read together.
+# ``requests`` applies a scalar timeout to each phase separately, so passing
+# 5.0 buys 10s per attempt, not 5 -- ``stripe_client`` therefore splits this
+# into an explicit (connect, read) pair that sums to it. Without the split the
+# real worst case was roughly double what the guard asserted, and the guard
+# passed anyway because it was computed from the wrong model.
+stripe_timeout_seconds = _safe_float("STRIPE_TIMEOUT_SECONDS", 5.0)
+stripe_max_network_retries = _safe_int("STRIPE_MAX_NETWORK_RETRIES", 1)
+if stripe_timeout_seconds <= 0:
+    # `requests` reads 0 as "fail immediately", not "no timeout" -- which is
+    # what an operator reaching for the latter would expect it to mean. Every
+    # Stripe call would raise ConnectTimeout, so /billing/checkout would 500
+    # for every paying customer. Raised at import, matching the credit-ledger
+    # knobs below, so it surfaces as a cold-start error at deploy rather than
+    # as a checkout outage.
+    raise RuntimeError(
+        "STRIPE_TIMEOUT_SECONDS must be greater than zero "
+        f"(got {stripe_timeout_seconds}). It is a per-attempt budget, not a "
+        "disable switch; there is no way to ask for an unbounded Stripe call."
+    )
+if stripe_max_network_retries < 0:
+    raise RuntimeError(
+        f"STRIPE_MAX_NETWORK_RETRIES must not be negative (got {stripe_max_network_retries})"
+    )
 
 # Prompt enhancement model configuration
 prompt_model_provider = os.environ.get("PROMPT_MODEL_PROVIDER", "openai")

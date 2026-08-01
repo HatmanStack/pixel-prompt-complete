@@ -38,6 +38,27 @@ class GuestTokenService:
         return f"{_b64u_encode(token_id)}.{_b64u_encode(sig)}"
 
     def verify(self, token: str) -> str | None:
+        """Return the canonical token id, or None if the token is not ours.
+
+        The return value is the guest's **identity**: quota counters, the
+        age-affirmation record and the DynamoDB row are all keyed on it. So
+        it is re-encoded from the decoded bytes rather than handed back as
+        the caller spelled it.
+
+        A 16-byte token id occupies 22 unpadded base64url characters, and the
+        last one carries four bits that encode nothing. Python's decoder
+        ignores those bits instead of rejecting them, so sixteen distinct
+        strings decode to one identical token id — and every one of them
+        passes an HMAC computed over the decoded bytes. Returning the input
+        spelling therefore turned one signed token into sixteen quota
+        identities, each with its own counter, for a caller who only had to
+        edit the last character of their own cookie.
+
+        Deriving the identity from the bytes the signature actually covers
+        makes the aliases collapse. Rejecting noncanonical input instead
+        would work too, but it would also reject a cookie that arrived with
+        its padding intact, which is a legitimate spelling of the same guest.
+        """
         if not token or "." not in token:
             return None
         try:
@@ -49,7 +70,7 @@ class GuestTokenService:
         expected = hmac.new(self._secret, token_id, sha256).digest()
         if not hmac.compare_digest(sig, expected):
             return None
-        return token_id_b64
+        return _b64u_encode(token_id)
 
     @staticmethod
     def extract_from_cookie_header(header: str | None) -> str | None:
