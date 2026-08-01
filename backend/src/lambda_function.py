@@ -852,6 +852,21 @@ _GALLERY_BACKFILL_BUDGET_SECONDS = 10.0
 # constant.
 _gallery_backfilled = False
 
+# The folder list a backfill is working through, held for the life of the
+# container. `list_galleries()` pages the ENTIRE `sessions/` prefix -- its
+# `limit` and `cursor` filter the result afterwards rather than shortening the
+# walk -- so without this every resumed pass re-pays the full listing, and a
+# corpus needing many passes pays it once per request. That is the same
+# amplification on the same unauthenticated route this index exists to remove,
+# merely scoped to the backfill window.
+#
+# Caching it makes the walk once-per-container instead: with ten reserved
+# executions the whole backfill costs at most ten walks, not one per request.
+# Folders created *during* the window are indexed live by
+# `_index_public_gallery`, so a list that predates them is not stale for this
+# purpose.
+_gallery_backfill_pending: list[str] | None = None
+
 
 def _ensure_gallery_index_backfilled(correlation_id: str | None = None) -> None:
     """Complete the index from S3, so reading it cannot hide folders.
@@ -885,19 +900,29 @@ def _ensure_gallery_index_backfilled(correlation_id: str | None = None) -> None:
     they overlap rather than multiply. The alternative, a lock over the store
     this is trying not to depend on, is worse.
     """
-    global _gallery_backfilled
+    global _gallery_backfilled, _gallery_backfill_pending
     if _gallery_backfilled:
         return
     complete, resume_after = _gallery_index.get_backfill_state()
     if complete:
         _gallery_backfilled = True
+        _gallery_backfill_pending = None
         return
 
     started = time.time()
     # Newest-first, and the same ordering the index uses, so `resume_after`
     # means "everything lexicographically above this is already indexed".
-    pending = image_storage.list_galleries()
+    #
+    # Listed once per container, not once per pass. The budget below bounds
+    # the writes; without this cache it would not bound the listing, and the
+    # listing is the expensive half -- `list_galleries()` pages the whole
+    # prefix regardless of what is asked of it.
+    if _gallery_backfill_pending is None:
+        _gallery_backfill_pending = image_storage.list_galleries()
+    pending = _gallery_backfill_pending
     if resume_after:
+        # Re-filtered rather than consumed destructively: another container
+        # may have advanced the cursor further than this one's last pass.
         pending = [g for g in pending if g < resume_after]
 
     indexed = 0
@@ -920,6 +945,9 @@ def _ensure_gallery_index_backfilled(correlation_id: str | None = None) -> None:
 
     if exhausted:
         _gallery_backfilled = True
+        # Released rather than left to sit for the life of the container: it
+        # is a backfill scratchpad, and the backfill is over.
+        _gallery_backfill_pending = None
         StructuredLogger.info(
             f"Gallery index backfill complete; indexed {indexed} folders this pass",
             correlation_id=correlation_id,

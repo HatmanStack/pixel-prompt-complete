@@ -279,6 +279,7 @@ def wired_gallery(monkeypatch):
         # Per-container cache of the backfill marker; a reused module
         # would carry the previous test's answer into this one.
         lambda_function._gallery_backfilled = False
+        lambda_function._gallery_backfill_pending = None
         yield lambda_function, s3
 
 
@@ -582,3 +583,51 @@ def test_an_empty_bucket_completes_the_backfill(wired_gallery):
     lambda_function, s3 = wired_gallery
     lambda_function._ensure_gallery_index_backfilled()
     assert lambda_function._gallery_index.get_backfill_state()[0] is True
+
+
+def test_a_resumed_backfill_does_not_re_walk_the_prefix(wired_gallery, monkeypatch):
+    """Resumability must bound the listing, not only the writes.
+
+    `list_galleries()` pages the entire `sessions/` prefix -- its limit and
+    cursor filter the result afterwards rather than shortening the walk -- so
+    a corpus needing many passes would otherwise re-pay the full listing on
+    every request for the whole backfill window. That is the same
+    amplification on the same unauthenticated route this index removes.
+
+    The earlier resumability test asserts the index converges; it says
+    nothing about how often S3 is walked, which is why this one counts.
+    """
+    lambda_function, s3 = wired_gallery
+    folders = [_folder(i) for i in range(30)]
+    _seed_gallery_objects(s3, folders)
+
+    monkeypatch.setattr(lambda_function, "_GALLERY_BACKFILL_CHUNK", 10)
+    monkeypatch.setattr(lambda_function, "_GALLERY_BACKFILL_BUDGET_SECONDS", 0.0)
+
+    listed = _count_prefix_scans(lambda_function)
+
+    for _ in range(3):
+        lambda_function._gallery_backfilled = False
+        lambda_function._ensure_gallery_index_backfilled()
+
+    corpus_walks = [p for p in listed if p == "sessions/"]
+    assert lambda_function._gallery_index.get_backfill_state()[0] is True
+    assert len(corpus_walks) == 1, (
+        f"the prefix was walked {len(corpus_walks)} times across resumed passes"
+    )
+
+
+def test_the_listing_cache_is_released_once_complete(wired_gallery):
+    """It is a backfill scratchpad, not container-lifetime state."""
+    lambda_function, s3 = wired_gallery
+    _seed_gallery_objects(s3, [_folder(i) for i in range(5)])
+
+    lambda_function._ensure_gallery_index_backfilled()
+    assert lambda_function._gallery_index.get_backfill_state()[0] is True
+    assert lambda_function._gallery_backfill_pending is None
+
+    # A fresh container reading a complete marker must not hold it either.
+    lambda_function._gallery_backfilled = False
+    lambda_function._gallery_backfill_pending = ["stale"]
+    lambda_function._ensure_gallery_index_backfilled()
+    assert lambda_function._gallery_backfill_pending is None
