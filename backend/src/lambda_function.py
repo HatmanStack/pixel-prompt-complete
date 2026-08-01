@@ -817,10 +817,13 @@ def _index_public_gallery(image_key: str) -> None:
     private key has no gallery folder and is skipped structurally, not by a
     flag a future call site could forget to pass.
 
-    Best-effort. The index is a read optimisation over data S3 already holds,
-    so a DynamoDB failure must not fail a generation the user has been
-    charged for; the reader falls back to listing S3 when the index has
-    nothing to say.
+    Best-effort, but not consequence-free, and the docstring said otherwise
+    until the read path changed underneath it. A DynamoDB failure must not
+    fail a generation the user has been charged for -- so this swallows.
+    There is no read-side fallback to S3 any more, though, and the backfill
+    marker is already written by the time a session generates, so a dropped
+    write costs that folder its place in the gallery until its retention
+    expires. Logged at ERROR for that reason rather than passed over.
     """
     try:
         if image_storage.is_private_key(image_key):
@@ -833,61 +836,100 @@ def _index_public_gallery(image_key: str) -> None:
             return
         _gallery_index.record_gallery(folder)
     except Exception as e:
-        StructuredLogger.warning(f"Could not index gallery folder for {image_key}: {e}")
+        StructuredLogger.error(f"Could not index gallery folder for {image_key}: {e}")
 
 
 # Folders indexed by one backfill pass. Above any plausible 30-day retention
-# for this service, and a bound rather than an unbounded loop inside a request.
-# A deployment over this needs the backfill run offline; the count is logged.
-_GALLERY_BACKFILL_MAX = 5000
+# Folders indexed per batch write, and the wall-clock the backfill may spend
+# inside one request. The deadline is what keeps the first pass from
+# overrunning the gateway; the resume cursor is what stops the next request
+# starting the corpus again.
+_GALLERY_BACKFILL_CHUNK = 200
+_GALLERY_BACKFILL_BUDGET_SECONDS = 10.0
 
-# Per container: the marker is written once and never cleared, so re-reading it
-# on every gallery request would be a GetItem per request to learn a constant.
+# Per container: once the marker says complete it never goes back, so
+# re-reading it on every gallery request would be a GetItem to learn a
+# constant.
 _gallery_backfilled = False
 
 
 def _ensure_gallery_index_backfilled(correlation_id: str | None = None) -> None:
-    """Populate the index from S3 once, so reading it cannot hide folders.
+    """Complete the index from S3, so reading it cannot hide folders.
 
     The index is only safe to read as the whole truth if it *is* the whole
     truth. Folders written before it shipped have no entry, so serving the
     index alone would make an existing deployment's entire gallery vanish for
     the rest of its 30-day retention -- and preferring S3 whenever the index
     looked short would just restore the unbounded scan this exists to remove.
+    So the index is completed rather than second-guessed.
 
-    So the index is completed rather than second-guessed. This runs the same
-    full ``sessions/`` walk the endpoint used to do on **every** request,
-    exactly once per index, and every request afterwards is one bounded query.
+    **Resumable, and bounded by wall-clock rather than by count.** An earlier
+    version walked the corpus and wrote up to 5000 folders in one go, marking
+    the index complete at the end. That had two failure modes: a pass too slow
+    to finish left no marker at all, so the next request began the whole walk
+    again -- and the load is heaviest exactly when the pass is slowest -- while
+    a corpus over the cap was marked complete with the oldest folders never
+    indexed, hiding them permanently.
 
-    Concurrent first requests can each run it. Reserved concurrency caps that
-    at ten, the writes are idempotent, and the alternative -- a lock over the
-    store this is trying not to depend on -- is worse than a few duplicate
-    puts one time.
+    Each pass now writes in chunks, records the oldest folder it reached, and
+    stops when its budget is spent. The next request resumes from that cursor,
+    so the work converges instead of restarting, and ``complete`` is written
+    only when the walk is genuinely exhausted.
+
+    Newest-first is deliberate: page one of the gallery is what a caller
+    actually sees, so the first chunk makes the endpoint useful and later
+    passes deepen it.
+
+    Concurrent cold requests can each run a pass. Reserved concurrency caps
+    that at ten, the writes are idempotent, and they share the cursor -- so
+    they overlap rather than multiply. The alternative, a lock over the store
+    this is trying not to depend on, is worse.
     """
     global _gallery_backfilled
     if _gallery_backfilled:
         return
-    if _gallery_index.is_backfilled():
+    complete, resume_after = _gallery_index.get_backfill_state()
+    if complete:
         _gallery_backfilled = True
         return
 
-    existing = image_storage.list_galleries()
-    truncated = len(existing) > _GALLERY_BACKFILL_MAX
-    if truncated:
-        existing = existing[:_GALLERY_BACKFILL_MAX]
-    indexed = _gallery_index.backfill(existing)
-    _gallery_backfilled = True
-    StructuredLogger.info(
-        f"Backfilled the gallery index with {indexed} folders",
-        correlation_id=correlation_id,
-        truncated=truncated,
-        limit=_GALLERY_BACKFILL_MAX if truncated else None,
-    )
-    if truncated:
-        StructuredLogger.error(
-            "Gallery backfill hit its cap; folders older than the newest "
-            f"{_GALLERY_BACKFILL_MAX} are not indexed and will not be listed",
+    started = time.time()
+    # Newest-first, and the same ordering the index uses, so `resume_after`
+    # means "everything lexicographically above this is already indexed".
+    pending = image_storage.list_galleries()
+    if resume_after:
+        pending = [g for g in pending if g < resume_after]
+
+    indexed = 0
+    cursor = resume_after
+    for offset in range(0, len(pending), _GALLERY_BACKFILL_CHUNK):
+        chunk = pending[offset : offset + _GALLERY_BACKFILL_CHUNK]
+        indexed += _gallery_index.backfill_chunk(chunk)
+        cursor = chunk[-1]
+        # After the chunk, never before: progress must not claim coverage that
+        # was not written.
+        exhausted = offset + _GALLERY_BACKFILL_CHUNK >= len(pending)
+        out_of_time = time.time() - started >= _GALLERY_BACKFILL_BUDGET_SECONDS
+        if exhausted or out_of_time:
+            _gallery_index.record_backfill_progress(cursor, complete=exhausted)
+            break
+    else:
+        # Nothing pending: the walk is already exhausted.
+        _gallery_index.record_backfill_progress(cursor, complete=True)
+        exhausted = True
+
+    if exhausted:
+        _gallery_backfilled = True
+        StructuredLogger.info(
+            f"Gallery index backfill complete; indexed {indexed} folders this pass",
             correlation_id=correlation_id,
+        )
+    else:
+        StructuredLogger.info(
+            f"Gallery index backfill paused after {indexed} folders; "
+            "the next request resumes from the cursor",
+            correlation_id=correlation_id,
+            resumeAfter=cursor,
         )
 
 

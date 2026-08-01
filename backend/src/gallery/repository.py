@@ -126,24 +126,26 @@ class GalleryIndexRepository:
         with self._write_lock:
             self._table.put_item(Item=item)
 
-    def is_backfilled(self) -> bool:
-        """Whether the index covers folders written before it existed.
+    def get_backfill_state(self) -> tuple[bool, str | None]:
+        """``(complete, resume_after)`` for the one-time backfill.
 
-        Until this is true the index is a partial view, and reading from it
-        would hide every pre-existing gallery for the rest of its retention.
+        ``resume_after`` is the oldest gallery id indexed so far, so a pass
+        that ran out of time can be continued instead of restarted. Until
+        ``complete`` is true the index is a partial view of what S3 retains,
+        and reading it as the whole truth would hide pre-existing galleries.
         """
         response = self._table.get_item(Key={"userId": BACKFILL_MARKER_KEY})
-        return bool(response.get("Item"))
+        item = response.get("Item") or {}
+        if not item:
+            return False, None
+        cursor = item.get("resumeAfter")
+        return bool(item.get("complete")), str(cursor) if cursor else None
 
-    def backfill(self, gallery_ids: list[str]) -> int:
-        """Index folders that predate the index, then mark it complete.
+    def backfill_chunk(self, gallery_ids: list[str]) -> int:
+        """Index a batch of folders. Returns how many were written.
 
-        The marker is written **last and only on success**, so a backfill that
-        dies part-way is retried rather than leaving a partial index treated
-        as authoritative. Individual writes are idempotent, so the retry costs
-        duplicate puts and nothing else.
-
-        Returns the number of folders indexed.
+        Idempotent, so a chunk replayed after a lost response costs duplicate
+        puts and nothing else.
         """
         indexed = 0
         with self._write_lock:
@@ -154,13 +156,23 @@ class GalleryIndexRepository:
                         continue
                     batch.put_item(Item=item)
                     indexed += 1
-            self._table.put_item(
-                Item={
-                    "userId": BACKFILL_MARKER_KEY,
-                    "backfilledCount": indexed,
-                }
-            )
         return indexed
+
+    def record_backfill_progress(self, resume_after: str | None, complete: bool) -> None:
+        """Persist how far the backfill has got.
+
+        Progress is recorded **after** the chunk it describes, so a crash
+        loses at most one chunk's work and never claims coverage that was not
+        written. ``complete`` is set only when the walk is exhausted: a
+        partial pass that stops on its deadline records its cursor and leaves
+        the marker incomplete, so the next request continues rather than
+        starting the corpus again.
+        """
+        item: dict[str, Any] = {"userId": BACKFILL_MARKER_KEY, "complete": complete}
+        if resume_after:
+            item["resumeAfter"] = resume_after
+        with self._write_lock:
+            self._table.put_item(Item=item)
 
     def list_recent(self, limit: int, cursor: str | None = None) -> list[str]:
         """Return at most ``limit`` gallery ids, newest first.

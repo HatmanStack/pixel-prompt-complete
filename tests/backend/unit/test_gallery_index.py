@@ -197,22 +197,39 @@ def test_an_unparseable_cursor_is_rejected_not_ignored(repo):
         repo.list_recent(limit=2, cursor="not-a-gallery-id")
 
 
-def test_backfill_indexes_folders_and_marks_completion(repo):
-    assert repo.is_backfilled() is False
-    indexed = repo.backfill([_folder(i) for i in range(5)])
-    assert indexed == 5
-    assert repo.is_backfilled() is True
+def test_backfill_state_starts_empty(repo):
+    assert repo.get_backfill_state() == (False, None)
+
+
+def test_backfill_chunk_indexes_folders(repo):
+    assert repo.backfill_chunk([_folder(i) for i in range(5)]) == 5
     assert repo.list_recent(limit=10) == [_folder(i) for i in range(4, -1, -1)]
 
 
-def test_backfill_skips_unparseable_names(repo):
-    assert repo.backfill([_folder(0), "not-a-gallery", _folder(1)]) == 2
+def test_backfill_chunk_skips_unparseable_names(repo):
+    assert repo.backfill_chunk([_folder(0), "not-a-gallery", _folder(1)]) == 2
     assert repo.list_recent(limit=10) == [_folder(1), _folder(0)]
+
+
+def test_progress_is_recorded_without_claiming_completion(repo):
+    """A paused pass must not read as a covered index.
+
+    Marking complete early is what would hide every folder the pass had not
+    reached yet, permanently.
+    """
+    repo.backfill_chunk([_folder(4)])
+    repo.record_backfill_progress(_folder(4), complete=False)
+    assert repo.get_backfill_state() == (False, _folder(4))
+
+    repo.backfill_chunk([_folder(3)])
+    repo.record_backfill_progress(_folder(3), complete=True)
+    assert repo.get_backfill_state() == (True, _folder(3))
 
 
 def test_the_backfill_marker_is_not_listed_as_a_gallery(repo):
     """It shares the gallery# prefix but carries no feed key."""
-    repo.backfill([_folder(0)])
+    repo.backfill_chunk([_folder(0)])
+    repo.record_backfill_progress(_folder(0), complete=True)
     assert repo.list_recent(limit=10) == [_folder(0)]
 
 
@@ -495,3 +512,73 @@ def test_concurrent_index_writes_do_not_lose_the_folder(wired_gallery):
     assert lambda_function._gallery_index.list_recent(limit=10) == [
         "2026-01-01-00-00-00-abcd1234"
     ]
+
+
+def test_a_paused_backfill_resumes_instead_of_restarting(wired_gallery, monkeypatch):
+    """A pass that runs out of time must not make the next one start over.
+
+    The corpus walk is the cost the index exists to remove. Restarting it per
+    request means paying it repeatedly, and the load is heaviest exactly when
+    the pass is slowest.
+    """
+    lambda_function, s3 = wired_gallery
+    folders = [_folder(i) for i in range(30)]
+    _seed_gallery_objects(s3, folders)
+
+    monkeypatch.setattr(lambda_function, "_GALLERY_BACKFILL_CHUNK", 10)
+    # Budget of zero: every pass stops after its first chunk.
+    monkeypatch.setattr(lambda_function, "_GALLERY_BACKFILL_BUDGET_SECONDS", 0.0)
+
+    lambda_function._ensure_gallery_index_backfilled()
+    complete, cursor = lambda_function._gallery_index.get_backfill_state()
+    assert complete is False
+    assert cursor == _folder(20)
+    assert len(lambda_function._gallery_index.list_recent(limit=50)) == 10
+
+    lambda_function._gallery_backfilled = False
+    lambda_function._ensure_gallery_index_backfilled()
+    complete, cursor = lambda_function._gallery_index.get_backfill_state()
+    assert complete is False
+    assert cursor == _folder(10)
+    assert len(lambda_function._gallery_index.list_recent(limit=50)) == 20
+
+    lambda_function._gallery_backfilled = False
+    lambda_function._ensure_gallery_index_backfilled()
+    complete, _ = lambda_function._gallery_index.get_backfill_state()
+    assert complete is True
+    assert len(lambda_function._gallery_index.list_recent(limit=50)) == 30
+
+
+def test_a_paused_backfill_still_serves_the_newest_page(wired_gallery, monkeypatch):
+    """Newest-first, so page one works before the walk finishes."""
+    lambda_function, s3 = wired_gallery
+    folders = [_folder(i) for i in range(30)]
+    _seed_gallery_objects(s3, folders)
+
+    monkeypatch.setattr(lambda_function, "_GALLERY_BACKFILL_CHUNK", 10)
+    monkeypatch.setattr(lambda_function, "_GALLERY_BACKFILL_BUDGET_SECONDS", 0.0)
+
+    body = json.loads(lambda_function.lambda_handler(_gallery_request(limit=5), None)["body"])
+    assert [g["id"] for g in body["galleries"]] == [_folder(i) for i in range(29, 24, -1)]
+
+
+def test_a_completed_backfill_is_never_walked_again(wired_gallery):
+    """The marker is the whole point: one walk, not one per request."""
+    lambda_function, s3 = wired_gallery
+    _seed_gallery_objects(s3, [_folder(i) for i in range(5)])
+
+    lambda_function._ensure_gallery_index_backfilled()
+    assert lambda_function._gallery_index.get_backfill_state()[0] is True
+
+    # A fresh container reads the marker and does not walk.
+    lambda_function._gallery_backfilled = False
+    listed = _count_prefix_scans(lambda_function)
+    lambda_function._ensure_gallery_index_backfilled()
+    assert "sessions/" not in listed
+
+
+def test_an_empty_bucket_completes_the_backfill(wired_gallery):
+    """Nothing to index is still a completed index, not a permanent retry."""
+    lambda_function, s3 = wired_gallery
+    lambda_function._ensure_gallery_index_backfilled()
+    assert lambda_function._gallery_index.get_backfill_state()[0] is True
