@@ -41,11 +41,19 @@ def sign_payload(payload: str, secret: str, timestamp: int | None = None) -> str
 
 
 def build_event(
-    event_type: str, obj: dict[str, Any], event_id: str | None = None
+    event_type: str,
+    obj: dict[str, Any],
+    event_id: str | None = None,
+    created: int = 1679609767,
 ) -> str:
     """Return a JSON-encoded Stripe event payload.
 
     ``event_id`` defaults to a unique value, matching Stripe's behaviour.
+
+    ``created`` is when Stripe generated the event, which is **not** the order
+    it arrives in — Stripe guarantees delivery, not ordering. It defaults to a
+    fixed value so tests that do not care about ordering all sit at the same
+    instant; pass it explicitly to model a delayed or reordered delivery.
     """
     if event_id is None:
         event_id = f"evt_test_{next(_event_counter)}"
@@ -54,7 +62,7 @@ def build_event(
             "id": event_id,
             "object": "event",
             "api_version": "2024-06-20",
-            "created": 1679609767,
+            "created": created,
             "livemode": False,
             "type": event_type,
             "data": {"object": obj},

@@ -459,7 +459,45 @@ class UserRepository:
 
     # ---------- tier / stripe ----------
 
-    def set_tier(self, user_id: str, tier: str, **stripe_fields: Any) -> None:
+    def set_tier(
+        self,
+        user_id: str,
+        tier: str,
+        *,
+        event_created: int | None = None,
+        **stripe_fields: Any,
+    ) -> bool:
+        """Write the tier and any Stripe fields. Returns whether it applied.
+
+        ``event_created`` is the Stripe ``event.created`` timestamp of the
+        webhook driving this change, and passing it makes the write a
+        **monotonic** one: it records the timestamp as ``lastBillingEventAt``
+        and refuses any later write carrying an older one.
+
+        This is the bound that signature verification and event dedup do not
+        provide. A signature proves an event is authentic; the dedup claim
+        stops one event id applying twice. Neither orders two *distinct*
+        authentic events, and Stripe guarantees delivery, not order — so a
+        ``customer.subscription.updated`` generated before a cancellation but
+        delivered after it used to overwrite the cancellation and hand paid
+        access back.
+
+        ``<=`` rather than ``<``: Stripe stamps ``created`` to the second and a
+        cancellation routinely emits ``customer.subscription.updated`` and
+        ``.deleted`` within the same one. Rejecting equality would drop the
+        second of every such pair. Same-second reordering therefore remains
+        unordered — a far narrower window than the one this closes, and not one
+        any store this side of a Stripe re-fetch can resolve.
+
+        Keyword-only so it cannot be mistaken for a Stripe field name and
+        silently written to the record as one.
+
+        Returns:
+            True when the write landed. False when it was rejected as stale —
+            in which case the caller must skip whatever else it would have
+            done for a real transition (revenue counters, lifecycle email),
+            or the ledger drifts from the entitlement it is meant to track.
+        """
         now = int(time.time())
         parts = ["tier = :tier", "updatedAt = :now"]
         values: dict[str, Any] = {":tier": tier, ":now": now}
@@ -467,11 +505,27 @@ class UserRepository:
             placeholder = f":v{i}"
             parts.append(f"{k} = {placeholder}")
             values[placeholder] = v
-        self._table.update_item(
-            Key={"userId": user_id},
-            UpdateExpression="SET " + ", ".join(parts),
-            ExpressionAttributeValues=values,
-        )
+
+        kwargs: dict[str, Any] = {}
+        if event_created is not None:
+            parts.append("lastBillingEventAt = :evt")
+            values[":evt"] = event_created
+            kwargs["ConditionExpression"] = (
+                "attribute_not_exists(lastBillingEventAt) OR lastBillingEventAt <= :evt"
+            )
+
+        try:
+            self._table.update_item(
+                Key={"userId": user_id},
+                UpdateExpression="SET " + ", ".join(parts),
+                ExpressionAttributeValues=values,
+                **kwargs,
+            )
+            return True
+        except ClientError as e:
+            if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
+                raise
+            return False
 
     def set_stripe_customer_id(self, user_id: str, customer_id: str) -> None:
         now = int(time.time())

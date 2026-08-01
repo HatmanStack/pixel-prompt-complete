@@ -310,3 +310,45 @@ def test_scan_users_cursor_is_the_last_returned_item_not_the_last_scanned(users_
     page, cursor = repo.scan_users(limit=7, max_pages=50)
 
     assert cursor == {"userId": page[-1]["userId"]}
+
+
+def test_set_tier_without_event_created_always_applies(users_table):
+    """The guard is opt-in: callers that pass no timestamp are unconditional.
+
+    Admin and test paths write tiers with no Stripe event behind them, and
+    making those conditional on a watermark they cannot supply would make the
+    first webhook permanently freeze the record.
+    """
+    repo = _repo(users_table)
+    repo.get_or_create_user("u_uncond")
+    assert repo.set_tier("u_uncond", "paid", event_created=1000) is True
+    assert repo.set_tier("u_uncond", "free") is True
+    assert repo.get_user("u_uncond")["tier"] == "free"
+
+
+def test_set_tier_rejects_an_older_event(users_table):
+    """The monotonic watermark: a stale transition must not apply."""
+    repo = _repo(users_table)
+    repo.get_or_create_user("u_mono")
+
+    assert repo.set_tier("u_mono", "free", event_created=2000) is True
+    assert repo.get_user("u_mono")["lastBillingEventAt"] == 2000
+
+    assert repo.set_tier("u_mono", "paid", event_created=1000) is False
+    item = repo.get_user("u_mono")
+    assert item["tier"] == "free"
+    # The rejected write must leave the watermark where it was, or a second
+    # stale event would be judged against the stale one and let through.
+    assert item["lastBillingEventAt"] == 2000
+
+
+def test_set_tier_accepts_equal_and_newer_events(users_table):
+    """``<=``: Stripe stamps to the second and emits pairs within one."""
+    repo = _repo(users_table)
+    repo.get_or_create_user("u_eq")
+
+    assert repo.set_tier("u_eq", "paid", event_created=2000) is True
+    assert repo.set_tier("u_eq", "free", event_created=2000) is True
+    assert repo.get_user("u_eq")["tier"] == "free"
+    assert repo.set_tier("u_eq", "paid", event_created=2001) is True
+    assert repo.get_user("u_eq")["tier"] == "paid"

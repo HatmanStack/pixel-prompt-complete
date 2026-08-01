@@ -133,7 +133,24 @@ def _billing_period(obj: dict[str, Any]) -> tuple[int | None, int | None]:
     return (int(start) if start else None, int(end) if end else None)
 
 
-def _on_checkout_completed(obj: dict[str, Any], repo: UserRepository, event_type: str) -> None:
+def _stale(user_id: str, event_type: str, event_created: int | None) -> None:
+    """Log a transition refused for being older than the applied state.
+
+    Not an error: Stripe does not order distinct events, so this is the
+    control working. Logged at INFO because a sudden run of them means
+    deliveries are arriving badly out of order and is worth seeing.
+    """
+    StructuredLogger.info(
+        f"Webhook {event_type}: older than the last applied event — ignored",
+        userId=user_id,
+        event_type=event_type,
+        eventCreated=event_created,
+    )
+
+
+def _on_checkout_completed(
+    obj: dict[str, Any], repo: UserRepository, event_type: str, event_created: int | None
+) -> None:
     user_id = _user_id_from_object(obj, repo)
     if not user_id:
         _unresolved(obj, event_type)
@@ -144,12 +161,16 @@ def _on_checkout_completed(obj: dict[str, Any], repo: UserRepository, event_type
     if obj.get("subscription"):
         fields["stripeSubscriptionId"] = obj["subscription"]
     fields["subscriptionStatus"] = "active"
-    repo.set_tier(user_id, "paid", **fields)
+    if not repo.set_tier(user_id, "paid", event_created=event_created, **fields):
+        _stale(user_id, event_type, event_created)
+        return
     repo.increment_revenue_counter("activeSubscribers", 1)
     _send_lifecycle_email(repo, user_id, email_templates.welcome_email)
 
 
-def _on_subscription_upsert(obj: dict[str, Any], repo: UserRepository, event_type: str) -> None:
+def _on_subscription_upsert(
+    obj: dict[str, Any], repo: UserRepository, event_type: str, event_created: int | None
+) -> None:
     user_id = _user_id_from_object(obj, repo)
     if not user_id:
         _unresolved(obj, event_type)
@@ -179,22 +200,29 @@ def _on_subscription_upsert(obj: dict[str, Any], repo: UserRepository, event_typ
             "fall back to a fixed window",
             stripe_subscription_id=obj.get("id"),
         )
-    repo.set_tier(user_id, tier, **fields)
+    if not repo.set_tier(user_id, tier, event_created=event_created, **fields):
+        _stale(user_id, event_type, event_created)
+        return
     if status == "active":
         _send_lifecycle_email(repo, user_id, email_templates.subscription_activated_email)
 
 
-def _on_subscription_deleted(obj: dict[str, Any], repo: UserRepository, event_type: str) -> None:
+def _on_subscription_deleted(
+    obj: dict[str, Any], repo: UserRepository, event_type: str, event_created: int | None
+) -> None:
     user_id = _user_id_from_object(obj, repo)
     if not user_id:
         _unresolved(obj, event_type)
         return
-    repo.set_tier(
+    if not repo.set_tier(
         user_id,
         "free",
+        event_created=event_created,
         subscriptionStatus="canceled",
         stripeSubscriptionId="",
-    )
+    ):
+        _stale(user_id, event_type, event_created)
+        return
     # One atomic UpdateItem, not two sequential ones: a failure between
     # them would release the idempotency claim with the first delta already
     # applied, and Stripe's retry would apply it a second time.
@@ -202,7 +230,9 @@ def _on_subscription_deleted(obj: dict[str, Any], repo: UserRepository, event_ty
     _send_lifecycle_email(repo, user_id, email_templates.subscription_cancelled_email)
 
 
-def _on_payment_failed(obj: dict[str, Any], repo: UserRepository, event_type: str) -> None:
+def _on_payment_failed(
+    obj: dict[str, Any], repo: UserRepository, event_type: str, event_created: int | None
+) -> None:
     user_id = _user_id_from_object(obj, repo)
     if not user_id:
         _unresolved(obj, event_type)
@@ -212,7 +242,11 @@ def _on_payment_failed(obj: dict[str, Any], repo: UserRepository, event_type: st
         return
     current_tier = user.get("tier", "free")
     # Keep tier as-is; only mark status as past_due.
-    repo.set_tier(user_id, current_tier, subscriptionStatus="past_due")
+    if not repo.set_tier(
+        user_id, current_tier, event_created=event_created, subscriptionStatus="past_due"
+    ):
+        _stale(user_id, event_type, event_created)
+        return
     _send_lifecycle_email(repo, user_id, email_templates.payment_failed_email)
 
 
@@ -261,6 +295,14 @@ def handle_stripe_webhook(
         event_id = str(stripe_event["id"] or "")
     except (KeyError, AttributeError):
         event_id = ""
+    # When Stripe generated the event, which is not the order it arrives in.
+    # None disables the monotonic guard for this event rather than treating a
+    # missing timestamp as "older than everything", which would silently drop
+    # every event from an account whose payloads omit it.
+    try:
+        event_created: int | None = int(stripe_event["created"])
+    except (KeyError, AttributeError, TypeError, ValueError):
+        event_created = None
     handler = _DISPATCH.get(event_type)
     if handler:
         # Stripe delivers at-least-once. Claim the event id before mutating
@@ -291,7 +333,7 @@ def handle_stripe_webhook(
                 obj = raw_obj.to_dict()
             else:
                 obj = raw_obj
-            handler(obj, repo, event_type)
+            handler(obj, repo, event_type, event_created)
             # Only a completed record suppresses redelivery. Until this lands
             # the claim is just a lease, so a crash mid-handler is retried.
             repo.complete_webhook_event(event_id)
