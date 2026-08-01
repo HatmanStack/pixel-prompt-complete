@@ -57,8 +57,29 @@ def test_stripe_client_sets_an_explicit_timeout(monkeypatch):
 
     client = stripe_module.default_http_client
     assert client is not None
-    assert client._timeout == 5.0
+    assert client._timeout == (2.0, 3.0)
     reset_stripe_client()
+
+
+def test_the_timeout_is_a_pair_that_sums_to_the_budget(monkeypatch):
+    """A scalar is applied per phase, so it buys double what it reads as.
+
+    `requests` uses one scalar for BOTH the connect and the read timeout, so
+    timeout=5.0 permits 10s per attempt. Splitting it explicitly is what makes
+    STRIPE_TIMEOUT_SECONDS mean the whole budget for one attempt.
+    """
+    import config
+    from billing.stripe_client import stripe_timeout_pair
+
+    monkeypatch.setattr(config, "stripe_timeout_seconds", 5.0)
+    connect, read = stripe_timeout_pair()
+    assert connect + read == 5.0
+    assert connect > 0 and read > 0
+
+    monkeypatch.setattr(config, "stripe_timeout_seconds", 1.0)
+    connect, read = stripe_timeout_pair()
+    assert connect + read == 1.0
+    assert connect > 0 and read > 0
 
 
 def test_stripe_client_bounds_the_retry_budget(monkeypatch):
@@ -77,10 +98,43 @@ def test_stripe_client_bounds_the_retry_budget(monkeypatch):
     reset_stripe_client()
 
 
-def test_timeout_is_well_inside_the_gateway_ceiling():
-    """The whole point is to answer before the gateway gives up."""
+def test_worst_case_is_well_inside_the_gateway_ceiling():
+    """Computed from what requests actually does, not from the scalar.
+
+    An earlier version of this asserted `timeout * (1 + retries)`, which is
+    the number the code was written against rather than the one the HTTP
+    client produces -- so it passed while the property it names did not hold.
+    Per attempt the cost is connect + read; attempts are 1 + retries; and
+    Stripe sleeps between them.
+    """
+    import config
+    from billing.stripe_client import stripe_timeout_pair
+
+    connect, read = stripe_timeout_pair()
+    per_attempt = connect + read
+    attempts = 1 + config.stripe_max_network_retries
+    # Stripe's initial retry delay is 0.5s and doubles; allow a second per gap.
+    backoff_allowance = config.stripe_max_network_retries * 1.0
+
+    worst_case = per_attempt * attempts + backoff_allowance
+    assert worst_case < config.gateway_integration_timeout_seconds, worst_case
+
+
+def test_a_zero_timeout_is_refused_at_import(monkeypatch):
+    """`requests` reads 0 as "fail immediately", not "no timeout".
+
+    An operator setting StripeTimeoutSeconds=0 to restore the SDK's previous
+    unbounded behaviour would 500 every checkout instead. Caught at deploy,
+    matching the credit-ledger knobs, rather than at the till.
+    """
+    import importlib
+
     import config
 
+    monkeypatch.setenv("STRIPE_TIMEOUT_SECONDS", "0")
+    with pytest.raises(RuntimeError, match="STRIPE_TIMEOUT_SECONDS"):
+        importlib.reload(config)
+
+    monkeypatch.delenv("STRIPE_TIMEOUT_SECONDS", raising=False)
+    importlib.reload(config)
     assert config.stripe_timeout_seconds > 0
-    worst_case = config.stripe_timeout_seconds * (1 + config.stripe_max_network_retries)
-    assert worst_case < config.gateway_integration_timeout_seconds

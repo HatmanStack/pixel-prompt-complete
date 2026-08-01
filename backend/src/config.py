@@ -304,10 +304,33 @@ stripe_portal_return_url = os.environ.get("STRIPE_PORTAL_RETURN_URL", "")
 #
 # The two multiply: 5s with the default two retries is a 15s worst case.
 # Bounding one without the other only looks bounded, so both are set, and
-# test_timeout_is_well_inside_the_gateway_ceiling asserts their product stays
+# test_timeout_is_well_inside_the_gateway_ceiling asserts the total stays
 # under the gateway's.
+#
+# This is the budget for one ATTEMPT, connect and read together.
+# ``requests`` applies a scalar timeout to each phase separately, so passing
+# 5.0 buys 10s per attempt, not 5 -- ``stripe_client`` therefore splits this
+# into an explicit (connect, read) pair that sums to it. Without the split the
+# real worst case was roughly double what the guard asserted, and the guard
+# passed anyway because it was computed from the wrong model.
 stripe_timeout_seconds = _safe_float("STRIPE_TIMEOUT_SECONDS", 5.0)
 stripe_max_network_retries = _safe_int("STRIPE_MAX_NETWORK_RETRIES", 1)
+if stripe_timeout_seconds <= 0:
+    # `requests` reads 0 as "fail immediately", not "no timeout" -- which is
+    # what an operator reaching for the latter would expect it to mean. Every
+    # Stripe call would raise ConnectTimeout, so /billing/checkout would 500
+    # for every paying customer. Raised at import, matching the credit-ledger
+    # knobs below, so it surfaces as a cold-start error at deploy rather than
+    # as a checkout outage.
+    raise RuntimeError(
+        "STRIPE_TIMEOUT_SECONDS must be greater than zero "
+        f"(got {stripe_timeout_seconds}). It is a per-attempt budget, not a "
+        "disable switch; there is no way to ask for an unbounded Stripe call."
+    )
+if stripe_max_network_retries < 0:
+    raise RuntimeError(
+        f"STRIPE_MAX_NETWORK_RETRIES must not be negative (got {stripe_max_network_retries})"
+    )
 
 # Prompt enhancement model configuration
 prompt_model_provider = os.environ.get("PROMPT_MODEL_PROVIDER", "openai")
