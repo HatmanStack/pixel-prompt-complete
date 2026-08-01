@@ -5,9 +5,9 @@ anyio==4.14.2
     #   google-genai
     #   httpx
     #   openai
-boto3==1.43.24
+boto3==1.43.57
     # via -r backend/src/requirements.txt
-botocore==1.43.46
+botocore==1.43.62
     # via
     #   boto3
     #   s3transfer
@@ -73,7 +73,7 @@ requests==2.34.2
     #   google-auth
     #   google-genai
     #   stripe
-s3transfer==0.18.0
+s3transfer==0.19.2
     # via boto3
 six==1.17.0
     # via python-dateutil
