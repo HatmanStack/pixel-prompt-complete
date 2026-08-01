@@ -147,7 +147,11 @@ def test_enhance_survives_an_unreachable_counter(wired):
     """
     with (
         patch.object(wired, "prompt_enhancer") as enhancer,
-        patch.object(wired._user_repo, "increment_anon", side_effect=RuntimeError("dynamo down")),
+        patch.object(
+            wired._user_repo,
+            "increment_ip_rate_bucket",
+            side_effect=RuntimeError("dynamo down"),
+        ),
     ):
         enhancer.enhance_variants.return_value = ("short", "long")
         for _ in range(5):
@@ -185,7 +189,11 @@ def test_log_limit_is_per_ip_not_global(wired):
 def test_log_survives_an_unreachable_counter(wired):
     with (
         patch.object(wired, "handle_log") as log_fn,
-        patch.object(wired._user_repo, "increment_anon", side_effect=RuntimeError("dynamo down")),
+        patch.object(
+            wired._user_repo,
+            "increment_ip_rate_bucket",
+            side_effect=RuntimeError("dynamo down"),
+        ),
     ):
         log_fn.return_value = {"success": True, "message": "ok"}
         for _ in range(5):
@@ -227,3 +235,109 @@ def test_enhance_and_log_do_not_share_a_bucket(wired):
             wired.lambda_handler(_log_event(), None)
 
         assert wired.lambda_handler(_enhance_event(), None)["statusCode"] == 200
+
+
+# --------------------------------------------------------------------------
+# Turning the limiter off must turn it OFF
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture
+def wired_zero_limits(monkeypatch):
+    """The operator reaches for the documented `0 disables` convention."""
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("ENHANCE_IP_LIMIT", "0")
+    monkeypatch.setenv("LOG_IP_LIMIT", "0")
+    import config as cfg
+
+    importlib.reload(cfg)
+    with mock_aws():
+        boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="test-bucket")
+        ddb = boto3.resource("dynamodb", region_name="us-east-1")
+        ddb.create_table(
+            TableName=_TABLE,
+            KeySchema=[{"AttributeName": "userId", "KeyType": "HASH"}],
+            AttributeDefinitions=[{"AttributeName": "userId", "AttributeType": "S"}],
+            BillingMode="PAY_PER_REQUEST",
+        )
+        import lambda_function
+
+        importlib.reload(lambda_function)
+        from users.repository import UserRepository
+
+        lambda_function._user_repo = UserRepository(_TABLE, dynamodb_resource=ddb)
+        yield lambda_function
+    for v in ("ENHANCE_IP_LIMIT", "LOG_IP_LIMIT"):
+        monkeypatch.delenv(v, raising=False)
+    importlib.reload(cfg)
+
+
+def test_a_zero_limit_disables_the_check_rather_than_closing_the_door(wired_zero_limits):
+    """`requestCount < 0` is false on the first request.
+
+    So the naive reading takes the endpoint offline for everyone, which is
+    the opposite of what an operator setting it to zero is asking for --
+    and CLAUDE.md documents `0 disables` for a spend knob two rows away.
+    """
+    wired = wired_zero_limits
+    with (
+        patch.object(wired, "prompt_enhancer") as enhancer,
+        patch.object(wired, "handle_log") as log_fn,
+    ):
+        enhancer.enhance_variants.return_value = ("short", "long")
+        log_fn.return_value = {"success": True, "message": "ok"}
+
+        for _ in range(5):
+            assert wired.lambda_handler(_enhance_event(), None)["statusCode"] == 200
+            assert wired.lambda_handler(_log_event(), None)["statusCode"] == 200
+
+
+def test_a_disabled_limiter_writes_nothing(wired_zero_limits):
+    """Disabled means no counter, not a counter nobody reads."""
+    wired = wired_zero_limits
+    with patch.object(wired, "handle_log") as log_fn:
+        log_fn.return_value = {"success": True, "message": "ok"}
+        wired.lambda_handler(_log_event(), None)
+
+    scan = wired._user_repo._table.scan()
+    assert scan.get("Items", []) == []
+
+
+def test_the_limiter_costs_one_write_per_request(wired):
+    """A guard on CloudWatch cost must not cost more than what it guards.
+
+    increment_anon pre-creates a full user record (GetItem + conditional
+    PutItem) before touching the counter, so the bound was 3-4 operations and
+    a persisted row per source IP on the table the spend ceilings read.
+    """
+    calls: list[str] = []
+    table = wired._user_repo._table
+    real_update, real_get, real_put = table.update_item, table.get_item, table.put_item
+
+    def rec(name, fn):
+        def wrapper(**kwargs):
+            calls.append(name)
+            return fn(**kwargs)
+
+        return wrapper
+
+    table.update_item = rec("update", real_update)
+    table.get_item = rec("get", real_get)
+    table.put_item = rec("put", real_put)
+
+    with patch.object(wired, "handle_log") as log_fn:
+        log_fn.return_value = {"success": True, "message": "ok"}
+        assert wired.lambda_handler(_log_event(), None)["statusCode"] == 200
+
+    assert calls == ["update"], calls
+
+
+def test_the_bucket_still_expires_with_its_window(wired):
+    """Without the pre-created row, the TTL has to come from the update."""
+    with patch.object(wired, "handle_log") as log_fn:
+        log_fn.return_value = {"success": True, "message": "ok"}
+        wired.lambda_handler(_log_event(), None)
+
+    items = wired._user_repo._table.scan().get("Items", [])
+    assert len(items) == 1
+    assert int(items[0]["ttl"]) > 0

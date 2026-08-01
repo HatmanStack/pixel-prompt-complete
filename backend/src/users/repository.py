@@ -636,6 +636,76 @@ class UserRepository:
             return self.get_user(key) or item
         return item
 
+    def increment_ip_rate_bucket(
+        self, key: str, limit: int, window_seconds: int, now: int
+    ) -> tuple[bool, dict]:
+        """Count one request against a per-IP bucket in a single write.
+
+        Deliberately not :meth:`increment_anon`. That path calls
+        ``get_or_create_user`` first, which is a GetItem plus a conditional
+        PutItem that materialises a full user-shaped record before the
+        counter is even touched -- three or four operations per request, and
+        one persisted row per distinct source address, on the same table the
+        spend ceilings read. For the public ``/log`` and ``/enhance`` bounds
+        that is a guard costing more than the thing it guards, and it puts the
+        load on a table whose availability those ceilings depend on.
+
+        UpdateItem creates the item when it is absent, so nothing has to be
+        pre-created; the TTL is written in the same expression via
+        ``if_not_exists`` so an abuse bucket still expires with its window
+        rather than accumulating forever. ``#ttl`` is aliased because ``TTL``
+        is a DynamoDB reserved word -- the existing writers set it through
+        ``put_item``, where reservation does not apply, so this is the first
+        place it bites.
+
+        Returns ``(allowed, item)``.
+        """
+        ttl = now + window_seconds + _IP_BUCKET_TTL_GRACE_SECONDS
+        for _ in range(_MAX_RETRIES):
+            try:
+                resp = self._table.update_item(
+                    Key={"userId": key},
+                    UpdateExpression=(
+                        "SET windowStart = if_not_exists(windowStart, :now), "
+                        "#ttl = if_not_exists(#ttl, :ttl), "
+                        "updatedAt = :now "
+                        "ADD requestCount :one"
+                    ),
+                    ConditionExpression=(
+                        "(attribute_not_exists(requestCount) OR requestCount < :limit) "
+                        "AND (attribute_not_exists(windowStart) OR windowStart > :stale)"
+                    ),
+                    ExpressionAttributeNames={"#ttl": "ttl"},
+                    ExpressionAttributeValues={
+                        ":one": 1,
+                        ":limit": limit,
+                        ":now": now,
+                        ":ttl": ttl,
+                        ":stale": now - window_seconds,
+                    },
+                    ReturnValues="ALL_NEW",
+                )
+                return True, resp.get("Attributes", {})
+            except ClientError as e:
+                if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
+                    raise
+                item = self.get_user(key) or {}
+                window_start = int(item.get("windowStart", 0) or 0)
+                if window_start and window_start > now - window_seconds:
+                    # Inside the window: genuinely at the limit.
+                    return False, item
+                # The window has rolled. Reset it and take the slot.
+                self._table.update_item(
+                    Key={"userId": key},
+                    UpdateExpression=(
+                        "SET windowStart = :now, requestCount = :zero, "
+                        "#ttl = :ttl, updatedAt = :now"
+                    ),
+                    ExpressionAttributeNames={"#ttl": "ttl"},
+                    ExpressionAttributeValues={":now": now, ":zero": 0, ":ttl": ttl},
+                )
+        return False, self.get_user(key) or {}
+
     def has_affirmed_age(self, identity_key: str) -> bool:
         """Return True if this identity has previously affirmed being 18+.
 
