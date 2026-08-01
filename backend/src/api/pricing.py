@@ -58,9 +58,25 @@ def _stripe_price_usd_cents() -> int | None:
         stripe_mod = get_stripe()
         price = stripe_mod.Price.retrieve(config.stripe_price_id)
         amount = price.get("unit_amount") if hasattr(price, "get") else None
-        if not amount:
-            _price_cache = (None, now)
-            return None
+        # `is None`, not falsiness. A fully discounted price has a
+        # unit_amount of 0, which is a real answer -- treating it as "no
+        # answer" would advertise the configured non-zero price instead.
+        if amount is None:
+            # Same reasoning as the except branch below: a price we cannot
+            # read is not a price change. Stripe returns a null unit_amount
+            # for tiered and graduated pricing, so caching None here would
+            # quietly swap every visitor onto PAID_PRICE_USD_CENTS the moment
+            # someone migrated the plan -- the config-vs-Stripe mismatch this
+            # module exists to eliminate, arrived at through this module.
+            last_known = _price_cache[0] if _price_cache else None
+            StructuredLogger.warning(
+                "Stripe price carried no unit_amount (tiered or graduated?); "
+                f"serving {'last known' if last_known is not None else 'configured'} value",
+                stripePriceId=config.stripe_price_id,
+                lastKnownCents=last_known,
+            )
+            _price_cache = (last_known, now)
+            return last_known
         _price_cache = (int(amount), now)
         return int(amount)
     except Exception as e:
