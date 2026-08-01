@@ -80,9 +80,7 @@ def wired(billing_on):
                 GlobalSecondaryIndexes=[
                     {
                         "IndexName": "StripeCustomerIndex",
-                        "KeySchema": [
-                            {"AttributeName": "stripeCustomerId", "KeyType": "HASH"}
-                        ],
+                        "KeySchema": [{"AttributeName": "stripeCustomerId", "KeyType": "HASH"}],
                         "Projection": {"ProjectionType": "KEYS_ONLY"},
                     }
                 ],
@@ -193,9 +191,7 @@ def test_invalid_payload_returns_400(wired):
     orig = wh.stripe.Webhook.construct_event
     wh.stripe.Webhook.construct_event = raise_value
     try:
-        r = wired.lambda_handler(
-            _event("{}", sig=sign_payload("{}", WEBHOOK_SECRET)), None
-        )
+        r = wired.lambda_handler(_event("{}", sig=sign_payload("{}", WEBHOOK_SECRET)), None)
     finally:
         wh.stripe.Webhook.construct_event = orig
     assert r["statusCode"] == 400
@@ -695,9 +691,7 @@ def test_subscription_upsert_non_active_skips_email(wired, monkeypatch):
     calls = _capture_emails(monkeypatch)
     payload = build_event(
         "customer.subscription.updated",
-        subscription(
-            subscription_id="sub_noact", customer="cus_noact", status="past_due"
-        ),
+        subscription(subscription_id="sub_noact", customer="cus_noact", status="past_due"),
     )
     r = _send(wired, payload)
     assert r["statusCode"] == 200
@@ -954,11 +948,15 @@ def test_stale_checkout_completion_cannot_resurrect_paid(wired):
     assert wired._user_repo.get_user("u_order2")["tier"] == "free"
 
 
-def test_stale_event_does_not_move_revenue_counters(wired):
-    """A rejected transition must not book revenue either.
+def test_revenue_counters_pair_regardless_of_ordering(wired):
+    """Both halves are unconditional, so they cannot disagree.
 
-    Applying the counter while refusing the tier write would leave
-    activeSubscribers permanently above the number of actual subscribers.
+    An earlier version of this file asserted the opposite -- that a stale
+    event books no revenue -- which sounds conservative and is not: the
+    decrement in _on_subscription_deleted was never gated, so gating only the
+    increment made activeSubscribers fall by one per reordered subscribe and
+    drift negative over ordinary churn. Consistency here comes from both
+    sides being driven by event dedup, not from both sides being suppressed.
     """
     _seed_subscriber(wired, "u_rev", "cus_rev", subscriptionStatus="active")
     wired._user_repo.increment_revenue_counter("activeSubscribers", 1)
@@ -973,6 +971,7 @@ def test_stale_event_does_not_move_revenue_counters(wired):
     )
     assert wired._user_repo.get_revenue().get("activeSubscribers", 0) == 0
 
+    # Stale relative to the cancellation, but a real purchase all the same.
     _send(
         wired,
         build_event(
@@ -982,8 +981,10 @@ def test_stale_event_does_not_move_revenue_counters(wired):
         ),
     )
     revenue = wired._user_repo.get_revenue()
-    assert revenue.get("activeSubscribers", 0) == 0
+    assert revenue.get("activeSubscribers", 0) == 1
     assert revenue.get("monthlyChurn", 0) == 1
+    # The entitlement itself is still governed by the watermark.
+    assert wired._user_repo.get_user("u_rev")["tier"] == "free"
 
 
 def test_stale_event_sends_no_lifecycle_email(wired, monkeypatch):
@@ -1102,9 +1103,7 @@ def test_unpaid_checkout_does_not_grant_paid(wired):
         wired,
         build_event(
             "checkout.session.completed",
-            checkout_session(
-                user_id="u_unpaid", customer="cus_unpaid", payment_status="unpaid"
-            ),
+            checkout_session(user_id="u_unpaid", customer="cus_unpaid", payment_status="unpaid"),
         ),
     )
     assert r["statusCode"] == 200
@@ -1123,9 +1122,7 @@ def test_unpaid_checkout_books_no_revenue_and_no_welcome(wired, monkeypatch):
         wired,
         build_event(
             "checkout.session.completed",
-            checkout_session(
-                user_id="u_unpaid2", customer="cus_unpaid2", payment_status="unpaid"
-            ),
+            checkout_session(user_id="u_unpaid2", customer="cus_unpaid2", payment_status="unpaid"),
         ),
     )
     assert wired._user_repo.get_revenue().get("activeSubscribers", 0) == 0
@@ -1191,9 +1188,7 @@ def test_delayed_payment_grants_paid_on_async_success(wired):
     still gets what they bought once the payment clears.
     """
     wired._user_repo.get_or_create_user("u_async")
-    session = checkout_session(
-        user_id="u_async", customer="cus_async", subscription="sub_async"
-    )
+    session = checkout_session(user_id="u_async", customer="cus_async", subscription="sub_async")
 
     unpaid = dict(session, payment_status="unpaid")
     _send(wired, build_event("checkout.session.completed", unpaid, created=1679609700))
@@ -1201,9 +1196,7 @@ def test_delayed_payment_grants_paid_on_async_success(wired):
 
     _send(
         wired,
-        build_event(
-            "checkout.session.async_payment_succeeded", session, created=1679609800
-        ),
+        build_event("checkout.session.async_payment_succeeded", session, created=1679609800),
     )
     item = wired._user_repo.get_user("u_async")
     assert item["tier"] == "paid"
@@ -1224,3 +1217,203 @@ def test_async_payment_failure_leaves_the_user_free(wired):
         ),
     )
     assert wired._user_repo.get_user("u_async_fail").get("tier", "free") == "free"
+
+
+# ---- The ordering guard must not swallow side effects or facts ----
+#
+# `claim_webhook_event` already guarantees apply-once. The watermark answers
+# a different question -- "is this the newest word on the tier" -- and the
+# first cut of it was applied to things that are not the tier: revenue
+# counters, lifecycle emails, and the billing period that only one event
+# carries. Being late is not the same as not having happened.
+
+
+def test_a_late_checkout_still_counts_the_subscriber(wired):
+    """Otherwise activeSubscribers drifts negative over normal churn.
+
+    The cancellation decrements unconditionally, so gating the increment on
+    the ordering watermark makes the two halves disagree.
+    """
+    _seed_subscriber(wired, "u_late", "cus_late", tier="free", subscriptionStatus="")
+
+    # A subscription event lands first and takes the watermark.
+    _send(
+        wired,
+        build_event(
+            "customer.subscription.updated",
+            subscription(subscription_id="sub_late", customer="cus_late", status="active"),
+            created=1679609900,
+        ),
+    )
+    # The checkout that created it is delivered afterwards, stamped earlier.
+    _send(
+        wired,
+        build_event(
+            "checkout.session.completed",
+            checkout_session(user_id="u_late", customer="cus_late", subscription="sub_late"),
+            created=1679609800,
+        ),
+    )
+    assert wired._user_repo.get_revenue().get("activeSubscribers", 0) == 1
+
+    _send(
+        wired,
+        build_event(
+            "customer.subscription.deleted",
+            subscription(subscription_id="sub_late", customer="cus_late", status="canceled"),
+            created=1679610000,
+        ),
+    )
+    revenue = wired._user_repo.get_revenue()
+    assert revenue.get("activeSubscribers", 0) == 0, "subscriber count drifted"
+    assert revenue.get("monthlyChurn", 0) == 1
+
+
+def test_a_late_checkout_still_sends_the_welcome_email(wired, monkeypatch):
+    """The customer paid. Ordering is not a reason to say nothing."""
+    from notifications import sender as email_sender
+
+    _seed_subscriber(wired, "u_wel", "cus_wel", email="w@x.com", tier="free")
+    _send(
+        wired,
+        build_event(
+            "customer.subscription.updated",
+            subscription(subscription_id="sub_wel", customer="cus_wel", status="active"),
+            created=1679609900,
+        ),
+    )
+
+    sent: list[str] = []
+    monkeypatch.setattr(email_sender, "send_email", lambda to, s, h, t: sent.append(s))
+    _send(
+        wired,
+        build_event(
+            "checkout.session.completed",
+            checkout_session(user_id="u_wel", customer="cus_wel"),
+            created=1679609800,
+        ),
+    )
+    assert len(sent) == 1
+
+
+def test_a_late_payment_failure_still_warns_the_customer(wired, monkeypatch):
+    """A declined renewal emits subscription.updated a second later.
+
+    Stripe delivers the two concurrently, so the subscription event commonly
+    wins the watermark. The payment still failed, and losing the warning
+    means the customer just loses access when dunning runs out.
+    """
+    from notifications import sender as email_sender
+
+    _seed_subscriber(wired, "u_dun", "cus_dun", email="d@x.com")
+    _send(
+        wired,
+        build_event(
+            "customer.subscription.updated",
+            subscription(subscription_id="sub_dun", customer="cus_dun", status="past_due"),
+            created=1679609901,
+        ),
+    )
+
+    sent: list[str] = []
+    monkeypatch.setattr(email_sender, "send_email", lambda to, s, h, t: sent.append(s))
+    _send(
+        wired,
+        build_event(
+            "invoice.payment_failed",
+            invoice(customer="cus_dun", subscription_id="sub_dun"),
+            created=1679609900,
+        ),
+    )
+    assert len(sent) == 1
+
+
+def test_a_late_subscription_event_still_records_the_billing_period(wired):
+    """The billing period has exactly one source.
+
+    Dropping the whole write because the tier half was stale left paying
+    customers renewing on the fixed fallback clock, with no signal.
+    """
+    _seed_subscriber(wired, "u_period", "cus_period", tier="free")
+    _send(
+        wired,
+        build_event(
+            "checkout.session.completed",
+            checkout_session(user_id="u_period", customer="cus_period"),
+            created=1679609900,
+        ),
+    )
+
+    _send(
+        wired,
+        build_event(
+            "customer.subscription.created",
+            subscription(subscription_id="sub_period", customer="cus_period", status="active"),
+            created=1679609800,
+        ),
+    )
+
+    item = wired._user_repo.get_user("u_period")
+    assert int(item["stripeCurrentPeriodEnd"]) == 1682288167
+    assert int(item["stripeCurrentPeriodStart"]) == 1679609767
+
+
+def test_the_tier_itself_is_still_protected_from_a_stale_event(wired):
+    """Widening the side effects must not widen the entitlement."""
+    _seed_subscriber(wired, "u_guard", "cus_guard", subscriptionStatus="active")
+    _send(
+        wired,
+        build_event(
+            "customer.subscription.deleted",
+            subscription(subscription_id="sub_guard", customer="cus_guard", status="canceled"),
+            created=1679609900,
+        ),
+    )
+    _send(
+        wired,
+        build_event(
+            "customer.subscription.updated",
+            subscription(subscription_id="sub_guard", customer="cus_guard", status="active"),
+            created=1679609800,
+        ),
+    )
+    item = wired._user_repo.get_user("u_guard")
+    assert item["tier"] == "free"
+    assert item["subscriptionStatus"] == "canceled"
+
+
+def test_a_stale_upsert_does_not_claim_the_subscription_is_active(wired):
+    """ "Your subscription is active" is a state assertion, not an event.
+
+    Unlike the welcome and dunning mails, this one is false if a newer event
+    has already said otherwise, so it stays behind the guard.
+    """
+    from notifications import sender as email_sender
+
+    _seed_subscriber(wired, "u_act", "cus_act", email="a@x.com", subscriptionStatus="active")
+    _send(
+        wired,
+        build_event(
+            "customer.subscription.deleted",
+            subscription(subscription_id="sub_act", customer="cus_act", status="canceled"),
+            created=1679609900,
+        ),
+    )
+
+    sent: list[str] = []
+    monkeypatch_target = email_sender
+    original = monkeypatch_target.send_email
+    monkeypatch_target.send_email = lambda to, s, h, t: sent.append(s)
+    try:
+        _send(
+            wired,
+            build_event(
+                "customer.subscription.updated",
+                subscription(subscription_id="sub_act", customer="cus_act", status="active"),
+                created=1679609800,
+            ),
+        )
+    finally:
+        monkeypatch_target.send_email = original
+
+    assert sent == []

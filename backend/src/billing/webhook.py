@@ -208,15 +208,28 @@ def _on_checkout_completed(
         return
     if not _checkout_qualifies(obj, event_type):
         return
-    fields: dict[str, Any] = {}
-    if obj.get("customer"):
-        fields["stripeCustomerId"] = obj["customer"]
-    if obj.get("subscription"):
-        fields["stripeSubscriptionId"] = obj["subscription"]
-    fields["subscriptionStatus"] = "active"
-    if not repo.set_tier(user_id, "paid", event_created=event_created, **fields):
+    # Facts first, unconditionally: a late event still knows the customer id.
+    repo.record_billing_facts(
+        user_id,
+        stripeCustomerId=obj.get("customer"),
+        stripeSubscriptionId=obj.get("subscription"),
+    )
+    if not repo.set_tier(
+        user_id,
+        "paid",
+        event_created=event_created,
+        subscriptionStatus="active",
+    ):
         _stale(user_id, event_type, event_created)
-        return
+    # Outside the guard on purpose. The watermark answers "is this the newest
+    # word on the tier"; it does not answer "did this purchase happen". It
+    # did — the event is signed and `claim_webhook_event` has already
+    # guaranteed it is applied exactly once, which is the property these two
+    # need. Gating them on the tier write instead meant a checkout that lost a
+    # race to its own customer.subscription.created silently never counted the
+    # subscriber and never sent the welcome email, while the eventual
+    # cancellation still decremented — so activeSubscribers drifted negative
+    # across ordinary subscribe/cancel cycles.
     repo.increment_revenue_counter("activeSubscribers", 1)
     _send_lifecycle_email(repo, user_id, email_templates.welcome_email)
 
@@ -230,21 +243,11 @@ def _on_subscription_upsert(
         return
     status = obj.get("status", "active")
     tier = "paid" if status in ("active", "trialing") else "free"
-    fields: dict[str, Any] = {
-        "subscriptionStatus": status,
-        "stripeSubscriptionId": obj.get("id", ""),
-    }
-    if obj.get("customer"):
-        fields["stripeCustomerId"] = obj["customer"]
     # Credit allotments renew on Stripe's own period boundary, not a fixed
     # 30-day clock: Stripe's monthly cycles run 28-31 days, so a fixed window
     # would grant credits before the customer is billed in some months and
     # leave them short after renewal in others.
     period_start, period_end = _billing_period(obj)
-    if period_end:
-        fields["stripeCurrentPeriodEnd"] = period_end
-    if period_start:
-        fields["stripeCurrentPeriodStart"] = period_start
     if not period_end:
         # Not fatal — quota falls back to a fixed window — but it silently
         # means paid users never get Stripe-anchored renewal, so say so.
@@ -253,7 +256,24 @@ def _on_subscription_upsert(
             "fall back to a fixed window",
             stripe_subscription_id=obj.get("id"),
         )
-    if not repo.set_tier(user_id, tier, event_created=event_created, **fields):
+    # Unconditional: these are what Stripe reported, not a transition. This
+    # event is the ONLY source of the billing period, so letting the ordering
+    # guard discard it left paying customers renewing on the fixed fallback
+    # clock — and the warning above fires before the rejected write, so the
+    # operator saw nothing.
+    repo.record_billing_facts(
+        user_id,
+        stripeCustomerId=obj.get("customer"),
+        stripeCurrentPeriodEnd=period_end,
+        stripeCurrentPeriodStart=period_start,
+    )
+    if not repo.set_tier(
+        user_id,
+        tier,
+        event_created=event_created,
+        subscriptionStatus=status,
+        stripeSubscriptionId=obj.get("id", ""),
+    ):
         _stale(user_id, event_type, event_created)
         return
     if status == "active":
@@ -275,7 +295,11 @@ def _on_subscription_deleted(
         stripeSubscriptionId="",
     ):
         _stale(user_id, event_type, event_created)
-        return
+    # Outside the guard, and it must pair with the increment in
+    # _on_checkout_completed: gating one on the ordering watermark and not the
+    # other is what makes activeSubscribers drift. The cancellation happened
+    # whatever order it arrived in, and dedup already bounds it to once.
+    #
     # One atomic UpdateItem, not two sequential ones: a failure between
     # them would release the idempotency claim with the first delta already
     # applied, and Stripe's retry would apply it a second time.
@@ -299,7 +323,13 @@ def _on_payment_failed(
         user_id, current_tier, event_created=event_created, subscriptionStatus="past_due"
     ):
         _stale(user_id, event_type, event_created)
-        return
+    # Outside the guard. A declined renewal routinely emits
+    # customer.subscription.updated (status=past_due) a second AFTER the
+    # invoice event that caused it, and Stripe delivers them concurrently — so
+    # the subscription event commonly wins the watermark and this one reads as
+    # stale. The payment still failed. Gating the warning on the write meant
+    # the customer was never told their card was declined and simply lost
+    # access when Stripe's dunning retries ran out.
     _send_lifecycle_email(repo, user_id, email_templates.payment_failed_email)
 
 

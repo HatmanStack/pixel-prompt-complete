@@ -494,11 +494,21 @@ class UserRepository:
         Keyword-only so it cannot be mistaken for a Stripe field name and
         silently written to the record as one.
 
+        **Scope.** The guard protects the entitlement transition and nothing
+        else. Fields that merely record what Stripe told us — the customer id,
+        the subscription's billing period — are written by
+        :meth:`record_billing_facts` on a separate unconditional update,
+        because rejecting them would drop information that only the losing
+        event carried. A stale ``customer.subscription.created`` is the wrong
+        answer about the *tier* and the only source of
+        ``stripeCurrentPeriodEnd``; discarding both because one is stale left
+        paying customers renewing on a fixed fallback clock with no signal.
+
         Returns:
-            True when the write landed. False when it was rejected as stale —
-            in which case the caller must skip whatever else it would have
-            done for a real transition (revenue counters, lifecycle email),
-            or the ledger drifts from the entitlement it is meant to track.
+            True when the write landed. False when it was rejected as stale.
+            Callers must not read this as "the event did not happen": event
+            dedup already guarantees apply-once, so revenue counters and
+            lifecycle emails belong to the delivery, not to this write.
         """
         now = int(time.time())
         parts = ["tier = :tier", "updatedAt = :now"]
@@ -528,6 +538,41 @@ class UserRepository:
             if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
                 raise
             return False
+
+    def record_billing_facts(self, user_id: str, **fields: Any) -> None:
+        """Record what Stripe reported, unconditionally.
+
+        The ordering watermark on :meth:`set_tier` exists to stop an older
+        event regressing the *tier*. These fields are not a transition — the
+        customer id and the subscription's billing period are facts about the
+        account that only ever get more accurate — so an event being late is
+        no reason to throw them away.
+
+        Applying them separately is what lets the guard stay narrow. A single
+        conditional write meant a stale ``customer.subscription.created`` took
+        its ``stripeCurrentPeriodEnd`` down with it, and that field is the
+        *only* source of Stripe-anchored credit renewal: losing it silently
+        drops the customer onto the fixed fallback clock, and the warning that
+        would have said so fires before the rejected write, not after.
+
+        Empty ``fields`` is a no-op rather than an empty UpdateExpression,
+        which DynamoDB rejects.
+        """
+        present = {k: v for k, v in fields.items() if v not in (None, "")}
+        if not present:
+            return
+        now = int(time.time())
+        parts = ["updatedAt = :now"]
+        values: dict[str, Any] = {":now": now}
+        for i, (k, v) in enumerate(present.items()):
+            placeholder = f":f{i}"
+            parts.append(f"{k} = {placeholder}")
+            values[placeholder] = v
+        self._table.update_item(
+            Key={"userId": user_id},
+            UpdateExpression="SET " + ", ".join(parts),
+            ExpressionAttributeValues=values,
+        )
 
     def set_stripe_customer_id(self, user_id: str, customer_id: str) -> None:
         now = int(time.time())
