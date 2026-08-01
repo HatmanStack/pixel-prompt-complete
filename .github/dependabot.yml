@@ -22,15 +22,17 @@ updates:
       production-dependencies:
         dependency-type: production
 
-  - package-ecosystem: pip
-    directory: /backend
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 3
+  # NOTE: there is intentionally NO `pip` job for /backend. That directory
+  # contains a *derived* lockfile, backend/requirements-lock.txt, generated
+  # from backend/src/requirements.txt via `make relock`. Dependabot treated the
+  # lockfile as a manifest and opened bumps that can never merge -- e.g. bumping
+  # pydantic-core, which pydantic pins to an exact version, so `uv pip compile`
+  # reverts it every time. The Lambda runtime source is covered by /backend/src
+  # below; the derived lock is regenerated, never bumped directly.
 
-  # The Lambda runtime dependencies. /backend above finds pyproject.toml (dev
-  # tooling) and /tests/backend finds the test pins; neither covers this file,
-  # which is why Pillow sat at 12.2.0 with 20 advisories here while
+  # The Lambda runtime dependencies. /backend/src (below) edits the source and
+  # /tests/backend finds the test pins; neither covers this file, which is why
+  # Pillow sat at 12.2.0 with 20 advisories here while
   # tests/backend/requirements.txt already asked for >=12.3.0.
   #
   # NOTE: this job can only edit backend/src/requirements.txt, but CI and
