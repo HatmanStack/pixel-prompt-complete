@@ -12,4 +12,4 @@ openai==2.50.0
 google-genai==2.24.0
 
 # Billing
-stripe==15.6.0
+stripe==15.6.1
