@@ -8,7 +8,7 @@ requests==2.34.2
 Pillow==12.3.0
 
 # AI provider SDKs
-openai==2.50.0
+openai==3.19.2
 google-genai==2.24.0
 
 # Billing
